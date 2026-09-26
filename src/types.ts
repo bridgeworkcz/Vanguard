@@ -5,17 +5,25 @@ export type ProcessStatus =
   | 'DOCUMENTS_REQUIRED'
   | 'DOCUMENTS_REVIEW'
   | 'LEGAL_REVIEW'
+  | 'READY_FOR_FILING'
   | 'FILED'
+  | 'PROCESSING'
   | 'APPROVED'
   | 'COMPLETED'
   | 'REJECTED'
-  | 'ON_HOLD';
+  | 'ON_HOLD'
+  | 'CANCELLED';
 
-export type PaymentStatus = 
+export type DossierPaymentStatus = 
   | 'NOT_DUE'
-  | 'PENDING_REVIEW'
   | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'OVERDUE';
+
+export type PaymentReviewStatus = 
+  | 'PENDING_REVIEW'
   | 'CONFIRMED'
+  | 'REJECTED'
   | 'REFUNDED';
 
 export type DocumentStatus = 
@@ -51,9 +59,11 @@ export interface Dossier {
   vacancyId?: string;
   vacancyTitle?: string;
   processStatus: ProcessStatus;
-  paymentStatus: PaymentStatus;
+  paymentStatus: DossierPaymentStatus;
+  currency: string;
   totalCost: number;
   paidAmount: number;
+  remainingAmount: number;
   assignedManagerId?: string;
   createdAt: string;
   updatedAt: string;
@@ -68,7 +78,7 @@ export interface PaymentTransaction {
   network: string;
   txHash: string;
   tranchePercent: 20 | 50 | 30;
-  status: PaymentStatus;
+  status: PaymentReviewStatus;
   submittedAt: string;
   verifiedAt?: string;
   verifiedBy?: string;
