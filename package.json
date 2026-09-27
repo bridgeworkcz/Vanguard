@@ -9,14 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "jspdf": "^2.5.1",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "jspdf": "^2.5.1"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/node": "^20.11.24",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
+    "@vercel/node": "^3.0.23",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "postcss": "^8.4.35",
