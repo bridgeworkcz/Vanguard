@@ -18,30 +18,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setError(null);
 
     const cleanEmail = email.trim();
     const cleanPhone = phone.trim();
     const cleanName = fullName.trim();
 
-    // Власна перевірка полів замість нативного контролера Safari
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('Please enter a valid email address (e.g. user@gmail.com)');
+      setError('Будь ласка, введіть коректний Email (наприклад: user@gmail.com)');
       return;
     }
 
     if (!password || password.length < 8) {
-      setError('Password must be at least 8 characters long');
+      setError('Пароль має містити щонайменше 8 символів');
       return;
     }
 
     if (mode === 'register') {
       if (!cleanName) {
-        setError('Please enter your full name');
+        setError("Будь ласка, введіть ваше повне ім'я");
         return;
       }
       if (!cleanPhone || cleanPhone.length < 5) {
-        setError('Please enter a valid phone number (e.g. +380...)');
+        setError('Будь ласка, введіть дійсний номер телефону');
         return;
       }
     }
@@ -60,13 +60,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
         });
       }
       onClose();
-    } catch (err: unknown) {
-      let msg = 'Authentication failed';
-      if (err instanceof Error) {
-        msg = err.message;
-        // Заміна системних помилок WebKit на зрозумілий текст
-        if (msg.includes('pattern') || msg.includes('expected pattern') || msg.includes('DOMException')) {
-          msg = 'Invalid input format. Please check your email, phone, and password.';
+    } catch (err: any) {
+      let msg = 'Помилка авторизації. Перевірте введені дані.';
+      if (err && typeof err === 'object' && err.message) {
+        const raw = String(err.message).toLowerCase();
+        if (raw.includes('already exists') || raw.includes('існує')) {
+          msg = 'Користувач з таким Email вже зареєстрований.';
+        } else if (raw.includes('credentials') || raw.includes('пароль')) {
+          msg = 'Невірний Email або пароль.';
+        } else if (raw.includes('pattern') || raw.includes('expected') || raw.includes('domexception')) {
+          msg = 'Помилка формату даних. Перевірте правильність заповнення полів.';
+        } else {
+          msg = err.message;
         }
       }
       setError(msg);
@@ -120,8 +125,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
           </div>
         )}
 
-        {/* noValidate повністю вимикає блокування форм браузером Safari */}
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate autoComplete="off" className="space-y-4">
           {mode === 'register' && (
             <>
               <div>
