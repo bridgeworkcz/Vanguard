@@ -11,7 +11,6 @@ export const ClientDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New Dossier Form
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [fullName, setFullName] = useState('');
   const [passportNumber, setPassportNumber] = useState('');
@@ -19,11 +18,9 @@ export const ClientDashboard: React.FC = () => {
   const [targetCountry, setTargetCountry] = useState('Czech Republic');
   const [totalCost] = useState(2500);
 
-  // Document Upload Form
   const [selectedCategory, setSelectedCategory] = useState<DocumentCategory>('PASSPORT');
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
-  // Payment Submit Form
   const [payAmount, setPayAmount] = useState<number>(500);
   const [payTranche, setPayTranche] = useState<20 | 30 | 50>(20);
   const [txHash, setTxHash] = useState('');
@@ -159,7 +156,6 @@ export const ClientDashboard: React.FC = () => {
 
       {error && <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">{error}</div>}
 
-      {/* Dossier List */}
       {dossiers.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-4">
           <FileText className="w-12 h-12 text-slate-600 mx-auto" />
@@ -170,7 +166,6 @@ export const ClientDashboard: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Dossier Selection */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Your Dossiers</h3>
             {dossiers.map(d => (
@@ -195,10 +190,8 @@ export const ClientDashboard: React.FC = () => {
             ))}
           </div>
 
-          {/* Dossier Details */}
           {selectedDossier && (
             <div className="lg:col-span-2 space-y-6">
-              {/* Status Card */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
@@ -230,7 +223,6 @@ export const ClientDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Documents Section */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <h3 className="text-sm font-bold flex items-center gap-2">
                   <FileText className="w-4 h-4 text-amber-500" /> Dossier Documents
@@ -275,7 +267,6 @@ export const ClientDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Payment Section */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <h3 className="text-sm font-bold flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-amber-500" /> Tranche Payment (USDT TRC-20)
@@ -327,7 +318,6 @@ export const ClientDashboard: React.FC = () => {
                   </button>
                 </form>
 
-                {/* Payment History */}
                 <div className="space-y-2 pt-2 border-t border-slate-800">
                   {payments.map(p => (
                     <div key={p.id} className="flex justify-between items-center p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs">
@@ -347,7 +337,6 @@ export const ClientDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* New Dossier Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4">
