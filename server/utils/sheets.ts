@@ -4,26 +4,18 @@ function parsePrivateKey(rawKey: string | undefined): string {
   if (!rawKey) return '';
   let key = rawKey.trim();
   
-  // Видалення зовнішніх лапок
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
     key = key.slice(1, -1);
   }
 
-  // Заміна текстових \n на справжні переноси
+  // Відновлюємо нормальні переноси рядків PEM
   key = key.replace(/\\n/g, '\n').replace(/\r/g, '');
 
-  // Очищення від заголовків для ізоляції суто Base64 вмісту
-  const base64Body = key
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/\s+/g, '');
+  if (!key.includes('-----BEGIN PRIVATE KEY-----')) {
+    key = `-----BEGIN PRIVATE KEY-----\n${key}\n-----END PRIVATE KEY-----\n`;
+  }
 
-  if (!base64Body) return '';
-
-  // Канонічне форматування Base64 у 64-символьні рядки (стандарт PEM / OpenSSL)
-  const chunked = base64Body.match(/.{1,64}/g)?.join('\n') || base64Body;
-
-  return `-----BEGIN PRIVATE KEY-----\n${chunked}\n-----END PRIVATE KEY-----\n`;
+  return key;
 }
 
 interface GoogleSheetsCredentials {
@@ -39,8 +31,6 @@ interface CachedToken {
 
 let cachedAccessToken: CachedToken | null = null;
 
-// --- 1. Отримання та валідація конфігурації Credentials ---
-
 function getCredentials(): GoogleSheetsCredentials {
   const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
   const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY;
@@ -48,7 +38,7 @@ function getCredentials(): GoogleSheetsCredentials {
 
   if (!clientEmail || !rawPrivateKey || !spreadsheetId) {
     throw new Error(
-      'Server Config Error: Missing required Google Sheets environment variables (GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_SPREADSHEET_ID).'
+      `Server Config Error: Missing ENV (EMAIL: ${!!clientEmail}, KEY: ${!!rawPrivateKey}, SHEET_ID: ${!!spreadsheetId})`
     );
   }
 
@@ -59,8 +49,6 @@ function getCredentials(): GoogleSheetsCredentials {
   };
 }
 
-// --- 2. Генерація OAuth2 JWT Токена для Google Sheets API v4 (RS256) ---
-
 async function getAccessToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -70,11 +58,7 @@ async function getAccessToken(): Promise<string> {
 
   const creds = getCredentials();
 
-  const header = {
-    alg: 'RS256',
-    typ: 'JWT',
-  };
-
+  const header = { alg: 'RS256', typ: 'JWT' };
   const claimSet = {
     iss: creds.clientEmail,
     scope: 'https://www.googleapis.com/auth/spreadsheets',
@@ -94,43 +78,43 @@ async function getAccessToken(): Promise<string> {
   const encodedClaimSet = base64UrlEncode(claimSet);
   const signatureInput = `${encodedHeader}.${encodedClaimSet}`;
 
-  const signer = crypto.createSign('RSA-SHA256');
-  signer.update(signatureInput);
-  const signature = signer
-    .sign(creds.privateKey, 'base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
+  try {
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(signatureInput);
+    const signature = signer
+      .sign(creds.privateKey, 'base64')
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
 
-  const jwt = `${signatureInput}.${signature}`;
+    const jwt = `${signatureInput}.${signature}`;
 
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt,
-    }),
-  });
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt,
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Google OAuth2 Error (${response.status}): ${errorText}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google Auth Token Rejected (${response.status}): ${errText}`);
+    }
+
+    const data = (await response.json()) as { access_token: string; expires_in: number };
+
+    cachedAccessToken = {
+      token: data.access_token,
+      expiresAt: now + data.expires_in,
+    };
+
+    return data.access_token;
+  } catch (err: any) {
+    throw new Error(`RSA Signing / Google OAuth Error: ${err.message || err}`);
   }
-
-  const data = (await response.json()) as { access_token: string; expires_in: number };
-
-  cachedAccessToken = {
-    token: data.access_token,
-    expiresAt: now + data.expires_in,
-  };
-
-  return data.access_token;
 }
-
-// --- 3. Базова HTTP-утиліта до Google Sheets API v4 ---
 
 async function sheetsApiFetch<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = await getAccessToken();
@@ -153,8 +137,6 @@ async function sheetsApiFetch<T = unknown>(endpoint: string, options: RequestIni
 
   return response.json() as Promise<T>;
 }
-
-// --- 4. Публічні сервісні функції Google Sheets ---
 
 export async function readSheetRows(sheetName: string): Promise<Record<string, string>[]> {
   interface ValueRenderResponse {
@@ -272,4 +254,3 @@ export async function updateSheetRowById(
     }
   );
 }
-
