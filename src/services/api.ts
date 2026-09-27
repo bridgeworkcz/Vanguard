@@ -1,214 +1,133 @@
-import {
-  User,
-  Dossier,
-  DossierDocument,
-  PaymentTransaction,
-  Vacancy,
-  TeamMember,
-  ProcessStatus,
-  DossierPaymentStatus,
-  DocumentCategory,
-  DocumentStatus,
-  PaymentReviewStatus
-} from '../types';
+import { Dossier, DossierDocument, PaymentTransaction, Vacancy, TeamMember, User } from '../types';
 
-const TOKEN_KEY = 'vanguard_auth_token';
-
-export const getStoredToken = (): string | null => {
-  return localStorage.getItem(TOKEN_KEY);
-};
-
-export const setStoredToken = (token: string): void => {
-  localStorage.setItem(TOKEN_KEY, token);
-};
-
-export const removeStoredToken = (): void => {
-  localStorage.removeItem(TOKEN_KEY);
-};
-
-async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredToken();
+async function apiFetch(endpoint: string, options: RequestInit = {}) {
+  let token = localStorage.getItem('vanguard_token');
+  
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> || {}),
+    ...(options.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (token && typeof token === 'string') {
+    const cleanToken = token.replace(/["'\r\n\s]/g, '').trim();
+    if (cleanToken && cleanToken.length > 10) {
+      headers['Authorization'] = `Bearer ${cleanToken}`;
+    } else {
+      localStorage.removeItem('vanguard_token');
+    }
   }
 
-  const response = await fetch(endpoint, {
-    ...options,
-    headers,
-  });
+  try {
+    const res = await fetch(`/api${endpoint}`, {
+      ...options,
+      headers,
+    });
 
-  const data = await response.json();
+    const text = await res.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: text || `HTTP Status ${res.status}` };
+    }
 
-  if (!response.ok) {
-    throw new Error(data.error || `HTTP Error ${response.status}`);
+    if (!res.ok) {
+      throw new Error(data.error || data.message || `Server Error (${res.status})`);
+    }
+
+    return data;
+  } catch (err: any) {
+    if (err instanceof Error && (err.message.includes('pattern') || err.name === 'DOMException')) {
+      localStorage.removeItem('vanguard_token');
+      throw new Error('Form validation or network error. Please try again.');
+    }
+    throw err;
   }
-
-  return data as T;
 }
 
-// --- 1. Auth API ---
 export const authApi = {
-  login: async (email: string, password: string): Promise<{ token: string; user: User }> => {
-    const data = await apiFetch<{ token: string; user: User }>('/api/auth?action=login', {
+  login: (email: string, password: string) =>
+    apiFetch('/auth', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    setStoredToken(data.token);
-    return data;
-  },
+      body: JSON.stringify({ action: 'login', email, password }),
+    }) as Promise<{ token: string; user: User }>,
 
-  register: async (payload: {
-    email: string;
-    password: string;
-    fullName: string;
-    phone: string;
-  }): Promise<{ token: string; user: User }> => {
-    const data = await apiFetch<{ token: string; user: User }>('/api/auth?action=register', {
+  register: (data: { email: string; password: string; fullName: string; phone: string }) =>
+    apiFetch('/auth', {
       method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setStoredToken(data.token);
-    return data;
-  },
+      body: JSON.stringify({ action: 'register', ...data }),
+    }) as Promise<{ token: string; user: User }>,
 
-  me: async (): Promise<{ user: User }> => {
-    return apiFetch<{ user: User }>('/api/auth?action=me', {
-      method: 'GET',
-    });
-  },
-
-  logout: (): void => {
-    removeStoredToken();
-  },
+  me: () => apiFetch('/auth', { method: 'GET' }) as Promise<{ user: User }>,
 };
 
-// --- 2. Dossiers API ---
 export const dossiersApi = {
-  list: async (id?: string): Promise<{ dossiers?: Dossier[]; dossier?: Dossier }> => {
-    const query = id ? `?id=${encodeURIComponent(id)}` : '';
-    return apiFetch(`/api/dossiers${query}`, { method: 'GET' });
-  },
-
-  create: async (payload: {
+  list: () => apiFetch('/dossiers', { method: 'GET' }) as Promise<{ dossiers: Dossier[] }>,
+  
+  create: (data: {
     fullName: string;
     passportNumber: string;
     citizenship: string;
     targetCountry: string;
-    vacancyId?: string;
-    vacancyTitle?: string;
-    totalCost?: number;
+    totalCost: number;
     currency?: string;
-  }): Promise<{ dossier: Dossier }> => {
-    return apiFetch<{ dossier: Dossier }>('/api/dossiers?action=create', {
+    vacancyId?: string;
+  }) =>
+    apiFetch('/dossiers', {
       method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
+      body: JSON.stringify(data),
+    }) as Promise<{ dossier: Dossier }>,
 
-  updateStatus: async (payload: {
-    dossierId: string;
-    processStatus?: ProcessStatus;
-    paymentStatus?: DossierPaymentStatus;
-    assignedManagerId?: string;
-  }): Promise<{ dossier: Dossier }> => {
-    return apiFetch<{ dossier: Dossier }>('/api/dossiers?action=updateStatus', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
+  updateStatus: (data: { dossierId: string; processStatus?: string; paymentStatus?: string }) =>
+    apiFetch('/dossiers', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }) as Promise<{ dossier: Dossier }>,
 };
 
-// --- 3. Documents API ---
 export const documentsApi = {
-  list: async (dossierId: string): Promise<{ documents: DossierDocument[] }> => {
-    return apiFetch<{ documents: DossierDocument[] }>(
-      `/api/documents?dossierId=${encodeURIComponent(dossierId)}`,
-      { method: 'GET' }
-    );
-  },
+  list: (dossierId: string) =>
+    apiFetch(`/documents?dossierId=${encodeURIComponent(dossierId)}`, {
+      method: 'GET',
+    }) as Promise<{ documents: DossierDocument[] }>,
 
-  upload: async (payload: {
+  upload: (data: {
     dossierId: string;
-    category: DocumentCategory;
+    category: string;
     fileName: string;
     mimeType: string;
     fileBase64: string;
-  }): Promise<{ document: DossierDocument }> => {
-    return apiFetch<{ document: DossierDocument }>('/api/documents?action=upload', {
+  }) =>
+    apiFetch('/documents', {
       method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  review: async (payload: {
-    documentId: string;
-    status: DocumentStatus;
-    rejectionReason?: string;
-  }): Promise<{ document: DossierDocument }> => {
-    return apiFetch<{ document: DossierDocument }>('/api/documents?action=review', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
+      body: JSON.stringify(data),
+    }) as Promise<{ document: DossierDocument }>,
 };
 
-// --- 4. Payments API ---
 export const paymentsApi = {
-  list: async (dossierId: string): Promise<{ payments: PaymentTransaction[] }> => {
-    return apiFetch<{ payments: PaymentTransaction[] }>(
-      `/api/payments?dossierId=${encodeURIComponent(dossierId)}`,
-      { method: 'GET' }
-    );
-  },
+  list: (dossierId: string) =>
+    apiFetch(`/payments?dossierId=${encodeURIComponent(dossierId)}`, {
+      method: 'GET',
+    }) as Promise<{ payments: PaymentTransaction[] }>,
 
-  submit: async (payload: {
+  submit: (data: {
     dossierId: string;
     amount: number;
-    currency?: string;
-    network?: string;
+    currency: string;
+    network: string;
     txHash: string;
-    tranchePercent: 20 | 30 | 50;
-  }): Promise<{ payment: PaymentTransaction }> => {
-    return apiFetch<{ payment: PaymentTransaction }>('/api/payments?action=submit', {
+    tranchePercent: number;
+  }) =>
+    apiFetch('/payments', {
       method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  verify: async (payload: {
-    paymentId: string;
-    status: PaymentReviewStatus;
-  }): Promise<{ payment: PaymentTransaction }> => {
-    return apiFetch<{ payment: PaymentTransaction }>('/api/payments?action=verify', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
+      body: JSON.stringify(data),
+    }) as Promise<{ payment: PaymentTransaction }>,
 };
 
-// --- 5. Vacancies API ---
 export const vacanciesApi = {
-  list: async (id?: string): Promise<{ vacancies?: Vacancy[]; vacancy?: Vacancy }> => {
-    const query = id ? `?id=${encodeURIComponent(id)}` : '';
-    return apiFetch(`/api/vacancies${query}`, { method: 'GET' });
-  },
-
-  create: async (payload: Partial<Vacancy>): Promise<{ vacancy: Vacancy }> => {
-    return apiFetch<{ vacancy: Vacancy }>('/api/vacancies?action=create', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
+  list: () => apiFetch('/vacancies', { method: 'GET' }) as Promise<{ vacancies: Vacancy[] }>,
 };
 
-// --- 6. Team API ---
 export const teamApi = {
-  list: async (): Promise<{ team: TeamMember[] }> => {
-    return apiFetch<{ team: TeamMember[] }>('/api/team', { method: 'GET' });
-  },
+  list: () => apiFetch('/team', { method: 'GET' }) as Promise<{ team: TeamMember[] }>,
 };
