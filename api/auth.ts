@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { readSheetRows, appendSheetRow } from '../server/utils/sheets';
-import { hashPassword, verifyPassword, generateSessionToken } from '../server/utils/auth';
+import { hashPassword, verifyPassword, generateSessionToken, verifySessionToken } from '../server/utils/auth';
 import { userFromRow, userToRow } from '../server/utils/mappers';
 import { sendTelegramAlert } from '../server/utils/telegram';
 
@@ -15,7 +15,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const token = authHeader.substring(7);
       const secret = process.env.SESSION_SECRET || 'fallback-secret';
       
-      const { verifySessionToken } = await import('../server/utils/auth');
       const payload = verifySessionToken(token, secret);
       
       if (!payload) {
@@ -70,7 +69,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const secret = process.env.SESSION_SECRET || 'fallback-secret';
       const token = generateSessionToken(newUser, secret);
 
-      await sendTelegramAlert(`🆕 <b>Нова реєстрація клієнта</b>\n\n👤 Ім'я: ${newUser.fullName}\n📧 Email: ${newUser.email}\n📞 Тел: ${newUser.phone}`);
+      // Неблокуючий Telegram alert (не валить функцію у разі помилки мережі)
+      try {
+        await sendTelegramAlert(`🆕 <b>Нова реєстрація клієнта</b>\n\n👤 Ім'я: ${newUser.fullName}\n📧 Email: ${newUser.email}\n📞 Тел: ${newUser.phone}`);
+      } catch (tgErr) {
+        console.error('Telegram alert warning:', tgErr);
+      }
 
       return res.status(201).json({ token, user: newUser });
     }
