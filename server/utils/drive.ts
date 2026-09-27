@@ -31,7 +31,7 @@ function getCredentials(): GoogleDriveCredentials {
   return {
     clientEmail,
     privateKey: formattedPrivateKey,
-    rootFolderId,
+    rootFolderId: rootFolderId.trim(),
   };
 }
 
@@ -53,7 +53,7 @@ async function getAccessToken(): Promise<string> {
 
   const claimSet = {
     iss: creds.clientEmail,
-    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+    scope: 'https://www.googleapis.com/auth/drive',
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -130,14 +130,26 @@ async function driveApiFetch<T = unknown>(endpoint: string, options: RequestInit
   return response.json() as Promise<T>;
 }
 
-// --- 4. Публічні сервісні функції роботи з папочками та файлами Vault ---
+// --- 4. Публічні сервісні функції Vault ---
 
 /**
-  Знаходить або створює підпапку з вказаною назвою всередині батьківської папки.
+ * Знаходить або створює підпапку з вказаною назвою всередині батьківської папки.
  */
 export async function findOrCreateFolder(parentFolderId: string, folderName: string): Promise<string> {
-  const cleanName = folderName.trim().replace(/'/g, "\\'");
-  const query = `'${parentFolderId}' in parents and name = '${cleanName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const cleanParentId = parentFolderId ? parentFolderId.trim() : '';
+  const cleanName = folderName ? folderName.trim() : '';
+
+  if (!cleanParentId) {
+    throw new Error('Google Drive Error: Cannot find/create folder with an empty parentFolderId.');
+  }
+
+  if (!cleanName) {
+    throw new Error('Google Drive Error: Cannot find/create folder with an empty folderName.');
+  }
+
+  // Надійне екранування для Drive Search Query Syntax
+  const sanitizedQueryName = cleanName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const query = `'${cleanParentId}' in parents and name = '${sanitizedQueryName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
 
   interface SearchResponse {
     files?: { id: string; name: string }[];
@@ -147,11 +159,19 @@ export async function findOrCreateFolder(parentFolderId: string, folderName: str
     `/files?q=${encodeURIComponent(query)}&fields=files(id,name)`
   );
 
-  if (searchResult.files && searchResult.files.length > 0) {
-    return searchResult.files[0].id;
+  const files = searchResult.files || [];
+
+  if (files.length === 1) {
+    return files[0].id;
   }
 
-  // Створення папки
+  if (files.length > 1) {
+    throw new Error(
+      `Data Integrity Error: Multiple folders (${files.length}) with name '${cleanName}' found inside parent folder '${cleanParentId}'.`
+    );
+  }
+
+  // Створення папки при відсутності
   const token = await getAccessToken();
   const createResponse = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
     method: 'POST',
@@ -160,14 +180,14 @@ export async function findOrCreateFolder(parentFolderId: string, folderName: str
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      name: folderName,
+      name: cleanName,
       mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentFolderId],
+      parents: [cleanParentId],
     }),
   });
 
   if (!createResponse.ok) {
-    throw new Error(`Google Drive Folder Error (${createResponse.status}): Failed to create folder '${folderName}'.`);
+    throw new Error(`Google Drive Folder Error (${createResponse.status}): Failed to create folder '${cleanName}'.`);
   }
 
   const createdData = (await createResponse.json()) as { id: string };
@@ -175,7 +195,7 @@ export async function findOrCreateFolder(parentFolderId: string, folderName: str
 }
 
 /**
-  Завантажує бінарний файл (Buffer) у вказану папку Google Drive via Multipart Upload.
+ * Завантажує бінарний файл (Buffer) у вказану папку Google Drive via Valid Multipart Upload.
  */
 export async function uploadFileToDrive(
   folderId: string,
@@ -183,23 +203,40 @@ export async function uploadFileToDrive(
   mimeType: string,
   fileBuffer: Buffer
 ): Promise<{ fileId: string; webViewLink?: string }> {
+  const cleanFolderId = folderId ? folderId.trim() : '';
+  const cleanFileName = fileName ? fileName.trim() : '';
+  const cleanMimeType = mimeType ? mimeType.trim() : 'application/octet-stream';
+
+  if (!cleanFolderId) {
+    throw new Error('Google Drive Upload Error: Cannot upload file with empty folderId.');
+  }
+
+  if (!cleanFileName) {
+    throw new Error('Google Drive Upload Error: Cannot upload file with empty fileName.');
+  }
+
+  if (!fileBuffer || fileBuffer.length === 0) {
+    throw new Error(`Google Drive Upload Error: File buffer for '${cleanFileName}' is empty.`);
+  }
+
   const token = await getAccessToken();
-  const boundary = `-------314159265358979323846_${Date.now()}`;
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelimiter = `\r\n--${boundary}--`;
+  const boundary = `-------VanguardVaultBoundary${Date.now()}`;
 
   const metadata = {
-    name: fileName,
-    parents: [folderId],
+    name: cleanFileName,
+    parents: [cleanFolderId],
   };
 
+  // Канонічне формування Multipart тіла без ведучого \r\n
+  const headerPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+  const fileHeaderPart = `--${boundary}\r\nContent-Type: ${cleanMimeType}\r\n\r\n`;
+  const footerPart = `\r\n--${boundary}--`;
+
   const multipartBody = Buffer.concat([
-    Buffer.from(
-      `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`
-    ),
-    Buffer.from(`${delimiter}Content-Type: ${mimeType}\r\n\r\n`),
+    Buffer.from(headerPart, 'utf8'),
+    Buffer.from(fileHeaderPart, 'utf8'),
     fileBuffer,
-    Buffer.from(closeDelimiter),
+    Buffer.from(footerPart, 'utf8'),
   ]);
 
   const uploadResponse = await fetch(
@@ -216,7 +253,7 @@ export async function uploadFileToDrive(
   );
 
   if (!uploadResponse.ok) {
-    throw new Error(`Google Drive Upload Error (${uploadResponse.status}): Failed to upload file '${fileName}'.`);
+    throw new Error(`Google Drive Upload Error (${uploadResponse.status}): Failed to upload file '${cleanFileName}'.`);
   }
 
   const uploadData = (await uploadResponse.json()) as { id: string; webViewLink?: string };
@@ -228,10 +265,10 @@ export async function uploadFileToDrive(
 }
 
 /**
-  Видаляє файл за його Drive File ID.
+ * Видаляє файл за його Drive File ID.
  */
 export async function deleteFileFromDrive(fileId: string): Promise<void> {
-  const cleanId = fileId.trim();
+  const cleanId = fileId ? fileId.trim() : '';
   if (!cleanId) {
     throw new Error('Google Drive Delete Error: Cannot delete file with an empty fileId.');
   }
@@ -242,19 +279,26 @@ export async function deleteFileFromDrive(fileId: string): Promise<void> {
 }
 
 /**
-  Отримує пряму структуру папки досьє: Dossiers / {dossierId} / {categoryFolder}
+ * Формує або отримує досьє-центричну структуру папок Vault: Dossiers / {dossierId} / {categoryFolder}
  */
 export async function getDossierCategoryFolder(dossierId: string, categoryFolder: string): Promise<string> {
+  const cleanDossierId = dossierId ? dossierId.trim() : '';
+  const cleanCategory = categoryFolder ? categoryFolder.trim() : '';
+
+  if (!cleanDossierId || !cleanCategory) {
+    throw new Error('Google Drive Error: Invalid dossierId or categoryFolder parameter.');
+  }
+
   const creds = getCredentials();
 
   // 1. Папка "Dossiers" у корені Vault
   const dossiersFolderId = await findOrCreateFolder(creds.rootFolderId, 'Dossiers');
 
   // 2. Папка конкретного досьє (наприклад, "BW-2026-000001")
-  const dossierFolderId = await findOrCreateFolder(dossiersFolderId, dossierId);
+  const dossierFolderId = await findOrCreateFolder(dossiersFolderId, cleanDossierId);
 
   // 3. Категоріальна підпапка (наприклад, "01_Passport")
-  const categoryFolderId = await findOrCreateFolder(dossierFolderId, categoryFolder);
+  const categoryFolderId = await findOrCreateFolder(dossierFolderId, cleanCategory);
 
   return categoryFolderId;
 }
