@@ -1,5 +1,16 @@
 import crypto from 'crypto';
 
+function parsePrivateKey(rawKey: string | undefined): string {
+  if (!rawKey) return '';
+  let key = rawKey.trim();
+  // Видалення зовнішніх лапок, якщо вони випадково потрапили у змінні
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1);
+  }
+  // Перетворення символів \n на реальні переноси рядків PEM
+  return key.replace(/\\n/g, '\n');
+}
+
 interface GoogleDriveCredentials {
   clientEmail: string;
   privateKey: string;
@@ -17,20 +28,18 @@ let cachedAccessToken: CachedToken | null = null;
 
 function getCredentials(): GoogleDriveCredentials {
   const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY;
   const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
 
-  if (!clientEmail || !privateKey || !rootFolderId) {
+  if (!clientEmail || !rawPrivateKey || !rootFolderId) {
     throw new Error(
       'Server Config Error: Missing required Google Drive environment variables (GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_DRIVE_ROOT_FOLDER_ID).'
     );
   }
 
-  const formattedPrivateKey = privateKey.replace(/\\n/g, '\n');
-
   return {
     clientEmail,
-    privateKey: formattedPrivateKey,
+    privateKey: parsePrivateKey(rawPrivateKey),
     rootFolderId: rootFolderId.trim(),
   };
 }
@@ -227,7 +236,7 @@ export async function uploadFileToDrive(
     parents: [cleanFolderId],
   };
 
-  // Канонічне формування Multipart тіла без ведучого \r\n
+  // Канонічне формування Multipart тіла
   const headerPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
   const fileHeaderPart = `--${boundary}\r\nContent-Type: ${cleanMimeType}\r\n\r\n`;
   const footerPart = `\r\n--${boundary}--`;
@@ -294,10 +303,10 @@ export async function getDossierCategoryFolder(dossierId: string, categoryFolder
   // 1. Папка "Dossiers" у корені Vault
   const dossiersFolderId = await findOrCreateFolder(creds.rootFolderId, 'Dossiers');
 
-  // 2. Папка конкретного досьє (наприклад, "BW-2026-000001")
+  // 2. Папка конкретного досьє
   const dossierFolderId = await findOrCreateFolder(dossiersFolderId, cleanDossierId);
 
-  // 3. Категоріальна підпапка (наприклад, "01_Passport")
+  // 3. Категоріальна підпапка
   const categoryFolderId = await findOrCreateFolder(dossierFolderId, cleanCategory);
 
   return categoryFolderId;
