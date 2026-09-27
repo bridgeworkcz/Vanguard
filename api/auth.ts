@@ -72,10 +72,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lastLoginAt: now,
       };
 
-      const rowData = mapUserToRow(newUser, passwordHash);
+      // 1. Передаємо єдиний об'єкт для mapUserToRow
+      const rowData = mapUserToRow({ ...newUser, passwordHash } as any);
       await appendSheetRow('Users', rowData);
 
-      const token = createSessionToken(newUser);
+      // 2. Формуємо об'єкт із полем userId для createSessionToken
+      const token = createSessionToken({
+        userId: newUser.id,
+        email: newUser.email,
+        roles: newUser.roles,
+      });
 
       try {
         await sendSafeTelegramAlert(
@@ -109,7 +115,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const user = mapRowToUser(foundRow);
-      const token = createSessionToken(user);
+
+      // 3. Формуємо об'єкт із полем userId для createSessionToken
+      const token = createSessionToken({
+        userId: user.id,
+        email: user.email,
+        roles: user.roles,
+      });
 
       return res.status(200).json({ token, user });
     }
@@ -120,4 +132,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 }
-
