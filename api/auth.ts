@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { readSheetRows, appendSheetRow } from '../server/utils/sheets';
-import { hashPassword, verifyPassword, generateSessionToken, verifySessionToken } from '../server/utils/auth';
-import { userFromRow, userToRow } from '../server/utils/mappers';
-import { sendTelegramAlert } from '../server/utils/telegram';
+import { hashPassword, verifyPassword, createSessionToken, verifySessionToken } from '../server/utils/auth';
+import { mapRowToUser, mapUserToRow } from '../server/utils/mappers';
+import { sendSafeTelegramAlert } from '../server/utils/telegram';
+import { User } from '../src/types';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -13,15 +14,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const token = authHeader.substring(7);
-      const secret = process.env.SESSION_SECRET || 'fallback-secret';
-      
-      const payload = verifySessionToken(token, secret);
+      const payload = verifySessionToken(token);
       
       if (!payload) {
         return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
       }
 
-      return res.status(200).json({ user: payload.user });
+      const user = (payload as any).user || {
+        id: (payload as any).userId || (payload as any).id,
+        email: (payload as any).email,
+        phone: (payload as any).phone || '',
+        fullName: (payload as any).fullName || '',
+        roles: (payload as any).roles || ['CLIENT'],
+        createdAt: (payload as any).createdAt || new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+
+      return res.status(200).json({ user });
     }
 
     if (req.method !== 'POST') {
@@ -42,9 +51,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const rawRows = await readSheetRows('Users');
-      const existingUsers = rawRows.map(userFromRow);
+      const existingUsers: User[] = rawRows.map((row) => mapRowToUser(row));
       
-      const exists = existingUsers.some(u => u.email.toLowerCase() === normalizedEmail);
+      const exists = existingUsers.some((u: User) => u.email.toLowerCase() === normalizedEmail);
       if (exists) {
         return res.status(409).json({ error: 'User with this email already exists' });
       }
@@ -53,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const passwordHash = await hashPassword(password);
       const now = new Date().toISOString();
 
-      const newUser = {
+      const newUser: User = {
         id: userId,
         email: normalizedEmail,
         phone: String(phone).trim(),
@@ -63,15 +72,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lastLoginAt: now,
       };
 
-      const rowData = userToRow(newUser, passwordHash);
+      const rowData = mapUserToRow(newUser, passwordHash);
       await appendSheetRow('Users', rowData);
 
-      const secret = process.env.SESSION_SECRET || 'fallback-secret';
-      const token = generateSessionToken(newUser, secret);
+      const token = createSessionToken(newUser);
 
-      // Неблокуючий Telegram alert (не валить функцію у разі помилки мережі)
       try {
-        await sendTelegramAlert(`🆕 <b>Нова реєстрація клієнта</b>\n\n👤 Ім'я: ${newUser.fullName}\n📧 Email: ${newUser.email}\n📞 Тел: ${newUser.phone}`);
+        await sendSafeTelegramAlert(
+          `🆕 <b>Нова реєстрація клієнта</b>\n\n👤 Ім'я: ${newUser.fullName}\n📧 Email: ${newUser.email}\n📞 Тел: ${newUser.phone}`
+        );
       } catch (tgErr) {
         console.error('Telegram alert warning:', tgErr);
       }
@@ -99,9 +108,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
 
-      const user = userFromRow(foundRow);
-      const secret = process.env.SESSION_SECRET || 'fallback-secret';
-      const token = generateSessionToken(user, secret);
+      const user = mapRowToUser(foundRow);
+      const token = createSessionToken(user);
 
       return res.status(200).json({ token, user });
     }
@@ -112,3 +120,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 }
+
