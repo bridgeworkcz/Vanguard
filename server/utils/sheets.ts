@@ -3,12 +3,27 @@ import crypto from 'crypto';
 function parsePrivateKey(rawKey: string | undefined): string {
   if (!rawKey) return '';
   let key = rawKey.trim();
-  // Видалення зовнішніх лапок, якщо вони випадково потрапили у змінні
+  
+  // Видалення зовнішніх лапок
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
     key = key.slice(1, -1);
   }
-  // Перетворення символів \n на реальні переноси рядків PEM
-  return key.replace(/\\n/g, '\n');
+
+  // Заміна текстових \n на справжні переноси
+  key = key.replace(/\\n/g, '\n').replace(/\r/g, '');
+
+  // Очищення від заголовків для ізоляції суто Base64 вмісту
+  const base64Body = key
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s+/g, '');
+
+  if (!base64Body) return '';
+
+  // Канонічне форматування Base64 у 64-символьні рядки (стандарт PEM / OpenSSL)
+  const chunked = base64Body.match(/.{1,64}/g)?.join('\n') || base64Body;
+
+  return `-----BEGIN PRIVATE KEY-----\n${chunked}\n-----END PRIVATE KEY-----\n`;
 }
 
 interface GoogleSheetsCredentials {
@@ -38,7 +53,7 @@ function getCredentials(): GoogleSheetsCredentials {
   }
 
   return {
-    clientEmail,
+    clientEmail: clientEmail.trim(),
     privateKey: parsePrivateKey(rawPrivateKey),
     spreadsheetId: spreadsheetId.trim(),
   };
@@ -101,7 +116,8 @@ async function getAccessToken(): Promise<string> {
   });
 
   if (!response.ok) {
-    throw new Error(`Google OAuth2 Error (${response.status}): Authentication failed against Google OAuth servers.`);
+    const errorText = await response.text();
+    throw new Error(`Google OAuth2 Error (${response.status}): ${errorText}`);
   }
 
   const data = (await response.json()) as { access_token: string; expires_in: number };
@@ -131,7 +147,8 @@ async function sheetsApiFetch<T = unknown>(endpoint: string, options: RequestIni
   });
 
   if (!response.ok) {
-    throw new Error(`Google Sheets API Error (${response.status}): Request failed for endpoint ${endpoint}`);
+    const errBody = await response.text();
+    throw new Error(`Google Sheets API Error (${response.status}): ${errBody}`);
   }
 
   return response.json() as Promise<T>;
@@ -234,7 +251,7 @@ export async function updateSheetRowById(
   let rowIndex = -1;
   for (let i = 1; i < rows.length; i++) {
     if (rows[i][idIndex] && String(rows[i][idIndex]).trim() === id) {
-      rowIndex = i + 1; // 1-indexed range for Google Sheets API
+      rowIndex = i + 1;
       break;
     }
   }
@@ -255,3 +272,4 @@ export async function updateSheetRowById(
     }
   );
 }
+
