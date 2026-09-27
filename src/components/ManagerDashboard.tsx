@@ -19,7 +19,7 @@ export const ManagerDashboard: React.FC = () => {
       setDossiers(res.dossiers || []);
     } catch (err) {
       console.error(err);
-    } fontally {
+    } finally {
       setLoading(false);
     }
   };
