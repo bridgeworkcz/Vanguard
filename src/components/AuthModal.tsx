@@ -20,37 +20,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
     e.preventDefault();
     setError(null);
 
-    // Власна ізольована валідація без використання нативного API Safari
+    const cleanEmail = email.trim();
+    const cleanPhone = phone.trim();
+    const cleanName = fullName.trim();
+
+    // Власна перевірка полів замість нативного контролера Safari
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Please enter a valid email address (e.g. user@gmail.com)');
+      return;
+    }
+
+    if (!password || password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+
     if (mode === 'register') {
-      if (!fullName.trim()) {
+      if (!cleanName) {
         setError('Please enter your full name');
         return;
       }
-      if (!phone.trim()) {
-        setError('Please enter your phone number');
+      if (!cleanPhone || cleanPhone.length < 5) {
+        setError('Please enter a valid phone number (e.g. +380...)');
         return;
       }
-    }
-    if (!email.trim() || !email.includes('@')) {
-      setError('Please enter a valid email address');
-      return;
-    }
-    if (!password || password.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
     }
 
     setLoading(true);
 
     try {
       if (mode === 'login') {
-        await login(email.trim(), password);
+        await login(cleanEmail, password);
       } else {
         await register({
-          email: email.trim(),
+          email: cleanEmail,
           password,
-          fullName: fullName.trim(),
-          phone: phone.trim(),
+          fullName: cleanName,
+          phone: cleanPhone,
         });
       }
       onClose();
@@ -58,8 +64,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
       let msg = 'Authentication failed';
       if (err instanceof Error) {
         msg = err.message;
-        if (msg.includes('pattern') || msg.includes('expected pattern')) {
-          msg = 'Invalid input format. Please check your details and try again.';
+        // Заміна системних помилок WebKit на зрозумілий текст
+        if (msg.includes('pattern') || msg.includes('expected pattern') || msg.includes('DOMException')) {
+          msg = 'Invalid input format. Please check your email, phone, and password.';
         }
       }
       setError(msg);
@@ -72,6 +79,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
       <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl text-white">
         <button
+          type="button"
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
         >
@@ -107,12 +115,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs leading-relaxed">
             {error}
           </div>
         )}
 
-        {/* noValidate повністю вимикає вбудований перевірник форм Safari */}
+        {/* noValidate повністю вимикає блокування форм браузером Safari */}
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {mode === 'register' && (
             <>
@@ -136,6 +144,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                   <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
                   <input
                     type="text"
+                    inputMode="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+44 7000 000000"
@@ -151,7 +160,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
             <div className="relative">
               <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
               <input
-                type="email"
+                type="text"
+                inputMode="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="client@example.com"
