@@ -1,7 +1,6 @@
 export const APP_CONFIG = {
   version: "0.1.0",
-  brandName: "BridgeWork EU",
-  // Примітка: Юридичні реквізити та гаманці потребують документального підтвердження перед Production
+  brandName: "Vanguard Global Mobility",
   legalEntity: "Vanguard Global Mobility S.R.O. (PENDING_VERIFICATION)",
   registrationNumber: "CZ28941562",
   legalAddress: "Rybná 716/24, Staré Město, 110 00 Praha 1, Czech Republic",
