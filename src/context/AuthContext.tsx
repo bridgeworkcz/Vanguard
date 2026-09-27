@@ -13,30 +13,38 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Повністю сумісний з Safari (iOS WebKit) декодер JWT Base64Url
-function parseJwt(token: string): any {
+// Чисто-JS декодер JWT Base64Url без використання нестійкого atob()
+function parseJwtSafariSafe(token: string): any {
+  if (!token || typeof token !== 'string') return null;
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     
-    // Перетворення URL-safe Base64 у канонічний Base64
-    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    
-    // Додавання необхідного вирівнювання '=' для Safari
-    while (base64.length % 4 !== 0) {
-      base64 += '=';
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let output = '';
+    let buffer = 0;
+    let bits = 0;
+
+    const cleanStr = base64.replace(/[^A-Za-z0-9+/]/g, '');
+
+    for (let i = 0; i < cleanStr.length; i++) {
+      buffer = (buffer << 6) | chars.indexOf(cleanStr[i]);
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        output += String.fromCharCode((buffer >> bits) & 0xff);
+      }
     }
-    
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+
+    const bytes = new Uint8Array(output.length);
+    for (let i = 0; i < output.length; i++) {
+      bytes[i] = output.charCodeAt(i);
     }
-    
-    const jsonPayload = new TextDecoder().decode(bytes);
-    return JSON.parse(jsonPayload);
+    const decodedText = new TextDecoder().decode(bytes);
+    return JSON.parse(decodedText);
   } catch (e) {
-    console.error('JWT Parse Error (WebKit Safe):', e);
     return null;
   }
 }
@@ -47,15 +55,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('vanguard_token');
-    if (savedToken) {
-      const payload = parseJwt(savedToken);
-      if (payload && payload.exp && payload.exp * 1000 > Date.now()) {
-        setToken(savedToken);
-        setUser(payload.user || null);
-      } else {
-        localStorage.removeItem('vanguard_token');
+    try {
+      const savedToken = localStorage.getItem('vanguard_token');
+      if (savedToken) {
+        const payload = parseJwtSafariSafe(savedToken);
+        if (payload && payload.exp && payload.exp * 1000 > Date.now()) {
+          setToken(savedToken);
+          setUser(payload.user || null);
+        } else {
+          localStorage.removeItem('vanguard_token');
+        }
       }
+    } catch (e) {
+      localStorage.removeItem('vanguard_token');
     }
     setLoading(false);
   }, []);
@@ -63,9 +75,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, pass: string) => {
     const res = await authApi.login(email, pass);
     if (res.token) {
-      localStorage.setItem('vanguard_token', res.token);
-      setToken(res.token);
-      const payload = parseJwt(res.token);
+      const cleanToken = String(res.token).replace(/["'\r\n\s]/g, '').trim();
+      localStorage.setItem('vanguard_token', cleanToken);
+      setToken(cleanToken);
+      const payload = parseJwtSafariSafe(cleanToken);
       setUser(payload?.user || res.user || null);
     }
   };
@@ -73,9 +86,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (data: { email: string; password: string; fullName: string; phone: string }) => {
     const res = await authApi.register(data);
     if (res.token) {
-      localStorage.setItem('vanguard_token', res.token);
-      setToken(res.token);
-      const payload = parseJwt(res.token);
+      const cleanToken = String(res.token).replace(/["'\r\n\s]/g, '').trim();
+      localStorage.setItem('vanguard_token', cleanToken);
+      setToken(cleanToken);
+      const payload = parseJwtSafariSafe(cleanToken);
       setUser(payload?.user || res.user || null);
     }
   };
