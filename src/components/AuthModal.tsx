@@ -19,17 +19,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Власна ізольована валідація без використання нативного API Safari
+    if (mode === 'register') {
+      if (!fullName.trim()) {
+        setError('Please enter your full name');
+        return;
+      }
+      if (!phone.trim()) {
+        setError('Please enter your phone number');
+        return;
+      }
+    }
+    if (!email.trim() || !email.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (!password || password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
     setLoading(true);
 
     try {
       if (mode === 'login') {
-        await login(email, password);
+        await login(email.trim(), password);
       } else {
-        await register({ email, password, fullName, phone });
+        await register({
+          email: email.trim(),
+          password,
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+        });
       }
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      let msg = 'Authentication failed';
+      if (err instanceof Error) {
+        msg = err.message;
+        if (msg.includes('pattern') || msg.includes('expected pattern')) {
+          msg = 'Invalid input format. Please check your details and try again.';
+        }
+      }
       setError(msg);
     } finally {
       setLoading(false);
@@ -80,7 +112,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {/* noValidate повністю вимикає вбудований перевірник форм Safari */}
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {mode === 'register' && (
             <>
               <div>
@@ -89,7 +122,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                   <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
                   <input
                     type="text"
-                    required
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="John Doe"
@@ -103,8 +135,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                 <div className="relative">
                   <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
                   <input
-                    type="tel"
-                    required
+                    type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+44 7000 000000"
@@ -121,7 +152,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
               <input
                 type="email"
-                required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="client@example.com"
@@ -136,8 +166,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
               <input
                 type="password"
-                required
-                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -158,4 +186,3 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
     </div>
   );
 };
-
