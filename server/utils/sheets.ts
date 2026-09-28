@@ -142,8 +142,9 @@ export async function readSheetRows(sheetName: string): Promise<Record<string, s
     values?: string[][];
   }
 
+  // Обмежуємо зчитування лише колонками A-Z
   const res = await sheetsApiFetch<ValueRenderResponse>(
-    `/values/${encodeURIComponent(sheetName)}?valueRenderOption=UNFORMATTED_VALUE`
+    `/values/${encodeURIComponent(sheetName)}!A1:Z1000?valueRenderOption=UNFORMATTED_VALUE`
   );
 
   const rows = res.values || [];
@@ -158,12 +159,13 @@ export async function readSheetRows(sheetName: string): Promise<Record<string, s
     let hasData = false;
 
     headers.forEach((header, index) => {
+      if (!header) return;
       const val = row[index] !== undefined && row[index] !== null ? String(row[index]).trim() : '';
       record[header] = val;
       if (val !== '') hasData = true;
     });
 
-    if (hasData) {
+    if (hasData && record.id) {
       result.push(record);
     }
   }
@@ -181,20 +183,41 @@ export async function appendSheetRow(sheetName: string, rowData: Record<string, 
     values?: string[][];
   }
 
+  // 1. Отримуємо заголовки лише з першого рядка A1:Z1
   const res = await sheetsApiFetch<ValueRenderResponse>(
-    `/values/${encodeURIComponent(sheetName)}?valueRenderOption=UNFORMATTED_VALUE`
+    `/values/${encodeURIComponent(sheetName)}!A1:Z1?valueRenderOption=UNFORMATTED_VALUE`
   );
 
+  let headers: string[] = [];
   const rows = res.values || [];
-  if (rows.length === 0) {
-    throw new Error(`Google Sheets Error: Sheet '${sheetName}' is empty or header row is missing.`);
+
+  const defaultHeadersMap: Record<string, string[]> = {
+    Users: ['id', 'email', 'phone', 'fullName', 'roles', 'passwordHash', 'createdAt', 'lastLoginAt'],
+    Dossiers: ['id', 'userId', 'vacancyId', 'status', 'createdAt', 'updatedAt'],
+    Documents: ['id', 'dossierId', 'userId', 'category', 'fileName', 'fileUrl', 'status', 'createdAt'],
+    Payments: ['id', 'dossierId', 'userId', 'amount', 'currency', 'status', 'createdAt'],
+  };
+
+  // Якщо рядок 1 порожній — автоматично прописуємо канонічні заголовки
+  if (!rows || rows.length === 0 || !rows[0] || rows[0].length === 0 || !rows[0][0]) {
+    headers = defaultHeadersMap[sheetName] || Object.keys(rowData);
+    await sheetsApiFetch(
+      `/values/${encodeURIComponent(sheetName)}!A1?valueInputOption=RAW`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values: [headers] }),
+      }
+    );
+  } else {
+    headers = rows[0].map(h => String(h).trim());
   }
 
-  const headers = rows[0].map(h => String(h).trim());
   const valuesToAppend = headers.map(h => rowData[h] ?? '');
+  const lastColLetter = String.fromCharCode(64 + Math.min(headers.length, 26));
 
+  // 2. Додаємо новий рядок ЖОРСТКО в межах колонок A..lastCol
   await sheetsApiFetch(
-    `/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `/values/${encodeURIComponent(sheetName)}!A1:${lastColLetter}1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       body: JSON.stringify({
@@ -214,7 +237,7 @@ export async function updateSheetRowById(
   }
 
   const res = await sheetsApiFetch<ValueRenderResponse>(
-    `/values/${encodeURIComponent(sheetName)}?valueRenderOption=UNFORMATTED_VALUE`
+    `/values/${encodeURIComponent(sheetName)}!A1:Z1000?valueRenderOption=UNFORMATTED_VALUE`
   );
 
   const rows = res.values || [];
