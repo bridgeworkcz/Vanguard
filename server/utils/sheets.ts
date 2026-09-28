@@ -8,7 +8,6 @@ function parsePrivateKey(rawKey: string | undefined): string {
     key = key.slice(1, -1);
   }
 
-  // Відновлюємо нормальні переноси рядків PEM
   key = key.replace(/\\n/g, '\n').replace(/\r/g, '');
 
   if (!key.includes('-----BEGIN PRIVATE KEY-----')) {
