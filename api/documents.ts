@@ -28,9 +28,10 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
 
   const { session } = auth;
   const dossierId = req.query.dossierId ? String(req.query.dossierId).trim() : '';
-
   if (!dossierId) {
-    return res.status(400).json({ error: 'Validation Error: Parameter dossierId is required.' });
+    if (!isStaff(session)) return res.status(400).json({ error: 'Validation Error: Parameter dossierId is required.' });
+    const all = (await readSheetRows(DOCUMENTS_SHEET_NAME)).map(mapRowToDocument);
+    return res.status(200).json({ documents: all });
   }
 
   // Перевірка існування досьє
@@ -116,14 +117,17 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
   const docId = `DOC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const now = new Date().toISOString();
 
+  const finalByStaff = isStaff(session) && cleanCategory === 'FINAL_DOCUMENT';
   const newDoc: DossierDocument = {
     id: docId,
     dossierId: cleanDossierId,
     category: cleanCategory,
     fileName: cleanFileName,
     driveFileId: driveResult.fileId,
-    status: 'UPLOADED',
+    status: finalByStaff ? 'APPROVED' : 'UPLOADED',
     uploadedAt: now,
+    reviewedAt: finalByStaff ? now : undefined,
+    reviewedBy: finalByStaff ? session.userId : undefined,
   };
 
   const rowData = mapDocumentToRow(newDoc);
