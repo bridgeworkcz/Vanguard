@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "types": ["node", "@vercel/node"]
-  },
-  "include": ["api/**/*.ts", "server/**/*.ts", "src/types.ts"]
-}
