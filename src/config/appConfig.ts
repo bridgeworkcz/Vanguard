@@ -1,0 +1,1 @@
+export const APP_CONFIG={version:'1.0.0',brandName:'Vanguard Global Mobility',legalEntity:'',registrationNumber:'',legalAddress:'',supportEmail:'',supportPhone:'',usdtWallet:'',usdtNetwork:'TRC-20 (TRON Network)'} as const;
