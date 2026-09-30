@@ -1,18 +1,18 @@
 import type {ProcessingOption,VisaProduct,Vacancy} from '../types';
 export const processingLabels:Record<ProcessingOption,string>={STANDARD:'Standard',PRIORITY:'Priority',EXPRESS:'Express'};
 const raw:[string,string,string,number,number,number,ProcessingOption[]][]=[
-['Slovakia','Work permit','2 years',1125,2,8,['STANDARD','PRIORITY','EXPRESS']],
-['Czech Republic','Work permit','2 years',1200,2,8,['STANDARD','PRIORITY','EXPRESS']],
-['Czech Republic','Work permit','9 months',900,2,8,['STANDARD','PRIORITY']],
+['Slovakia','Work permit','2 years',1125,2,8,['STANDARD','PRIORITY']],
+['Czech Republic','Work permit','2 years',1200,2,8,['STANDARD','PRIORITY']],
+['Czech Republic','Work permit','9 months',900,2,8,['STANDARD']],
 ['Germany','Work permit','1 year',1800,2,8,['STANDARD','PRIORITY']],
 ['Portugal','Work permit','1 year',1650,2,8,['STANDARD','PRIORITY']],
 ['Bulgaria','Work permit','1 year',1500,2,8,['STANDARD','PRIORITY']],
-['Italy','NULLA OSTA / work permit','1 year',2250,2,8,['STANDARD','PRIORITY']],
+['Italy','NULLA OSTA / work permit','1 year',2250,2,8,['STANDARD']],
 ['Norway','Work permit','1 year',1650,2,8,['STANDARD','PRIORITY']],
 ['Serbia','Work permit','1 year',1200,1,3,['STANDARD','PRIORITY','EXPRESS']],
 ['Canada','Work permit','2 years',3150,3,8,['STANDARD','PRIORITY']],
 ['Hungary','Work permit','2 years',1950,2,8,['STANDARD','PRIORITY']],
-['Poland','Work permit','2 years',1050,2,8,['STANDARD','PRIORITY','EXPRESS']],
+['Poland','Work permit','2 years',1050,2,8,['STANDARD','PRIORITY']],
 ['New Zealand','Work permit','2 years',3200,2,8,['STANDARD','PRIORITY']],
 ['Belarus','Work permit','2 years',1300,2,5,['STANDARD','PRIORITY']]];
 export const visaProducts:VisaProduct[]=raw.map((x,i)=>({id:`VP-${String(i+1).padStart(3,'0')}`,country:x[0],name:x[1],duration:x[2],description:'Configured service catalogue item. Final eligibility and government processing remain subject to the applicable authority.',basePrice:Math.round(x[3]*1.25),currency:'EUR',productionMinWeeks:x[4],productionMaxWeeks:x[5],allowedProcessing:x[6],active:true}));
