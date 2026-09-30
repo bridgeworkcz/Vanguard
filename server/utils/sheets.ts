@@ -4,7 +4,7 @@ export const SHEET_SCHEMAS = {
   Users: ['id', 'email', 'phone', 'fullName', 'roles', 'passwordHash', 'createdAt', 'lastLoginAt', 'isActive'],
   Dossiers: ['id', 'userId', 'fullName', 'passportNumber', 'citizenship', 'targetCountry', 'vacancyId', 'vacancyTitle', 'processStatus', 'paymentStatus', 'currency', 'totalCost', 'paidAmount', 'remainingAmount', 'assignedManagerId', 'createdAt', 'updatedAt'],
   DossierDocuments: ['id', 'dossierId', 'category', 'fileName', 'driveFileId', 'status', 'uploadedAt', 'reviewedAt', 'reviewedBy', 'rejectionReason'],
-  PaymentTransactions: ['id', 'dossierId', 'userId', 'amount', 'currency', 'network', 'txHash', 'tranchePercent', 'status', 'submittedAt', 'verifiedAt','verifiedBy','proofFileId','proofFileName'],
+  PaymentTransactions: ['id', 'dossierId', 'userId', 'amount', 'currency', 'network', 'txHash', 'tranchePercent', 'trancheKey', 'status', 'submittedAt', 'verifiedAt','verifiedBy','proofFileId','proofFileName'],
   Vacancies: ['id','title','category','country','salaryNet','salaryGross','accommodation','workingHours','description','quotaRemaining','isActive','visaProductId','visaDuration','processingOptions','employerLabel','requirements','createdAt','updatedAt'],
   Team: ['id','fullName','position','photoUrl','contactPhone','languages','bio','order','isActive'],
   AuditLog: ['id', 'actorUserId', 'action', 'targetEntity', 'targetEntityId', 'details', 'timestamp'],

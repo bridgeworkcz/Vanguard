@@ -257,6 +257,8 @@ export async function uploadFileToDrive(
   };
 }
 
+
+export async function makeFilePublic(fileId:string):Promise<void>{const id=fileId.trim();if(!id)return;const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/permissions`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({type:'anyone',role:'reader'})});if(!r.ok){const body=await r.text();throw new Error(`Google Drive Permission Error (${r.status}): ${body.slice(0,300)}`)}}
 export async function deleteFileFromDrive(fileId: string): Promise<void> {
   const cleanId = fileId ? fileId.trim() : '';
   if (!cleanId) return;
