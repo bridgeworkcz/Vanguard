@@ -1,0 +1,14 @@
+import crypto from 'crypto';
+import type {VercelRequest,VercelResponse} from '@vercel/node';
+import {readSheetRows, appendSheetRow,updateSheetRowById} from '../server/utils/sheets.js';
+import {mapRowToSetting,mapSettingToRow,mapRowToGallery} from '../server/utils/mappers.js';
+import {authenticateRequest,hasRole} from '../server/utils/permissions.js';
+import {uploadFileToDrive,findOrCreateFolder} from '../server/utils/drive.js';
+const clean=(v:unknown)=>String(v??'').trim();
+export default async function handler(req:VercelRequest,res:VercelResponse){try{
+ if(req.method==='GET'){const settings=(await readSheetRows('SystemSettings')).map(mapRowToSetting);const gallery=(await readSheetRows('Gallery')).map(mapRowToGallery).filter(x=>x.isActive).sort((a,b)=>a.order-b.order);return res.status(200).json({settings:Object.fromEntries(settings.map(x=>[x.key,x.value])),gallery})}
+ const a=authenticateRequest(req.headers.authorization);if(!a.authorized||!a.session)return res.status(a.statusCode).json({error:a.errorMessage});if(!hasRole(a.session,['ADMIN']))return res.status(403).json({error:'Admin role required.'});
+ if(req.method==='POST'&&String(req.body?.action||'settings')==='settings'){const key=clean(req.body?.key),value=clean(req.body?.value);if(!key)return res.status(400).json({error:'key required'});const old=(await readSheetRows('SystemSettings')).map(mapRowToSetting).find(x=>x.key===key);const item={id:old?.id||`SET-${Date.now()}`,key,value,updatedAt:new Date().toISOString(),updatedBy:a.session.userId};if(old)await updateSheetRowById('SystemSettings',old.id,mapSettingToRow(item));else await appendSheetRow('SystemSettings',mapSettingToRow(item));return res.status(200).json({setting:item})}
+ if(req.method==='POST'&&String(req.body?.action)==='uploadMedia'){const b=req.body||{};const base64=clean(b.fileBase64);if(!base64)return res.status(400).json({error:'fileBase64 required'});const root=clean(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID);if(!root)return res.status(500).json({error:'GOOGLE_DRIVE_ROOT_FOLDER_ID missing'});const folder=await findOrCreateFolder(root,'Public Media');const buffer=Buffer.from(base64,'base64');const upload=await uploadFileToDrive(folder,clean(b.fileName)||`media-${crypto.randomInt(1000,9999)}`,clean(b.mimeType)||'application/octet-stream',buffer);const key=clean(b.settingKey);if(key){const old=(await readSheetRows('SystemSettings')).map(mapRowToSetting).find(x=>x.key===key);const item={id:old?.id||`SET-${Date.now()}`,key,value:upload.fileId,updatedAt:new Date().toISOString(),updatedBy:a.session.userId};if(old)await updateSheetRowById('SystemSettings',old.id,mapSettingToRow(item));else await appendSheetRow('SystemSettings',mapSettingToRow(item))}return res.status(201).json({fileId:upload.fileId,webViewLink:upload.webViewLink})}
+ return res.status(405).json({error:'Method not allowed.'});
+}catch(e){return res.status(500).json({error:e instanceof Error?e.message:'Internal Server Error'})}}
