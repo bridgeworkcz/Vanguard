@@ -633,6 +633,7 @@ export const adminOverview = createServerFn({ method: "GET" })
     const users = await sql<{ userId: string; email: string; fullName: string; phone: string; role: string }>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles order by email`;
     return {
       role: profile.role,
+      userId: profile.userId,
       waiting: Number(waiting[0]?.c ?? 0),
       proofs: Number(proofs[0]?.c ?? 0),
       live: Number(live[0]?.c ?? 0),

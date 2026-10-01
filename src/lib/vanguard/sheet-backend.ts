@@ -848,6 +848,7 @@ export async function adminOverview(userId: string) {
   }));
   return {
     role: person.role,
+    userId: person.userId,
     waiting: apps.filter((app) => app.status === "OPEN" && app.stage === 1 && app.profileComplete).length,
     proofs: apps.filter((app) => app.status === "OPEN" && app.stage === 2 && docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status === "UPLOADED")).length,
     live: apps.filter((app) => app.status === "OPEN").length,

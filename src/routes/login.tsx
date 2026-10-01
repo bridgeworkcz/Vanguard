@@ -1,7 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
-import { accountAuth } from "@/lib/vanguard/account";
+import { accountAuth, accountBackend } from "@/lib/vanguard/account";
 import { useI18n } from "@/lib/vanguard/i18n";
 import { Shell } from "@/components/vg/chrome";
 
@@ -11,7 +11,6 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const { t } = useI18n();
-  const navigate = useNavigate();
   const [mode, setMode] = useState<"in" | "up">("in");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -19,6 +18,13 @@ function LoginPage() {
   const [phone, setPhone] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sheet, setSheet] = useState(false);
+
+  useEffect(() => {
+    accountBackend()
+      .then((row) => setSheet(row.kind === "sheet"))
+      .catch(() => setSheet(false));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,12 +48,16 @@ function LoginPage() {
         if (mode === "up") {
           const res = await authClient.signUp.email({ email, password, name: name || email });
           if (res.error) throw new Error(res.error.message || "Error");
+          const token = res.data?.token;
+          if (token) sessionStorage.setItem("grok-auth.bearer-token", token);
         } else {
           const res = await authClient.signIn.email({ email, password });
           if (res.error) throw new Error(res.error.message || "Error");
+          const token = res.data?.token;
+          if (token) sessionStorage.setItem("grok-auth.bearer-token", token);
         }
       }
-      void navigate({ to: "/portal", search: { id: "" } });
+      window.location.assign("/portal");
     } catch (error) {
       setErr(error instanceof Error ? error.message : t("login_error"));
       setBusy(false);
@@ -77,14 +87,18 @@ function LoginPage() {
           <button type="button" className="mt-4 text-sm text-mist" onClick={() => setMode(mode === "up" ? "in" : "up")}>
             {mode === "up" ? t("login_switch_have") : t("login_switch_create")}
           </button>
-          <p className="mt-6 text-center text-xs uppercase tracking-widest text-mist">{t("login_or")}</p>
-          <div className="mt-3 grid gap-2">
-            {GROK_PROVIDERS.map((p) => (
-              <button key={p.providerId} type="button" className="btn" onClick={() => signIn(p.providerId, { callbackURL: "/portal" })}>
-                {p.label}
-              </button>
-            ))}
-          </div>
+          {sheet ? null : (
+            <>
+              <p className="mt-6 text-center text-xs uppercase tracking-widest text-mist">{t("login_or")}</p>
+              <div className="mt-3 grid gap-2">
+                {GROK_PROVIDERS.map((p) => (
+                  <button key={p.providerId} type="button" className="btn" onClick={() => signIn(p.providerId, { callbackURL: "/portal" })}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </main>
     </Shell>

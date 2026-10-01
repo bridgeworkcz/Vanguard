@@ -14,6 +14,11 @@ export const accountSignOut = createServerFn({ method: "POST" }).handler(async (
   return { ok: true };
 });
 
+export const accountBackend = createServerFn({ method: "GET" }).handler(async () => {
+  const { sheetsConfigured } = await import("./account.server");
+  return { kind: sheetsConfigured() ? ("sheet" as const) : ("local" as const) };
+});
+
 export const accountAuth = createServerFn({ method: "POST" })
   .validator((input: AccountInput) => ({
     action: input?.action === "register" ? ("register" as const) : ("login" as const),

@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { signOut } from "@/lib/auth/client";
-import { accountSignOut } from "@/lib/vanguard/account";
+import { accountSession, accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
@@ -37,10 +37,31 @@ export function useSite() {
   return { data, error, reload };
 }
 
+export function useDesk() {
+  const auth = useCurrentUserState();
+  const [sheet, setSheet] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    accountSession()
+      .then((row) => {
+        if (live) setSheet(Boolean(row));
+      })
+      .catch(() => {
+        if (live) setSheet(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [auth.user?.id]);
+  const pending = auth.isPending || sheet === null;
+  const signedIn = Boolean(auth.user) || sheet === true;
+  return { pending, signedIn, user: auth.user, deskId: auth.user?.id ?? (signedIn ? "sheet" : "") };
+}
+
 export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?: "dark" | "light" }) {
   const { t, lang, setLang } = useI18n();
   const { data: site } = useSite();
-  const { user, isPending } = useCurrentUserState();
+  const { user, pending, signedIn, deskId } = useDesk();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [role, setRole] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -54,15 +75,15 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
     nav.scrollTo({ left: Math.max(0, left) });
   }, [path, lang]);
   useEffect(() => {
-    if (!user) {
+    if (!signedIn) {
       setRole(null);
       return;
     }
     getSessionProfile()
       .then((p) => setRole(p.role))
       .catch(() => setRole(null));
-  }, [user?.id]);
-  const item = (to: "/" | "/about" | "/contact" | "/filings" | "/process" | "/papers" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
+  }, [deskId, signedIn]);
+  const item = (to: "/" | "/about" | "/contact" | "/filings" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
     <Link
       to={to}
       className={`min-h-11 inline-flex shrink-0 items-center border-b-2 text-sm ${path === to ? "border-[#ff6a1a] text-paper" : "border-transparent text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink" : ""}`}
@@ -103,24 +124,32 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 {t("wa_label")}
               </a>
             ) : null}
-            {!isPending && !user ? (
+            {!pending && !signedIn ? (
               <Link to="/login" className="sign-pill">
                 {t("nav_sign_in")}
               </Link>
             ) : null}
-            {user && !gate ? (
+            {signedIn && !gate ? (
               <button
                 type="button"
                 className={`min-h-11 px-2 text-sm underline-offset-4 hover:underline ${tone === "light" ? "text-ink/70" : "text-mist"}`}
                 disabled={signingOut}
                 onClick={() => {
                   setSigningOut(true);
-                  void accountSignOut()
+                  try {
+                    sessionStorage.removeItem("grok-auth.bearer-token");
+                  } catch {
+                    /* storage unavailable */
+                  }
+                  const leave = accountSignOut()
                     .catch(() => undefined)
-                    .then(() => signOut())
-                    .catch(() => {
-                      window.location.assign("/");
+                    .then(() => {
+                      if (!user) return;
+                      return signOut();
                     });
+                  void Promise.race([leave.catch(() => undefined), new Promise((resolve) => window.setTimeout(resolve, 1600))]).then(() => {
+                    window.location.assign("/");
+                  });
                 }}
               >
                 {signingOut ? t("signing_out") : t("sign_out")}
@@ -132,12 +161,10 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/", t("nav_home"))}
           {item("/about", t("nav_about"))}
           {item("/filings", t("nav_filings"))}
-          {item("/process", t("nav_process"))}
-          {item("/papers", t("nav_papers"))}
           {item("/questions", t("nav_questions"))}
           {item("/agents", t("nav_agents"))}
           {item("/contact", t("nav_contact"))}
-          {user ? item("/portal", t("nav_portal")) : null}
+          {signedIn ? item("/portal", t("nav_portal")) : null}
           {role === "ADMIN" || role === "MANAGER" ? item("/admin", t("nav_console")) : null}
         </nav>
       </header>

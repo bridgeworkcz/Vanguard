@@ -16,49 +16,19 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
   );
 }
 
-export function ProcessPage() {
+export function QuestionsPage() {
   const { t } = useI18n();
-  const steps = [
+  const [find, setFind] = useState("");
+  const needle = find.trim().toLowerCase();
+  const steps: [string, string][] = [
     [t("process_1t"), t("process_1b")],
     [t("process_2t"), t("process_2b")],
     [t("process_3t"), t("process_3b")],
     [t("process_4t"), t("process_4b")],
   ];
-  return (
-    <Article kicker={t("process_kicker")} title={t("process_title")}>
-      <ol className="grid gap-4">
-        {steps.map(([title, body], index) => (
-          <li key={title} className="glass p-5">
-            <p className="ember text-sm">0{index + 1}</p>
-            <h2 className="display mt-1 text-3xl">{title}</h2>
-            <p className="mt-2 text-mist">{body}</p>
-          </li>
-        ))}
-      </ol>
-    </Article>
-  );
-}
-
-export function PapersPage() {
-  const { t } = useI18n();
-  return (
-    <Article kicker={t("papers_kicker")} title={t("papers_title")}>
-      <p className="text-mist">{t("papers_intro")}</p>
-      <ul className="grid gap-3">
-        {[t("papers_1"), t("papers_2"), t("papers_3"), t("papers_4"), t("papers_5")].map((line) => (
-          <li key={line} className="border-t border-white/10 pt-3">
-            {line}
-          </li>
-        ))}
-      </ul>
-    </Article>
-  );
-}
-
-export function QuestionsPage() {
-  const { t } = useI18n();
-  const [find, setFind] = useState("");
-  const needle = find.trim().toLowerCase();
+  const papers = [t("papers_1"), t("papers_2"), t("papers_3"), t("papers_4"), t("papers_5")];
+  const pathHit = !needle || `${t("process_title")} ${t("process_kicker")} ${steps.flat().join(" ")}`.toLowerCase().includes(needle);
+  const papersHit = !needle || `${t("papers_title")} ${t("papers_kicker")} ${t("papers_intro")} ${papers.join(" ")}`.toLowerCase().includes(needle);
   const groups: { title: string; items: [string, string][] }[] = [
     {
       title: t("faq_g_pages"),
@@ -66,8 +36,6 @@ export function QuestionsPage() {
         [t("faq_q5"), t("faq_a5")],
         [t("faq_q6"), t("faq_a6")],
         [t("faq_q7"), t("faq_a7")],
-        [t("faq_q8"), t("faq_a8")],
-        [t("faq_q9"), t("faq_a9")],
         [t("faq_q10"), t("faq_a10")],
         [t("faq_q11"), t("faq_a11")],
         [t("faq_q12"), t("faq_a12")],
@@ -105,11 +73,39 @@ export function QuestionsPage() {
       items: group.items.filter((item): item is [string, string] => !needle || `${item[0]} ${item[1]}`.toLowerCase().includes(needle)),
     }))
     .filter((group) => group.items.length > 0);
+  const empty = !pathHit && !papersHit && groups.length === 0;
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
       <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => setFind(e.target.value)} />
-      {groups.length === 0 ? <p className="text-mist">{t("faq_none")}</p> : null}
+      {empty ? <p className="text-mist">{t("faq_none")}</p> : null}
+      {pathHit ? (
+        <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("process_title")}</h2>
+          <ol className="grid gap-4">
+            {steps.map(([title, body], index) => (
+              <li key={title} className="glass p-5">
+                <p className="ember text-sm">0{index + 1}</p>
+                <h3 className="display mt-1 text-3xl">{title}</h3>
+                <p className="mt-2 text-mist">{body}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+      {papersHit ? (
+        <section id="papers" className="scroll-mt-32 grid gap-3 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("papers_title")}</h2>
+          <p className="text-mist">{t("papers_intro")}</p>
+          <ul className="grid gap-3">
+            {papers.map((line) => (
+              <li key={line} className="border-t border-white/10 pt-3">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {groups.map((group) => (
         <section key={group.title} className="grid gap-5 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{group.title}</h2>

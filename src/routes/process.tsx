@@ -1,4 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ProcessPage } from "@/components/vg/pages";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/process")({ component: ProcessPage });
+export const Route = createFileRoute("/process")({
+  beforeLoad: () => {
+    throw redirect({ to: "/questions", hash: "path", replace: true });
+  },
+});

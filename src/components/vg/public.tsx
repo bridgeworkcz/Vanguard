@@ -1,7 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Shell, storyKey, useSite } from "./chrome";
-import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import { createApplication, joinWaitlist } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
@@ -211,7 +210,7 @@ export function SearchPage({
   speed: string;
 }) {
   const { t } = useI18n();
-  const { user } = useCurrentUserState();
+  const { signedIn } = useDesk();
   const { data } = useSite();
   const [waitNote, setWaitNote] = useState("");
   const [pick, setPick] = useState<string[]>([]);
@@ -288,7 +287,7 @@ export function SearchPage({
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
                   <div>
-                    {user ? (
+                    {signedIn ? (
                       <button
                         type="button"
                         className="btn"
@@ -346,7 +345,7 @@ export function VacancyPage({
 }) {
   const { t } = useI18n();
   const { data } = useSite();
-  const { user } = useCurrentUserState();
+  const { signedIn } = useDesk();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -359,7 +358,7 @@ export function VacancyPage({
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : "STANDARD";
   async function apply() {
     if (!job) return;
-    if (!user) {
+    if (!signedIn) {
       sessionStorage.setItem("vg-agent", agentCode.trim());
       sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() }));
       void navigate({ to: "/login" });
@@ -419,7 +418,7 @@ export function VacancyPage({
             }}
           />
         </label>
-        {!user ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
+        {!signedIn ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
         <button type="button" className="btn-solid mt-6" disabled={busy || !citizenship} onClick={() => void apply()}>
           {busy ? t("applying") : t("search_apply")}
         </button>

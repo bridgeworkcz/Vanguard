@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
-import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import {
   adminAllTeam,
   adminAudit,
@@ -36,7 +36,6 @@ import { CITIZENSHIPS, PROCESS_STAGES, type Processing, type Vacancy, type VisaP
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { downloadStamped } from "@/lib/vanguard/pdf";
-import { Shell, storyKey, useSite } from "./chrome";
 import { Pager } from "./pages";
 
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
@@ -72,11 +71,12 @@ async function photoDataUrl(file: File) {
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const { t, lang } = useI18n();
-  const { user, isPending } = useCurrentUserState();
+  const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data, reload } = useSite();
   const current = (TABS.includes(tab as Tab) ? tab : "overview") as Tab;
   const [role, setRole] = useState<string | null>(null);
+  const [me, setMe] = useState("");
   const [overview, setOverview] = useState<Awaited<ReturnType<typeof adminOverview>> | null>(null);
   const [apps, setApps] = useState<AppRow[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -107,17 +107,18 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   }
 
   useEffect(() => {
-    if (!user) return;
+    if (!signedIn) return;
     adminOverview()
       .then((o) => {
         setOverview(o);
         setRole(o.role);
+        setMe(o.userId);
       })
       .catch((e: unknown) => {
         setRole("CLIENT");
         setErr(e instanceof Error ? e.message : "Error");
       });
-  }, [user?.id]);
+  }, [deskId, signedIn]);
 
   useEffect(() => {
     if (role !== "ADMIN" && role !== "MANAGER") return;
@@ -142,14 +143,14 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     void adminAudit().then(setAudit).catch(() => undefined);
   }, [id, role]);
 
-  if (isPending) {
+  if (pending) {
     return (
       <Shell>
         <p className="px-4 py-16">{t("loading")}</p>
       </Shell>
     );
   }
-  if (!user) return <RedirectToSignIn />;
+  if (!signedIn) return <RedirectToSignIn />;
   if (role === "CLIENT") {
     return (
       <Shell>
@@ -348,7 +349,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             </form>
             {(() => {
               const filtered = apps
-                .filter((a) => role !== "MANAGER" || a.assignedManagerId === user?.id)
+                .filter((a) => role !== "MANAGER" || a.assignedManagerId === me)
                 .filter((a) => !qCountry || a.country === qCountry)
                 .filter((a) => !qStage || String(a.stage) === qStage)
                 .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))

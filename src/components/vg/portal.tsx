@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
-import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { Shell, useDesk, useSite } from "./chrome";
 import {
   cancelMyApplication,
   createApplication,
@@ -32,7 +32,6 @@ import {
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { canCancel } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
-import { Shell, useSite } from "./chrome";
 
 function remain(iso: string | null, now: number) {
   if (!iso) return "";
@@ -90,7 +89,7 @@ function soon(iso: string | null, now: number) {
 
 export function PortalPage({ id }: { id: string }) {
   const { t, lang } = useI18n();
-  const { user, isPending } = useCurrentUserState();
+  const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data: site } = useSite();
   const [rows, setRows] = useState<AppRow[] | null>(null);
@@ -133,7 +132,7 @@ export function PortalPage({ id }: { id: string }) {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!signedIn) return;
     getSessionProfile()
       .then((p) => {
         setContact({ email: p.email, phone: p.phone });
@@ -142,7 +141,7 @@ export function PortalPage({ id }: { id: string }) {
         return undefined;
       })
       .catch(() => undefined);
-  }, [user?.id]);
+  }, [deskId]);
 
   useEffect(() => {
     if (!book?.code) {
@@ -153,7 +152,7 @@ export function PortalPage({ id }: { id: string }) {
   }, [book?.code]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!signedIn) return;
     const raw = sessionStorage.getItem("vg-intent");
     if (!raw) {
       void refreshList().catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
@@ -164,15 +163,15 @@ export function PortalPage({ id }: { id: string }) {
     createApplication({ data: intent })
       .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
-  }, [user?.id]);
+  }, [deskId]);
 
   useEffect(() => {
-    if (!user || !id) {
+    if (!signedIn || !id) {
       setDetail(null);
       return;
     }
     void refreshDetail(id).catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
-  }, [user?.id, id]);
+  }, [deskId, id]);
 
   useEffect(() => {
     const current = detail?.app;
@@ -180,14 +179,14 @@ export function PortalPage({ id }: { id: string }) {
     localStorage.setItem(`vg-draft-${current.id}`, JSON.stringify(q));
   }, [q, detail]);
 
-  if (isPending) {
+  if (pending) {
     return (
       <Shell>
         <p className="px-4 py-16">{t("loading")}</p>
       </Shell>
     );
   }
-  if (!user) return <RedirectToSignIn />;
+  if (!signedIn) return <RedirectToSignIn />;
 
   const app = detail?.app;
   const visa = site?.products.find((p) => p.id === app?.visaProductId);
