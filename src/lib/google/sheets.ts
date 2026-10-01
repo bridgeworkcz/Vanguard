@@ -105,13 +105,27 @@ export async function findSheetRowById(name:string,id:string):Promise<SheetRow|n
 }
 
 export async function appendSheetRow(name:string,row:SheetRow):Promise<void>{
-  const schema=await ensureSchema(name);
-  if(row.id){
-    const existing=await readSheetRows(name);
-    if(existing.some(x=>x.id===row.id)) throw new Error(`Duplicate ID '${row.id}' in '${name}'.`);
+  await appendSheetRows(name, [row], true);
+}
+
+export async function appendSheetRows(name: string, rows: SheetRow[], checkDup = false): Promise<void> {
+  if (!rows.length) return;
+  const schema = await ensureSchema(name);
+  if (checkDup) {
+    const existing = await readSheetRows(name);
+    const ids = new Set(existing.map((row) => row.id));
+    for (const row of rows) {
+      if (row.id && ids.has(row.id)) throw new Error(`Duplicate ID '${row.id}' in '${name}'.`);
+    }
   }
-  const values=[schema.map(h=>row[h]??'')];
-  await sheetsFetch(`/values/${enc(name)}!A:${col(schema.length)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{method:'POST',body:JSON.stringify({majorDimension:'ROWS',values})});
+  const values = rows.map((row) => schema.map((header) => row[header] ?? ""));
+  for (let index = 0; index < values.length; index += 2000) {
+    const slice = values.slice(index, index + 400);
+    await sheetsFetch(`/values/${enc(name)}!A:${col(schema.length)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: "POST",
+      body: JSON.stringify({ majorDimension: "ROWS", values: slice }),
+    });
+  }
 }
 
 export async function updateSheetRowById(name:string,id:string,patch:SheetRow):Promise<void>{

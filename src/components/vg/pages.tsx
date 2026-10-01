@@ -162,12 +162,14 @@ export function FilingsPage() {
   function hint(row: (typeof rows)[number]) {
     if (row.status === "CANCELLED") return t("status_help_cancelled");
     if (row.status === "REJECTED") return t("status_help_rejected");
+    if (row.status === "ISSUED") return t("status_help_issued");
     const stage = row.stage >= 1 && row.stage <= 4 ? row.stage : 1;
     return t(`stage_help_${stage}` as "stage_help_1");
   }
   function status(row: (typeof rows)[number]) {
     if (row.status === "CANCELLED") return t("status_cancelled");
     if (row.status === "REJECTED") return t("status_rejected");
+    if (row.status === "ISSUED") return t("status_issued");
     return t(`stage_${row.stage}` as "stage_1");
   }
   return (

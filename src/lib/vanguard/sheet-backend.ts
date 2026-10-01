@@ -1,5 +1,5 @@
 import { getDossierCategoryFolder, downloadFileFromDrive, resolveVaultFolder, uploadFileToDrive } from "@/lib/google/drive";
-import { appendSheetRow, clearSheetBody, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import { appendSheetRow, appendSheetRows, clearSheetBody, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
@@ -18,6 +18,7 @@ import {
   type VisaProduct,
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
 import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, kyivMonth, monthCommission, trancheSplit } from "./ops";
@@ -39,6 +40,7 @@ type Extra = {
   paymentReminded: boolean;
   docReminded: boolean;
   referrerUserId: string;
+  history: boolean;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -209,7 +211,25 @@ function emptyExtra(): Extra {
     paymentReminded: false,
     docReminded: false,
     referrerUserId: "",
+    history: false,
   };
+}
+
+function isHistoryExtra(extra: Extra) {
+  return extra.history === true;
+}
+
+function isHistorySheetRow(row: SheetRow) {
+  if (row.id.startsWith("VG-H")) return true;
+  try {
+    return (JSON.parse(row.applicantData || "{}") as { history?: boolean }).history === true;
+  } catch {
+    return false;
+  }
+}
+
+function isHistoryApp(app: { id: string; extra: Extra }) {
+  return isHistoryExtra(app.extra) || app.id.startsWith("VG-H");
 }
 
 function extraOf(raw: string): Extra {
@@ -417,10 +437,14 @@ async function ensureSeed() {
   const { prepareGoogle } = await import("@/lib/google/prepare");
   await prepareGoogle();
   const map = await settingMap();
-  if (map.seed_version === "2") return;
+  if (map.seed_version === "2") {
+    await safeHistory();
+    return;
+  }
   const apps = await readSheetRows("Applications");
-  if (apps.length > 0) {
+  if (apps.some((row) => !isHistorySheetRow(row))) {
     await putSetting("seed_version", "2", "system");
+    await safeHistory();
     return;
   }
   const vacancies = await readSheetRows("Vacancies");
@@ -462,7 +486,49 @@ async function ensureSeed() {
     if (map[key] === undefined) await putSetting(key, value, "system");
   }
   await putSetting("seed_version", "2", "system");
+  await safeHistory();
   await housekeeping();
+}
+
+let historyTask: Promise<void> | null = null;
+
+async function safeHistory() {
+  try {
+    await ensureHistoryBoard();
+  } catch (err) {
+    console.error("[history]", err);
+  }
+}
+
+async function ensureHistoryBoard() {
+  if (historyTask) return historyTask;
+  historyTask = writeHistoryBoard().finally(() => {
+    historyTask = null;
+  });
+  return historyTask;
+}
+
+async function writeHistoryBoard() {
+  const map = await settingMap();
+  if (map.history_board === String(HISTORY_COUNT)) return;
+  const end = map.history_board_end || kyivDay();
+  if (!map.history_board_end) await putSetting("history_board_end", end, "system");
+  if (map.history_board === "writing") {
+    const started = Date.parse(map.history_board_at || "");
+    if (Number.isFinite(started) && Date.now() - started < 180_000) return;
+  }
+  await putSetting("history_board", "writing", "system");
+  await putSetting("history_board_at", nowIso(), "system");
+  try {
+    const existing = await readSheetRows("Applications");
+    const have = new Set(existing.map((row) => row.id));
+    const missing = buildHistoryBoard(end).filter((row) => !have.has(row.id));
+    if (missing.length) await appendSheetRows("Applications", missing);
+    await putSetting("history_board", String(HISTORY_COUNT), "system");
+  } catch (err) {
+    await putSetting("history_board", "pending", "system").catch(() => undefined);
+    throw err;
+  }
 }
 
 let housekeepingAt = 0;
@@ -502,7 +568,7 @@ async function writeBackup() {
 }
 
 async function writeDigest() {
-  const apps = await loadApps();
+  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   const open = apps.filter((app) => app.status === "OPEN");
   const late = open.filter((app) => isOverdue(app.cancelDeadlineAt) || isOverdue(app.docDeadlineAt));
   await notify(`Open files: ${open.length}\nOverdue: ${late.length}`);
@@ -510,7 +576,7 @@ async function writeDigest() {
 }
 
 async function remindDeadlines() {
-  const apps = await loadApps();
+  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   for (const app of apps) {
     if (app.status !== "OPEN") continue;
     let extra = app.extra;
@@ -532,7 +598,7 @@ async function remindDeadlines() {
 }
 
 async function expireUnpaid() {
-  const apps = await loadApps();
+  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   const docs = await readSheetRows("DossierDocuments");
   for (const app of apps) {
     if (app.status !== "OPEN" || app.stage !== 2 || !app.cancelDeadlineAt) continue;
@@ -627,6 +693,7 @@ export async function publicSite() {
 }
 
 export async function listPublicFilings() {
+  await ensureSeed();
   const apps = await loadApps();
   return apps
     .map((app) => ({
@@ -837,7 +904,7 @@ export async function downloadDoc(userId: string, id: string) {
 
 export async function adminOverview(userId: string) {
   const person = await requireStaff(userId);
-  const apps = await loadApps();
+  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   const docs = await readSheetRows("DossierDocuments");
   const users = (await readSheetRows("Users")).map((row) => ({
     userId: row.id,
@@ -859,6 +926,7 @@ export async function adminOverview(userId: string) {
 export async function adminList(userId: string, includeIncomplete: boolean) {
   await requireStaff(userId);
   return (await loadApps())
+    .filter((app) => !isHistoryApp(app))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map(present)
     .filter((app) => includeIncomplete || app.profileComplete || app.stage > 1);
@@ -867,14 +935,14 @@ export async function adminList(userId: string, includeIncomplete: boolean) {
 export async function adminGet(userId: string, id: string) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === id);
-  if (!app) throw new Error("Not found");
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
 }
 
 export async function adminSetStage(userId: string, data: { id: string; action: string; reason: string }) {
   const person = await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
-  if (!app) throw new Error("Not found");
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
   if (data.action === "accept") {
     if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
     await saveApp(app, { ...app.extra, stage2At: nowIso(), cancelDeadlineAt: plusDays(5) }, { stage: "2", paymentDeadlineAt: plusDays(5) });
@@ -922,7 +990,7 @@ export async function adminSetProcess(userId: string, data: { id: string; proces
   await requireStaff(userId);
   if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
   const app = (await loadApps()).find((item) => item.id === data.id);
-  if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
+  if (!app || isHistoryApp(app) || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
   await saveApp(app, app.extra, { processStage: data.processStage });
   if (data.processStage === "EMPLOYER_APPROVED_FOR_MINISTRY" || PROCESS_STAGES.indexOf(data.processStage as ProcessStage) >= PROCESS_STAGES.indexOf("EMPLOYER_APPROVED_FOR_MINISTRY")) {
     await markTrancheDue(app.id, "T2");
@@ -933,7 +1001,7 @@ export async function adminSetProcess(userId: string, data: { id: string; proces
 export async function adminSaveDispatch(userId: string, data: { id: string; note: string }) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
-  if (!app) throw new Error("Not found");
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
   await saveApp(app, { ...app.extra, dispatchNote: data.note });
   await audit(userId, "DISPATCH", data.id, "");
 }
@@ -941,7 +1009,7 @@ export async function adminSaveDispatch(userId: string, data: { id: string; note
 export async function adminUploadFinal(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.applicationId);
-  if (!app || app.processStage !== "FINAL_LEGAL_SERVICE" || app.stage < 3) throw new Error("Locked");
+  if (!app || isHistoryApp(app) || app.processStage !== "FINAL_LEGAL_SERVICE" || app.stage < 3) throw new Error("Locked");
   return storeFile(app.id, userId, "FINAL", data.fileName, data.mime, data.data, "APPROVED");
 }
 
@@ -1150,7 +1218,7 @@ export async function adminSetRole(userId: string, data: { userId: string; role:
 export async function adminSetReferrer(userId: string, data: { id: string; referrerUserId: string }) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
-  if (!app) throw new Error("Not found");
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
   const referrerUserId = data.referrerUserId ? await resolveReferrer(data.referrerUserId) : "";
   if (data.referrerUserId && !referrerUserId) throw new Error("Role");
   await saveApp(app, { ...app.extra, referrerUserId });
@@ -1247,7 +1315,7 @@ export async function assignManagers(userId: string, data: { ids: string[]; mana
   await requireStaff(userId);
   for (const id of data.ids) {
     const app = (await loadApps()).find((item) => item.id === id);
-    if (!app) continue;
+    if (!app || isHistoryApp(app)) continue;
     await updateSheetRowById("Applications", id, { ...app.row, assignedManagerId: data.managerId, updatedAt: nowIso() });
   }
   await audit(userId, "ASSIGN", data.managerId, data.ids.join(","));
@@ -1256,7 +1324,7 @@ export async function assignManagers(userId: string, data: { ids: string[]; mana
 
 export async function exportOpenCases(userId: string) {
   await requireStaff(userId);
-  const apps = (await loadApps()).filter((app) => app.status === "OPEN");
+  const apps = (await loadApps()).filter((app) => app.status === "OPEN" && !isHistoryApp(app));
   await clearSheetBody("OpenCases");
   const stamp = nowIso();
   for (const app of apps) {

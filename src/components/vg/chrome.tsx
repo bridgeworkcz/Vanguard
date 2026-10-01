@@ -175,7 +175,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             <p className="latin text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
             <p className={`mt-2 max-w-md text-sm ${tone === "light" ? "text-ink/60" : "text-mist"}`}>{t("footer_note")}</p>
           </div>
-          <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© {new Date().getFullYear()} Vanguard Global Mobility s.r.o.</p>
+          <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© 2024 Vanguard Global Mobility s.r.o.</p>
         </div>
       </footer>
       {site?.settings.support_phone ? (
