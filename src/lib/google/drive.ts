@@ -285,3 +285,16 @@ export async function getDossierCategoryFolder(dossierId: string, categoryFolder
 }
 
 export async function downloadFileFromDrive(fileId:string):Promise<{buffer:Buffer;mimeType:string;name:string}>{const id=fileId.trim();if(!id)throw new Error('Invalid Drive file ID.');const meta=await driveApiFetch<{name?:string,mimeType?:string}>(`/files/${encodeURIComponent(id)}?fields=name,mimeType`);const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Google Drive Download Error (${r.status})`);return{buffer:Buffer.from(await r.arrayBuffer()),mimeType:meta.mimeType||'application/octet-stream',name:meta.name||'download'}}
+
+export const VAULT_FOLDERS = ["Dossiers", "Backups", "Gallery", "Team", "Invoices", "Contracts"] as const;
+
+/** Create the vault folders under the configured root. Existing folders are left as they are. */
+export async function ensureVaultFolders(): Promise<string[]> {
+  const root = getCredentials().rootFolderId;
+  const ready: string[] = [];
+  for (const name of VAULT_FOLDERS) {
+    await findOrCreateFolder(root, name);
+    ready.push(name);
+  }
+  return ready;
+}

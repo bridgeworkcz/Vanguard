@@ -270,6 +270,8 @@ async function audit(actor: string, action: string, target: string, details: str
 }
 
 async function ensureSeed() {
+  const { prepareGoogle } = await import("@/lib/google/prepare");
+  await prepareGoogle();
   const map = await settingMap();
   if (map.seed_version === "2") return;
   const apps = await readSheetRows("Applications");

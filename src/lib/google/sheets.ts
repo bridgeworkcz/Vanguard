@@ -80,7 +80,10 @@ async function ensureSchema(name:string):Promise<string[]> {
     await sheetsFetch(`/values/${enc(name)}!A1:${col(schema.length)}1?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!A1:${col(schema.length)}1`,majorDimension:'ROWS',values:[schema]})});
     return [...schema];
   }
-  if(current.length>schema.length || current.some((v,i)=>v!==schema[i])) throw new Error(`Sheet schema mismatch for '${name}'. Expected columns in canonical order.`);
+  const prefix=current.slice(0, schema.length);
+  if(prefix.some((v,i)=>v!==schema[i])) {
+    throw new Error(`Sheet schema mismatch for '${name}'. Found [${current.join(', ')}]. Expected [${schema.join(', ')}]. Existing rows were not changed.`);
+  }
   if(current.length<schema.length){
     const missing=schema.slice(current.length);
     await sheetsFetch(`/values/${enc(name)}!${col(current.length+1)}1:${col(schema.length)}1?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!${col(current.length+1)}1:${col(schema.length)}1`,majorDimension:'ROWS',values:[missing]})});
@@ -119,4 +122,30 @@ export async function updateSheetRowById(name:string,id:string,patch:SheetRow):P
   const current=values[rowNumber-1]||[];
   const merged=schema.map((h,i)=>patch[h]!==undefined?String(patch[h]):String(current[i]??''));
   await sheetsFetch(`/values/${enc(name)}!A${rowNumber}:${col(schema.length)}${rowNumber}?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!A${rowNumber}:${col(schema.length)}${rowNumber}`,majorDimension:'ROWS',values:[merged]})});
+}
+
+export type SheetPrep = { name: string; action: "created" | "extended" | "ready" | "conflict"; detail?: string };
+
+/** Create every canonical tab and add any missing columns. Never rewrites existing cells. */
+export async function ensureAllSheets(): Promise<SheetPrep[]> {
+  const meta = await metadata();
+  const titles = new Set<string>((meta.sheets || []).map((sheet: { properties?: { title?: string } }) => String(sheet.properties?.title || "")));
+  const report: SheetPrep[] = [];
+  for (const name of Object.keys(SHEET_SCHEMAS)) {
+    const schema = SHEET_SCHEMAS[name];
+    try {
+      let before: string[] = [];
+      if (titles.has(name)) {
+        const header = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!1:1`);
+        before = (header.values?.[0] || []).map(String);
+      }
+      await ensureSchema(name);
+      if (!titles.has(name)) report.push({ name, action: "created" });
+      else if (before.length < schema.length) report.push({ name, action: "extended" });
+      else report.push({ name, action: "ready" });
+    } catch (err) {
+      report.push({ name, action: "conflict", detail: err instanceof Error ? err.message : "Schema conflict" });
+    }
+  }
+  return report;
 }

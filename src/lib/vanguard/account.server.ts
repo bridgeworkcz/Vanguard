@@ -94,6 +94,8 @@ export const accountAuth = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     if (!sheetsConfigured()) return { mode: "local" as const };
+    const { prepareGoogle } = await import("@/lib/google/prepare");
+    await prepareGoogle();
     if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
     const { appendSheetRow, readSheetRows, updateSheetRowById } = await import("@/lib/google/sheets");
     const { createSessionToken, hashPassword, verifyPassword } = await import("@/lib/google/session");

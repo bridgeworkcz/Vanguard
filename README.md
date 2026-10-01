@@ -10,4 +10,4 @@ SESSION_SECRET
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
 
-Registration writes a row on the Users tab and sends a Telegram message. The password is stored as a hash in `passwordHash`, the same way the previous server did. Documents go to the Drive folder.
+On the first request the server creates any missing tabs and these Drive folders: Dossiers, Backups, Gallery, Team, Invoices, Contracts. Existing rows and files are not rewritten. A tab whose header is in a different order is left as it is and reported in the Vercel log.
