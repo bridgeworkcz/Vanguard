@@ -3,7 +3,9 @@ import { readSheetRows, appendSheetRow, updateSheetRowById } from '../server/uti
 import { hashPassword, verifyPassword, createSessionToken, verifySessionToken } from '../server/utils/auth.js';
 import { mapRowToUser, mapRowToUserRecord, mapUserToRow } from '../server/utils/mappers.js';
 import { sendSafeTelegramAlert } from '../server/utils/telegram.js';
-import type { User, UserRecord } from '../src/types.js';
+import type { Role, User, UserRecord } from '../src/types.js';
+
+const OWNER_EMAIL = 'admin@gmail.com';
 
 function normalizeEmail(value: unknown): string { return String(value ?? '').trim().toLowerCase(); }
 function normalizePhone(value: unknown): string {
@@ -11,6 +13,12 @@ function normalizePhone(value: unknown): string {
   if (!raw) return '';
   const plus = raw.startsWith('+') ? '+' : '';
   return plus + raw.replace(/\D/g, '');
+}
+
+function withOwnerRole(record: UserRecord): UserRecord {
+  if (normalizeEmail(record.email) !== OWNER_EMAIL) return record;
+  const roles = Array.from(new Set([...(record.roles || []), 'ADMIN', 'MANAGER'])) as Role[];
+  return { ...record, roles };
 }
 
 function publicUser(record: UserRecord): User {
@@ -28,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rows = await readSheetRows('Users');
       const record = rows.find(row => row.id === payload.userId);
       if (!record) return res.status(401).json({ error: 'Unauthorized: User no longer exists' });
-      const userRecord = mapRowToUserRecord(record);
+      const userRecord = withOwnerRole(mapRowToUserRecord(record));
       if (!userRecord.isActive) return res.status(403).json({ error: 'Account is inactive' });
       return res.status(200).json({ user: publicUser(userRecord) });
     }
@@ -58,24 +66,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const userId = `USR-${cryptoRandomId()}`;
       const now = new Date().toISOString();
-      const userRecord: UserRecord = {
+      const userRecord = withOwnerRole({
         id: userId,
         email: normalizedEmail,
         phone: normalizedPhone,
         fullName: cleanName,
-        roles: ['CLIENT'],
+        roles: normalizedEmail === OWNER_EMAIL ? ['ADMIN', 'MANAGER'] : ['CLIENT'],
         passwordHash: hashPassword(String(password)),
         createdAt: now,
         lastLoginAt: now,
         isActive: true,
-      };
+      });
 
       await appendSheetRow('Users', mapUserToRow(userRecord));
       const user = publicUser(userRecord);
       const token = createSessionToken({ userId: user.id, email: user.email, roles: user.roles });
 
       try {
-        await sendSafeTelegramAlert(`🆕 <b>Нова реєстрація клієнта</b>\n\n👤 Ім'я: ${user.fullName}\n📧 Email: ${user.email}\n📞 Тел: ${user.phone}`);
+        await sendSafeTelegramAlert(`New registration\n${user.fullName}\n${user.email}`);
       } catch (telegramError) {
         console.warn('Registration Telegram notification failed:', telegramError);
       }
@@ -90,12 +98,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const record = rows.find(row => normalizeEmail(row.email) === normalizedEmail || normalizePhone(row.phone) === normalizedPhone);
       if (!record) return res.status(401).json({ error: 'Invalid email/phone or password' });
 
-      const userRecord = mapRowToUserRecord(record);
+      const userRecord = withOwnerRole(mapRowToUserRecord(record));
       if (!userRecord.isActive) return res.status(403).json({ error: 'Account is inactive' });
       if (!verifyPassword(String(password), userRecord.passwordHash)) return res.status(401).json({ error: 'Invalid email/phone or password' });
 
       const lastLoginAt = new Date().toISOString();
-      await updateSheetRowById('Users', userRecord.id, { lastLoginAt });
+      await updateSheetRowById('Users', userRecord.id, mapUserToRow({ ...userRecord, lastLoginAt }));
       const user = { ...publicUser(userRecord), lastLoginAt };
       const token = createSessionToken({ userId: user.id, email: user.email, roles: user.roles });
       return res.status(200).json({ token, user });
