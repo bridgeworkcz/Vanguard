@@ -30,7 +30,7 @@ export const Navbar: React.FC<{
     <>
       <header className="top-nav glass">
         <div className="nav-inner">
-          <button className="hamburger" onClick={() => setOpen(true)}>
+          <button className="hamburger" onClick={() => setOpen(true)} aria-label="Menu">
             <Menu />
           </button>
 
@@ -44,11 +44,7 @@ export const Navbar: React.FC<{
 
           <nav className="desktop-nav">
             {links.map(([id, n, I]) => (
-              <button
-                key={id}
-                className={route === id ? 'active' : ''}
-                onClick={() => go(id)}
-              >
+              <button key={id} className={route === id ? 'active' : ''} onClick={() => go(id)}>
                 <I size={15} />
                 {n}
               </button>
@@ -58,7 +54,7 @@ export const Navbar: React.FC<{
           <div className="nav-right">
             <label className="lang-btn">
               <Globe2 size={14} />
-              <select value={lang} onChange={e => setLang(e.target.value as Lang)}>
+              <select value={lang} onChange={e => setLang(e.target.value as Lang)} aria-label="Language">
                 <option value="EN">EN</option>
                 <option value="CZ">CZ</option>
                 <option value="UR">UR</option>
@@ -66,13 +62,9 @@ export const Navbar: React.FC<{
             </label>
 
             {user ? (
-              <button className="secondary-btn compact" onClick={logout}>
-                {t('signOut')}
-              </button>
+              <button className="nav-auth" onClick={logout}>{t('signOut')}</button>
             ) : (
-              <button className="primary-btn compact" onClick={() => setAuth(true)}>
-                {t('signIn')} / {t('register')}
-              </button>
+              <button className="nav-auth" onClick={() => setAuth(true)}>{t('signIn')}</button>
             )}
           </div>
         </div>
@@ -84,37 +76,17 @@ export const Navbar: React.FC<{
             <div className="drawer-head">
               <button className="brand" onClick={() => go('home')}>
                 <span className="brand-mark">V</span>
-                <span>
-                  <b>VANGUARD</b>
-                  <small>GLOBAL MOBILITY</small>
-                </span>
+                <span><b>VANGUARD</b><small>GLOBAL MOBILITY</small></span>
               </button>
-              <button className="icon-btn" onClick={() => setOpen(false)}>
-                <X />
-              </button>
+              <button className="icon-btn" onClick={() => setOpen(false)} aria-label="Close"><X /></button>
             </div>
-
             <nav className="drawer-nav">
               {links.map(([id, n, I]) => (
-                <button key={id} onClick={() => go(id)}>
-                  <I size={16} />
-                  {n}
-                </button>
+                <button key={id} onClick={() => go(id)}><I size={16} />{n}</button>
               ))}
             </nav>
-
             <div className="drawer-bottom">
-              {!user && (
-                <button
-                  className="primary-btn"
-                  onClick={() => {
-                    setAuth(true);
-                    setOpen(false);
-                  }}
-                >
-                  {t('signIn')}
-                </button>
-              )}
+              {!user && <button className="nav-auth" onClick={() => { setAuth(true); setOpen(false); }}>{t('signIn')}</button>}
             </div>
           </aside>
         </div>
