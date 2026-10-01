@@ -1,3 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Vanguard Global Mobility">
+  <rect width="32" height="32" rx="8" fill="#070809"/>
+  <path fill="#f4f5f7" d="M6.2 6.2 16 27.2 25.8 6.2 21.2 6.2 16 17.6 10.8 6.2z"/>
 </svg>
