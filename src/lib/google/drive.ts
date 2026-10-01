@@ -146,6 +146,22 @@ async function driveApiFetch<T = unknown>(endpoint: string, options: RequestInit
   return response.json() as Promise<T>;
 }
 
+async function findFolder(parentFolderId: string, folderName: string): Promise<string | null> {
+  const cleanParentId = parentFolderId ? parentFolderId.trim() : "";
+  const cleanName = folderName ? folderName.trim() : "";
+  if (!cleanParentId || !cleanName) return null;
+  const sanitizedQueryName = cleanName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const query = `'${cleanParentId}' in parents and name = '${sanitizedQueryName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const searchResult = await driveApiFetch<{ files?: { id: string; name: string }[] }>(
+    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+  );
+  const files = searchResult.files || [];
+  if (files.length > 1) {
+    throw new Error(`Data Integrity Error: Multiple folders with name '${cleanName}' found inside parent folder.`);
+  }
+  return files[0]?.id ?? null;
+}
+
 export async function findOrCreateFolder(parentFolderId: string, folderName: string): Promise<string> {
   const cleanParentId = parentFolderId ? parentFolderId.trim() : '';
   const cleanName = folderName ? folderName.trim() : '';
@@ -154,28 +170,8 @@ export async function findOrCreateFolder(parentFolderId: string, folderName: str
     throw new Error('Google Drive Error: Invalid parentFolderId or folderName.');
   }
 
-  const sanitizedQueryName = cleanName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  const query = `'${cleanParentId}' in parents and name = '${sanitizedQueryName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-
-  interface SearchResponse {
-    files?: { id: string; name: string }[];
-  }
-
-  const searchResult = await driveApiFetch<SearchResponse>(
-    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)`
-  );
-
-  const files = searchResult.files || [];
-
-  if (files.length === 1) {
-    return files[0].id;
-  }
-
-  if (files.length > 1) {
-    throw new Error(
-      `Data Integrity Error: Multiple folders with name '${cleanName}' found inside parent folder.`
-    );
-  }
+  const existing = await findFolder(cleanParentId, cleanName);
+  if (existing) return existing;
 
   const token = await getAccessToken();
   const createResponse = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
@@ -268,6 +264,25 @@ export async function deleteFileFromDrive(fileId: string): Promise<void> {
   });
 }
 
+const FOLDER_ALIASES: Record<string, string[]> = {
+  Dossiers: ["02_DOSSIERS", "Dossiers"],
+  Backups: ["99_ARCHIVE", "Backups"],
+  Gallery: ["08_WEBSITE", "Gallery"],
+  Team: ["07_TEAM", "Team"],
+  Invoices: ["05_GENERATED_DOCUMENTS", "Invoices"],
+  Contracts: ["10_TEMPLATES", "Contracts"],
+};
+
+/** Use a folder the practice already named, otherwise create the plain English one. */
+export async function resolveVaultFolder(parentFolderId: string, logicalName: string): Promise<string> {
+  const aliases = FOLDER_ALIASES[logicalName] ?? [logicalName];
+  for (const name of aliases) {
+    const id = await findFolder(parentFolderId, name);
+    if (id) return id;
+  }
+  return findOrCreateFolder(parentFolderId, logicalName);
+}
+
 export async function getDossierCategoryFolder(dossierId: string, categoryFolder: string): Promise<string> {
   const cleanDossierId = dossierId ? dossierId.trim() : '';
   const cleanCategory = categoryFolder ? categoryFolder.trim() : '';
@@ -277,11 +292,13 @@ export async function getDossierCategoryFolder(dossierId: string, categoryFolder
   }
 
   const creds = getCredentials();
-  const dossiersFolderId = await findOrCreateFolder(creds.rootFolderId, 'Dossiers');
+  if (cleanDossierId === "team" || cleanDossierId === "gallery") {
+    const library = await resolveVaultFolder(creds.rootFolderId, cleanDossierId === "team" ? "Team" : "Gallery");
+    return findOrCreateFolder(library, cleanCategory);
+  }
+  const dossiersFolderId = await resolveVaultFolder(creds.rootFolderId, "Dossiers");
   const dossierFolderId = await findOrCreateFolder(dossiersFolderId, cleanDossierId);
-  const categoryFolderId = await findOrCreateFolder(dossierFolderId, cleanCategory);
-
-  return categoryFolderId;
+  return findOrCreateFolder(dossierFolderId, cleanCategory);
 }
 
 export async function downloadFileFromDrive(fileId:string):Promise<{buffer:Buffer;mimeType:string;name:string}>{const id=fileId.trim();if(!id)throw new Error('Invalid Drive file ID.');const meta=await driveApiFetch<{name?:string,mimeType?:string}>(`/files/${encodeURIComponent(id)}?fields=name,mimeType`);const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Google Drive Download Error (${r.status})`);return{buffer:Buffer.from(await r.arrayBuffer()),mimeType:meta.mimeType||'application/octet-stream',name:meta.name||'download'}}
@@ -293,7 +310,7 @@ export async function ensureVaultFolders(): Promise<string[]> {
   const root = getCredentials().rootFolderId;
   const ready: string[] = [];
   for (const name of VAULT_FOLDERS) {
-    await findOrCreateFolder(root, name);
+    await resolveVaultFolder(root, name);
     ready.push(name);
   }
   return ready;

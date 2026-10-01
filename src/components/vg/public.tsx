@@ -41,12 +41,12 @@ export function HomePage() {
       /* ignore a broken local note */
     }
   }, []);
-  const products = data?.products.filter((p) => p.active && p.country === country) ?? [];
+  const catalog = data ? data.products : VISA_PRODUCTS;
+  const products = catalog.filter((p) => p.active && p.country === country);
   const product = products.find((p) => p.id === productId);
   const countries = useMemo(() => {
-    const source = data ? data.products : VISA_PRODUCTS;
-    return Array.from(new Set(source.filter((p) => p.active && p.country).map((p) => p.country))).sort((a, b) => a.localeCompare(b));
-  }, [data]);
+    return Array.from(new Set(catalog.filter((p) => p.active && p.country).map((p) => p.country))).sort((a, b) => a.localeCompare(b));
+  }, [catalog]);
   const settings = data?.settings ?? {};
   const title = settings[storyKey(lang, "hero_title")] || settings.hero_title_en;
   const body = settings[storyKey(lang, "hero_body")] || settings.hero_body_en;

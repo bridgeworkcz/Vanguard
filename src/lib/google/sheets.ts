@@ -76,20 +76,21 @@ async function ensureSchema(name:string):Promise<string[]> {
   if(!schema) throw new Error(`Unknown sheet schema: ${name}`);
   await ensureSheet(name);
   const result=await sheetsFetch<{values?:string[][]}>(`/values/${enc(name)}!1:1`);
-  const current=(result.values?.[0]||[]).map(String);
+  let current=(result.values?.[0]||[]).map(String);
+  while(current.length && current[current.length-1]==='') current=current.slice(0,-1);
   if(current.length===0){
     await sheetsFetch(`/values/${enc(name)}!A1:${col(schema.length)}1?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!A1:${col(schema.length)}1`,majorDimension:'ROWS',values:[schema]})});
     return [...schema];
   }
-  const prefix=current.slice(0, schema.length);
-  if(prefix.some((v,i)=>v!==schema[i])) {
-    throw new Error(`Sheet schema mismatch for '${name}'. Found [${current.join(', ')}]. Expected [${schema.join(', ')}]. Existing rows were not changed.`);
+  const have=new Set(current);
+  const missing=schema.filter(h=>!have.has(h));
+  if(missing.length){
+    const start=current.length+1;
+    const end=current.length+missing.length;
+    await sheetsFetch(`/values/${enc(name)}!${col(start)}1:${col(end)}1?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!${col(start)}1:${col(end)}1`,majorDimension:'ROWS',values:[missing]})});
+    current=[...current,...missing];
   }
-  if(current.length<schema.length){
-    const missing=schema.slice(current.length);
-    await sheetsFetch(`/values/${enc(name)}!${col(current.length+1)}1:${col(schema.length)}1?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!${col(current.length+1)}1:${col(schema.length)}1`,majorDimension:'ROWS',values:[missing]})});
-  }
-  return [...schema];
+  return current;
 }
 
 export async function readSheetRows(name:string):Promise<SheetRow[]> {
@@ -115,9 +116,10 @@ export async function appendSheetRow(name:string,row:SheetRow):Promise<void>{
 
 export async function updateSheetRowById(name:string,id:string,patch:SheetRow):Promise<void>{
   const schema=await ensureSchema(name);
+  const idIndex=Math.max(0, schema.indexOf('id'));
   const result=await sheetsFetch<{values?:string[][]}>(`/values/${enc(name)}!A:${col(schema.length)}`);
   const values=result.values||[];
-  const idx=values.slice(1).findIndex(r=>String(r[0]??'')===id);
+  const idx=values.slice(1).findIndex(r=>String(r[idIndex]??'')===id);
   if(idx<0) throw new Error(`Row '${id}' not found in '${name}'.`);
   const rowNumber=idx+2;
   const current=values[rowNumber-1]||[];
@@ -138,16 +140,16 @@ export async function ensureAllSheets(): Promise<SheetPrep[]> {
   const titles = new Set<string>((meta.sheets || []).map((sheet: { properties?: { title?: string } }) => String(sheet.properties?.title || "")));
   const report: SheetPrep[] = [];
   for (const name of Object.keys(SHEET_SCHEMAS)) {
-    const schema = SHEET_SCHEMAS[name];
     try {
       let before: string[] = [];
       if (titles.has(name)) {
         const header = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!1:1`);
         before = (header.values?.[0] || []).map(String);
       }
-      await ensureSchema(name);
+      const beforeSet = new Set(before);
+      const after = await ensureSchema(name);
       if (!titles.has(name)) report.push({ name, action: "created" });
-      else if (before.length < schema.length) report.push({ name, action: "extended" });
+      else if (after.some((header) => header && !beforeSet.has(header))) report.push({ name, action: "extended" });
       else report.push({ name, action: "ready" });
     } catch (err) {
       report.push({ name, action: "conflict", detail: err instanceof Error ? err.message : "Schema conflict" });

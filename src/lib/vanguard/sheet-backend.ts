@@ -1,4 +1,4 @@
-import { getDossierCategoryFolder, downloadFileFromDrive, findOrCreateFolder, uploadFileToDrive } from "@/lib/google/drive";
+import { getDossierCategoryFolder, downloadFileFromDrive, resolveVaultFolder, uploadFileToDrive } from "@/lib/google/drive";
 import { appendSheetRow, clearSheetBody, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
@@ -485,7 +485,7 @@ async function writeBackup() {
   const root = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID?.trim();
   let driveFileId = "";
   if (root) {
-    const folder = await findOrCreateFolder(root, "Backups");
+    const folder = await resolveVaultFolder(root, "Backups");
     const fileName = `snapshot-${nowIso().slice(0, 10)}.txt`;
     const uploaded = await uploadFileToDrive(folder, fileName, "text/plain", Buffer.from(lines.join("\n"), "utf8"));
     driveFileId = uploaded.fileId;
