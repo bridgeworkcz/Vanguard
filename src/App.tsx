@@ -6,6 +6,7 @@ import { LanguageProvider, useLanguage } from './i18n/LanguageContext';
 import { ClientPortal } from './components/ClientPortal';
 import { AdminConsole } from './components/AdminConsole';
 import { ServicePicker } from './components/ServicePicker';
+import { ApplicationControls } from './components/ApplicationControls';
 import { contentApi } from './services/api';
 import { ArrowRight, ShieldCheck, LockKeyhole, Globe2, Eye, LayoutDashboard } from 'lucide-react';
 
@@ -96,7 +97,8 @@ const MainRouter: React.FC = () => {
             <button className="logout-btn" onClick={logout}>Sign out</button>
           </div>
         </div>
-        <AdminConsole limited={!isAdmin} />
+        <div className="admin-main"><ApplicationControls staff onChange={() => setPortalKey(k => k + 1)} /></div>
+        <AdminConsole key={portalKey} limited={!isAdmin} />
       </div>
     );
   }
@@ -132,7 +134,10 @@ const MainRouter: React.FC = () => {
         <main>
           {publicRoute === 'vacancies' ? <VacanciesPage onApply={() => navigatePublic('home')} /> : (
             <>
-              <section className="page-wrap" style={{ paddingBottom: 0 }}><ServicePicker onCreated={() => setPortalKey(k => k + 1)} /></section>
+              <section className="page-wrap" style={{ paddingBottom: 0 }}>
+                <ServicePicker onCreated={() => setPortalKey(k => k + 1)} />
+                <ApplicationControls onChange={() => setPortalKey(k => k + 1)} />
+              </section>
               <ClientPortal key={portalKey} />
             </>
           )}
