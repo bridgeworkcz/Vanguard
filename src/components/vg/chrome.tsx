@@ -7,16 +7,17 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
 import { useI18n, type Lang } from "@/lib/vanguard/i18n";
 
-export function Mark({ className = "size-8" }: { className?: string }) {
+export function Mark({ className = "size-9" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect x="1.25" y="1.25" width="29.5" height="29.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <path fill="currentColor" d="M6.2 8.6h2.2v14.8H6.2z" />
-      <path
-        fill="currentColor"
-        d="M11 8.6 17.4 16 11 23.4v-3.1L14.6 16 11 11.7zm8.2 0L25.6 16l-6.4 7.4v-3.1L22.8 16l-3.6-4.3z"
-      />
-    </svg>
+    <span
+      className={`grid place-items-center rounded-xl bg-gradient-to-br from-white to-[#8f8f8f] text-[#070809] ${className}`}
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 32 32" className="size-[68%]">
+        <path fill="currentColor" d="M4.5 7.2h3.1v17.6H4.5z" />
+        <path fill="currentColor" d="M11 7.2 19.2 16 11 24.8v-3.7L15.6 16 11 10.9zm9 0L29.2 16 20 24.8v-3.7L24.6 16 20 10.9z" />
+      </svg>
+    </span>
   );
 }
 
@@ -60,16 +61,14 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
     </Link>
   );
   return (
-    <div className={tone === "light" ? "paper min-h-screen" : "min-h-screen bg-ink text-paper"}>
-      <header
-        className={`sticky top-0 z-30 border-b backdrop-blur-md ${tone === "light" ? "border-ink/10 bg-paper/85" : "border-white/10 bg-ink/75"}`}
-      >
+    <div className={`relative z-[1] ${tone === "light" ? "paper min-h-screen" : "min-h-screen text-paper"}`}>
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-[rgba(8,9,10,0.72)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-          <Link to="/" className="inline-flex min-h-11 items-center gap-2">
-            <Mark className="size-7" />
+          <Link to="/" className="inline-flex min-h-11 items-center gap-2.5">
+            <Mark className="size-9" />
             <span className="leading-tight">
-              <span className="block text-sm tracking-[0.18em]">{t("brand")}</span>
-              <span className={`block text-xs ${tone === "light" ? "text-ink/50" : "text-mist"}`}>{t("brand_sub")}</span>
+              <span className="wordmark block">{t("brand")}</span>
+              <span className="mt-0.5 block text-[8px] tracking-[0.18em] text-[#858585] uppercase">{t("brand_sub")}</span>
             </span>
           </Link>
           <nav className="flex flex-wrap items-center gap-x-4">
@@ -85,13 +84,13 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 key={code}
                 type="button"
                 onClick={() => setLang(code)}
-                className={`min-h-8 px-1.5 text-[10px] tracking-widest ${lang === code ? "text-metal" : tone === "light" ? "text-ink/45" : "text-mist"}`}
+                className={`min-h-8 rounded-[10px] border border-white/15 px-2 text-[11px] tracking-[0.12em] ${lang === code ? "bg-white/10 text-white" : "text-[#aaa]"}`}
               >
                 {code.toUpperCase()}
               </button>
             ))}
             {!isPending && !user ? (
-              <Link to="/login" className="btn inline-flex items-center text-sm">
+              <Link to="/login" className="sign-pill">
                 {t("nav_sign_in")}
               </Link>
             ) : null}
@@ -120,7 +119,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
       <footer className={`border-t px-4 py-8 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="display text-2xl">Vanguard</p>
+            <p className="text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
             <p className={`mt-2 max-w-md text-sm ${tone === "light" ? "text-ink/60" : "text-mist"}`}>{t("footer_note")}</p>
           </div>
           <p className={`text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© {new Date().getFullYear()} Vanguard Global Mobility s.r.o.</p>
