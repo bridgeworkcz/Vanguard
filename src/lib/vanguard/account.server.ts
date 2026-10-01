@@ -89,7 +89,7 @@ export async function runAccountAuth(data: AccountInput) {
 
   if (data.action === "register") {
     const email = emailOf(data.email);
-    const phone = phoneOf(data.phone);
+    const phone = phoneOf(data.phone ?? "");
     if (!email.includes("@")) throw new Error("A valid email is required.");
     if (!data.fullName) throw new Error("Full name is required.");
     if (phone.replace(/\D/g, "").length < 7) throw new Error("A valid phone number is required.");
