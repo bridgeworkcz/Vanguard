@@ -77,7 +77,7 @@ export function HomePage() {
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-12 lg:py-14">
           <div className="lg:col-span-6">
             <p className="kicker ember">{t("hero_kicker")}</p>
-            <h1 className="display mt-4 max-w-xl text-5xl sm:text-6xl">{title}</h1>
+            <h1 className="display mt-4 max-w-xl text-4xl sm:text-6xl">{title}</h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">{body}</p>
           </div>
           <form

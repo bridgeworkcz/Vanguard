@@ -9,7 +9,7 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-14">
         <p className="kicker ember">{kicker}</p>
-        <h1 className="display mt-3 text-5xl">{title}</h1>
+        <h1 className="display mt-3 text-4xl sm:text-5xl">{title}</h1>
         <div className="mt-8 grid gap-6 text-base leading-relaxed">{children}</div>
       </article>
     </Shell>
@@ -163,7 +163,7 @@ export function FilingsPage() {
     <Shell>
       <div className="mx-auto max-w-5xl px-4 py-14">
         <p className="kicker ember">{t("filings_kicker")}</p>
-        <h1 className="display mt-3 text-5xl">{t("filings_title")}</h1>
+        <h1 className="display mt-3 text-4xl sm:text-5xl">{t("filings_title")}</h1>
         <p className="mt-3 max-w-2xl text-mist">{t("filings_hint")}</p>
         <input
           className="field mt-6 max-w-sm"
@@ -175,8 +175,8 @@ export function FilingsPage() {
           }}
         />
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
-        <div className="mt-6 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
+        <div className="sheet-wrap mt-6">
+          <table className="sheet w-full min-w-[640px] text-left text-sm">
             <thead className="text-mist">
               <tr>
                 <th className="py-2 font-medium">{t("filings_id")}</th>
@@ -189,11 +189,11 @@ export function FilingsPage() {
             <tbody>
               {slice.map((row) => (
                 <tr key={row.id} className="border-t border-white/10">
-                  <td className="py-3">{row.id}</td>
-                  <td>{row.citizenship || "—"}</td>
-                  <td>{row.country || "—"}</td>
-                  <td>{row.createdAt?.slice(0, 10) || "—"}</td>
-                  <td className="ember">{status(row)}</td>
+                  <td className="latin py-3" data-label={t("filings_id")}>{row.id}</td>
+                  <td data-label={t("filings_from")}>{row.citizenship || "—"}</td>
+                  <td data-label={t("filings_to")}>{row.country || "—"}</td>
+                  <td className="latin" data-label={t("filings_date")}>{row.createdAt?.slice(0, 10) || "—"}</td>
+                  <td className="ember" data-label={t("filings_status")}>{status(row)}</td>
                 </tr>
               ))}
             </tbody>

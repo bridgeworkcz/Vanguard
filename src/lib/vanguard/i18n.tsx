@@ -1260,7 +1260,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
+    document.documentElement.dir = "ltr";
+    document.documentElement.classList.toggle("lang-ur", lang === "ur");
   }, [lang]);
   const value = useMemo(() => {
     const dict = DICTS[lang];

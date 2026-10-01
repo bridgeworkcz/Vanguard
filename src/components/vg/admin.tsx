@@ -359,8 +359,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
               return (
                 <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[880px] text-left text-sm">
+                  <div className="sheet-wrap">
+                    <table className="sheet w-full min-w-[880px] text-left text-sm">
                       <thead className="text-mist">
                         <tr>
                           <th className="py-2" />
@@ -377,33 +377,33 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       <tbody>
                         {slice.map((a) => (
                           <tr key={a.id} className="border-t border-white/10">
-                            <td className="py-3">
+                            <td className="py-3" data-label="">
                               <input
                                 type="checkbox"
                                 checked={picked.includes(a.id)}
                                 onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, a.id] : cur.filter((id) => id !== a.id)))}
                               />
                             </td>
-                            <td>
+                            <td className="latin" data-label={t("filings_id")}>
                               <button type="button" className="underline-offset-4 hover:underline" onClick={() => go("applications", a.id)}>
                                 {a.id}
                               </button>
                             </td>
-                            <td>{a.createdAt?.slice(0, 10)}</td>
-                            <td>{a.clientEmail || "—"}</td>
-                            <td>{a.country}</td>
-                            <td>
+                            <td className="latin" data-label={t("filings_date")}>{a.createdAt?.slice(0, 10)}</td>
+                            <td className="latin" data-label={t("name")}>{a.clientEmail || "—"}</td>
+                            <td data-label={t("admin_country")}>{a.country}</td>
+                            <td data-label={t("seat")}>
                               {a.vacancyTitle}
                               {a.employer ? <span className="block text-mist">{a.employer}</span> : null}
                             </td>
-                            <td className="ember">
+                            <td className="ember" data-label={t("admin_stage")}>
                               {a.stage}
                               {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) ? <span className="mt-1 block text-xs">{t("admin_overdue")}</span> : null}
                               {!a.assignedManagerId ? <span className="mt-1 block text-xs text-mist">{t("admin_unassigned")}</span> : null}
                               {a.stage >= 3 && a.status === "OPEN" ? <span className="mt-1 block text-xs text-mist">{t("admin_waiting_doc")}</span> : null}
                             </td>
-                            <td>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
-                            <td>{a.assignedManagerId || "—"}</td>
+                            <td className="latin" data-label={t("portal_paid")}>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
+                            <td className="latin" data-label={t("admin_assign")}>{a.assignedManagerId || "—"}</td>
                           </tr>
                         ))}
                       </tbody>

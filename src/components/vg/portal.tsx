@@ -289,8 +289,8 @@ export function PortalPage({ id }: { id: string }) {
             </div>
             <p className="text-sm text-mist">{t("desk_code_help")}</p>
             {book.cases.length === 0 ? <p className="text-mist">{t("desk_empty")}</p> : null}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
+            <div className="sheet-wrap">
+              <table className="sheet w-full min-w-[640px] text-left text-sm">
                 <thead className="text-mist">
                   <tr>
                     <th className="py-2 font-medium">{t("filings_id")}</th>
@@ -304,12 +304,12 @@ export function PortalPage({ id }: { id: string }) {
                 <tbody>
                   {book.cases.map((row) => (
                     <tr key={row.id} className="border-t border-white/10">
-                      <td className="py-3">{row.id}</td>
-                      <td>{row.name}</td>
-                      <td>{row.citizenship || "—"}</td>
-                      <td>{row.country}</td>
-                      <td>{row.createdAt?.slice(0, 10)}</td>
-                      <td className="ember">{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
+                      <td className="latin py-3" data-label={t("filings_id")}>{row.id}</td>
+                      <td data-label={t("name")}>{row.name}</td>
+                      <td data-label={t("filings_from")}>{row.citizenship || "—"}</td>
+                      <td data-label={t("filings_to")}>{row.country}</td>
+                      <td className="latin" data-label={t("filings_date")}>{row.createdAt?.slice(0, 10)}</td>
+                      <td className="ember" data-label={t("filings_status")}>{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
                     </tr>
                   ))}
                 </tbody>

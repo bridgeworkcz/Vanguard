@@ -31,6 +31,7 @@
     text-rendering: optimizeLegibility;
     font-synthesis: none;
     min-height: 100vh;
+    overflow-x: clip;
   }
   body::before,
   body::after {
@@ -55,9 +56,63 @@
     top: 220px;
     background: radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent 70%);
   }
-  html[dir="rtl"] body {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5.5rem;
+  }
+  html.lang-ur {
+    direction: ltr;
+  }
+  html.lang-ur :where(
+    h1, h2, h3, h4, h5, h6,
+    p, li, dd, dt, figcaption, legend, label, caption, th, td,
+    .display, .kicker
+  ) {
+    direction: rtl;
+    text-align: right;
     font-family: "Noto Nastaliq Urdu", var(--font-sans);
-    line-height: 1.9;
+  }
+  html.lang-ur :where(button, .btn, .btn-solid, .btn-ink):not(.lang-code) {
+    font-family: "Noto Nastaliq Urdu", var(--font-sans);
+    letter-spacing: 0;
+  }
+  html.lang-ur :where(input, textarea, select) {
+    direction: rtl;
+    text-align: right;
+    font-family: "Noto Nastaliq Urdu", var(--font-sans);
+  }
+  html.lang-ur .latin,
+  html.lang-ur .latin * {
+    direction: ltr;
+    unicode-bidi: isolate;
+    text-align: left;
+    font-family: var(--font-sans);
+  }
+  html.lang-ur .glass label,
+  html.lang-ur label {
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1.7;
+  }
+  html.lang-ur .kicker {
+    letter-spacing: 0;
+    line-height: 1.8;
+  }
+  html.lang-ur h1.display {
+    font-size: clamp(1.85rem, 7vw, 2.8rem);
+    line-height: 1.65;
+  }
+  html.lang-ur h2.display {
+    font-size: clamp(1.4rem, 4.5vw, 2rem);
+    line-height: 1.6;
+  }
+  html.lang-ur h3.display {
+    line-height: 1.55;
+  }
+  html.lang-ur header nav a {
+    direction: rtl;
+    font-family: "Noto Nastaliq Urdu", var(--font-sans);
+    letter-spacing: 0;
   }
   :focus-visible {
     outline: 2px solid var(--color-metal);
@@ -79,11 +134,7 @@
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 0.98;
-}
-html[dir="rtl"] .display {
-  font-family: "Noto Nastaliq Urdu", serif;
-  letter-spacing: 0;
-  line-height: 1.45;
+  text-wrap: balance;
 }
 .kicker {
   font-size: 11px;
@@ -93,9 +144,6 @@ html[dir="rtl"] .display {
 }
 .ember {
   color: #ff6a1a;
-}
-html[dir="rtl"] .kicker {
-  letter-spacing: 0.04em;
 }
 .glass {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04));
@@ -221,8 +269,8 @@ textarea.field-light {
 }
 .banner b {
   display: block;
-  max-width: 18rem;
-  font-size: 1.45rem;
+  max-width: 22rem;
+  font-size: clamp(1.2rem, 3.4vw, 1.45rem);
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1.12;
@@ -244,4 +292,134 @@ textarea.field-light {
 .banner-blue {
   background: #2f4bff;
   color: #f4f5f7;
+}
+
+.nav-scroll {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.sheet-wrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+a,
+button,
+.btn,
+.btn-solid,
+.btn-ink,
+.sign-pill,
+.field,
+.glass {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+@media (hover: hover) {
+  .btn:hover,
+  .btn-ink:hover,
+  .sign-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .btn-solid:hover {
+    transform: translateY(-1px);
+  }
+  .glass:hover {
+    border-color: rgba(255, 255, 255, 0.34);
+  }
+}
+.vg-page {
+  animation: vg-in 320ms ease;
+}
+@keyframes vg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .sheet-wrap {
+    overflow: visible;
+  }
+  table.sheet {
+    display: block;
+    min-width: 0 !important;
+  }
+  table.sheet thead {
+    display: none;
+  }
+  table.sheet tbody,
+  table.sheet tr,
+  table.sheet td {
+    display: block;
+    width: 100%;
+  }
+  table.sheet tr {
+    padding: 0.85rem 0 0.35rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  table.sheet td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.28rem 0;
+    text-align: end;
+  }
+  table.sheet td::before {
+    content: attr(data-label);
+    color: #a7a7a7;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: start;
+    flex: 0 0 42%;
+  }
+  table.sheet td:not([data-label])::before,
+  table.sheet td[data-label=""]::before {
+    content: none;
+  }
+  html.lang-ur table.sheet td::before {
+    letter-spacing: 0;
+    text-transform: none;
+    font-family: "Noto Nastaliq Urdu", var(--font-sans);
+    direction: rtl;
+  }
+}
+
+html.lang-ur h1.display {
+  font-size: clamp(1.85rem, 7vw, 2.8rem) !important;
+  line-height: 1.65;
+}
+html.lang-ur h2.display {
+  font-size: clamp(1.4rem, 4.5vw, 2rem) !important;
+  line-height: 1.6;
+}
+html.lang-ur .banner {
+  min-height: 14.5rem;
+}
+html.lang-ur .banner b {
+  direction: rtl;
+  text-align: right;
+  font-size: 1.2rem;
+  line-height: 2.05;
+  letter-spacing: 0;
+  max-width: 20rem;
+}
+html.lang-ur header nav a {
+  line-height: 2;
 }
