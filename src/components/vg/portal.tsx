@@ -231,7 +231,7 @@ export function PortalPage({ id }: { id: string }) {
                 <Link to="/portal" search={{ id: row.id }} className="glass grid gap-2 p-4 sm:grid-cols-4">
                   <span className="display text-2xl sm:col-span-2">{row.vacancyTitle || row.country}</span>
                   <span className="text-sm text-mist">{row.country}</span>
-                  <span className="text-sm text-metal">{statusLabel(row, t)}</span>
+                  <span className="text-sm ember">{statusLabel(row, t)}</span>
                 </Link>
               </li>
             ))}
@@ -248,11 +248,11 @@ export function PortalPage({ id }: { id: string }) {
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
-              <p className="mt-4 text-metal">{statusLabel(app, t)}</p>
+              <p className="mt-4 ember">{statusLabel(app, t)}</p>
               <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => (
-                  <li key={label} className={app.stage >= index + 1 ? "border-t-2 border-paper pt-2 text-sm" : "border-t border-white/20 pt-2 text-sm text-mist"}>
-                    <span className="text-metal">0{index + 1}</span>
+                  <li key={label} className={app.stage >= index + 1 ? "border-t-2 border-[#ff6a1a] pt-2 text-sm" : "border-t border-white/20 pt-2 text-sm text-mist"}>
+                    <span className={app.stage >= index + 1 ? "ember" : "text-mist"}>0{index + 1}</span>
                     <span className="mt-1 block">{label}</span>
                   </li>
                 ))}
@@ -280,7 +280,7 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "OPEN" && app.stage === 1 && !app.profileComplete ? (
               <form
-                className="grid gap-3"
+                className="glass grid gap-3 p-5 sm:p-7"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void saveQ();

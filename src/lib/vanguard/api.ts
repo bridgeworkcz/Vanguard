@@ -77,6 +77,18 @@ async function ensureSeed(sql: Sql) {
   await sql`insert into settings (key, value) values ('seed_version', '2') on conflict (key) do update set value = '2'`;
 }
 
+async function ensurePartnerCatalog(sql: Sql) {
+  const flag = await sql<{ value: string }>`select value from settings where key = 'partners_catalog'`;
+  if (flag[0]?.value === "3") return;
+  const existing = await sql<{ country: string; name: string }>`select country, name from partners`;
+  const have = new Set(existing.map((row) => `${row.country}|${row.name}`.toLowerCase()));
+  for (const row of partnerRows()) {
+    if (have.has(`${row.country}|${row.name}`.toLowerCase())) continue;
+    await sql`insert into partners (id, country, name, sort_order, active) values (${row.id}, ${row.country}, ${row.name}, ${row.sort}, true) on conflict (id) do nothing`;
+  }
+  await sql`insert into settings (key, value) values ('partners_catalog', '3') on conflict (key) do update set value = '3'`;
+}
+
 async function expireUnpaid(sql: Sql) {
   const late = await sql<{ id: string; vacancyId: string }>`select id, vacancy_id as "vacancyId" from applications
     where status = 'OPEN' and stage = 2 and cancel_deadline_at is not null and cancel_deadline_at < now()
@@ -254,6 +266,7 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     }
   const sql = await getSql();
   await ensureSeed(sql);
+  await ensurePartnerCatalog(sql);
   await expireUnpaid(sql);
   const settingsRows = await sql<{ key: string; value: string }>`select key, value from settings`;
   const products = await loadProducts(sql);

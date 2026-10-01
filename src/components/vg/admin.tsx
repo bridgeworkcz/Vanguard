@@ -163,7 +163,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     <Shell>
       <div className="mx-auto flex max-w-6xl gap-6 px-4 py-10">
         <aside className="hidden w-44 shrink-0 md:block">
-          <p className="kicker">{t("admin_kicker")}</p>
+          <p className="kicker ember">{t("admin_kicker")}</p>
           <nav className="mt-4 grid gap-1">
             {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
               <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
@@ -173,7 +173,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           </nav>
         </aside>
         <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap gap-2 md:hidden">
+        <p className="kicker ember md:hidden">{t("admin_kicker")}</p>
+        <div className="mt-4 flex flex-wrap gap-2 md:hidden">
           {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
             <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
               {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
@@ -190,7 +191,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               [overview.live, t("admin_live")],
             ].map(([n, label]) => (
               <article key={String(label)} className="glass p-5">
-                <p className="display text-5xl">{n}</p>
+                <p className="display ember text-5xl">{n}</p>
                 <p className="mt-2 text-mist">{label}</p>
               </article>
             ))}
@@ -331,7 +332,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <span>{a.country}</span>
                     <span>{a.vacancyTitle}</span>
                     <span className="text-metal">
-                      {a.status} · {a.stage}
+                      {a.status} · <span className="ember">{a.stage}</span>
                       {a.assignedManagerId ? "" : ` · ${t("admin_unassigned")}`}
                       {!a.profileComplete && a.stage === 1 ? ` · ${t("admin_incomplete")}` : ""}
                     </span>

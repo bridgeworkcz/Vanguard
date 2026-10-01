@@ -535,8 +535,19 @@ function present(app: ReturnType<typeof appFrom>) {
   return rest;
 }
 
+async function ensurePartnerCatalog() {
+  const map = await settingMap();
+  if (map.partners_catalog === "3") return;
+  const stored = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
+  const have = new Set(stored.map((row) => `${row.country}|${row.name}`.toLowerCase()));
+  const missing = partnerRows().filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()));
+  if (missing.length) await putSetting("partners", JSON.stringify([...stored, ...missing]), "system");
+  await putSetting("partners_catalog", "3", "system");
+}
+
 export async function publicSite() {
   await ensureSeed();
+  await ensurePartnerCatalog();
   await housekeeping();
   await expireUnpaid();
   const settings = await settingMap();

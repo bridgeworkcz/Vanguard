@@ -303,14 +303,30 @@ export const TEAM = [
   { id: "TM-4", name: "Daniel Okonkwo", position: "Employer relations", phone: "+420 770 347 163", sort: 4 },
 ];
 
+/** Smaller sites that hire the people this practice files for. Partners only — not extra vacancies. */
+const SMALL_HIRERS: Record<string, string[]> = {
+  Slovakia: ["Hydina Senec", "Mäso Topoľčany", "Farma Galanta", "Hotel Tatranská", "Sklad Malacky", "Upratovanie Bratislava", "Stavba Žilina", "Ovocie Dunajská Streda"],
+  "Czech Republic": ["Drůbež Klatovy", "Maso Polička", "Farma Znojmo", "Hotel Karlín night", "Sklad Modletice", "Úklid Praha", "Stavmont Kladno", "Sad Mělník"],
+  Germany: ["Geflügel Vechta", "Fleischwerk Cloppenburg", "Spargel Beelitz", "Hotel Frankfurt night", "Lager Bönen", "Gebäudereinigung Köln", "Rohbau Duisburg", "Gurken Spreewald"],
+  Portugal: ["Aves Santarém", "Peixe Peniche", "Estufa Odemira", "Hotel Algarve rooms", "Armazém Azambuja", "Limpeza Lisboa", "Obra Setúbal", "Fruta Montijo"],
+  Bulgaria: ["Pile Stara Zagora", "Meso Lovech", "Zelenchuk Plovdiv", "Hotel Sunny Beach", "Sklad Bozhurishte", "Pochistvane Sofia", "Stroy Burgas", "Ovoshtarstvo Petrich"],
+  Italy: ["Pollame Forlì", "Salumi Langhirano", "Pomodoro Foggia", "Hotel Rimini rooms", "Magazzino Piacenza", "Pulizie Milano", "Cantiere Brescia", "Agrumi Rosarno"],
+  Norway: ["Slakteri Rogaland", "Fisk Måløy", "Bær Lier", "Hotell Oslo night", "Lager Vestby", "Renhold Bergen", "Bygg Drammen", "Grønt Lier"],
+  Serbia: ["Piletina Smederevo", "Meso Čačak", "Voće Subotica", "Hotel Novi Sad", "Magacin Šimanovci", "Čišćenje Beograd", "Gradnja Niš", "Staklenik Leskovac"],
+  Canada: ["Poultry Abbotsford", "Meat Brooks", "Greenhouse Leamington", "Hotel Banff rooms", "Warehouse Mississauga", "Cleaning Brampton", "Framing Woodbridge", "Berry Fraser Valley"],
+  Hungary: ["Baromfi Orosháza", "Hús Gyula", "Üvegház Szentes", "Hotel Hévíz", "Raktár Gyál", "Takarítás Budapest", "Építés Kecskemét", "Gyümölcs Szabolcs"],
+  Poland: ["Drób Mława", "Mięso Łuków", "Szklarnia Kraśnik", "Hotel Kraków night", "Magazyn Błonie", "Sprzątanie Warszawa", "Budowa Wrocław", "Owoce Grójec"],
+  "New Zealand": ["Poultry Waikato", "Meat Hastings", "Kiwifruit Te Puke", "Hotel Queenstown rooms", "Warehouse Penrose", "Cleaning Auckland", "Framing Christchurch", "Dairy Southland shed"],
+  Belarus: ["Ptitsefabrika Baranovichi", "Myaso Slonim", "Teplitsa Brest", "Hotel Minsk night", "Sklad Fanipol", "Uborka Minsk", "Stroyka Gomel", "Sadov Grodno"],
+};
+
 export function partnerRows(): { id: string; country: string; name: string; sort: number }[] {
   const rows: { id: string; country: string; name: string; sort: number }[] = [];
-  let i = 1;
   for (const [country, names] of Object.entries(EMPLOYERS)) {
-    const take = names.length >= 12 ? 3 : 2;
-    names.slice(0, take).forEach((name, idx) => {
-      rows.push({ id: `PT-${String(i).padStart(3, "0")}`, country, name, sort: idx + 1 });
-      i += 1;
+    const all = [...names, ...(SMALL_HIRERS[country] ?? [])];
+    all.forEach((name, idx) => {
+      const slug = `${country}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 28);
+      rows.push({ id: `PT-${slug}`, country, name, sort: idx + 1 });
     });
   }
   return rows;
