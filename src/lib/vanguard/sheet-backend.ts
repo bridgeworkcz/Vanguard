@@ -145,9 +145,39 @@ async function loadVacancies() {
   return (await readSheetRows("Vacancies")).map(vacancyFrom);
 }
 
+function productOf(raw: Partial<VisaProduct> | null | undefined): VisaProduct | null {
+  if (!raw || typeof raw !== "object") return null;
+  const known = VISA_PRODUCTS.find((item) => item.id === raw.id);
+  const id = String(raw.id || "").trim();
+  const country = String(raw.country || known?.country || "").trim();
+  if (!id || !country) return null;
+  const flag = raw.active as boolean | string | undefined;
+  const active =
+    flag === undefined || flag === null
+      ? (known?.active ?? true)
+      : flag === true || flag === "true" || flag === "TRUE" || flag === "1";
+  const lanes = (Array.isArray(raw.allowedProcessing) ? raw.allowedProcessing : known?.allowedProcessing ?? ["STANDARD"]).filter(
+    (item): item is Processing => item === "STANDARD" || item === "PRIORITY" || item === "EXPRESS",
+  );
+  return {
+    id,
+    country,
+    name: raw.name || known?.name || "Work permit",
+    duration: raw.duration || known?.duration || "",
+    description: raw.description || known?.description || "",
+    basePrice: Number(raw.basePrice) || known?.basePrice || 0,
+    currency: "EUR",
+    productionMinWeeks: Number(raw.productionMinWeeks) || known?.productionMinWeeks || 1,
+    productionMaxWeeks: Number(raw.productionMaxWeeks) || known?.productionMaxWeeks || 1,
+    allowedProcessing: lanes.length ? lanes : ["STANDARD"],
+    active,
+  };
+}
+
 async function loadProducts(): Promise<VisaProduct[]> {
-  const stored = await readJson<VisaProduct[]>("visa_products", []);
-  const base = stored.length ? stored : VISA_PRODUCTS;
+  const stored = await readJson<Partial<VisaProduct>[]>("visa_products", []);
+  const parsed = Array.isArray(stored) ? stored.map((item) => productOf(item)).filter((item): item is VisaProduct => item !== null) : [];
+  const base = parsed.length ? parsed : VISA_PRODUCTS;
   const pricing = await readSheetRows("Pricing");
   return base.map((product) => {
     const row = pricing.find((item) => item.id === product.id || item.name === product.id);
@@ -258,7 +288,6 @@ async function docsFor(applicationId: string) {
       status: row.status || "UPLOADED",
       createdAt: row.uploadedAt,
       rejectionReason: row.rejectionReason || "",
-      driveFileId: row.driveFileId,
     }));
 }
 
@@ -810,14 +839,14 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
       if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF") await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED" });
     }
     const due = (await readSheetRows("PaymentTransactions")).find((row) => row.dossierId === app.id && row.status === "DUE");
-    const proof = docs.find((doc) => doc.category === "PAYMENT_PROOF");
+    const proof = rawDocs.find((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF");
     if (due) {
       await updateSheetRowById("PaymentTransactions", due.id, {
         ...due,
         status: "VERIFIED",
         verifiedAt: nowIso(),
         verifiedBy: person.userId,
-        proofFileId: proof && "driveFileId" in proof ? String(proof.driveFileId) : "",
+        proofFileId: proof?.driveFileId || "",
         proofFileName: proof?.fileName || "",
       });
     }

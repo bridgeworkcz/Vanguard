@@ -10,6 +10,7 @@ import {
   sameCountry,
   type Processing,
 } from "@/lib/vanguard/domain";
+import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n } from "@/lib/vanguard/i18n";
 
@@ -42,7 +43,10 @@ export function HomePage() {
   }, []);
   const products = data?.products.filter((p) => p.active && p.country === country) ?? [];
   const product = products.find((p) => p.id === productId);
-  const countries = useMemo(() => Array.from(new Set(data?.products.filter((p) => p.active).map((p) => p.country) ?? [])), [data]);
+  const countries = useMemo(() => {
+    const source = data ? data.products : VISA_PRODUCTS;
+    return Array.from(new Set(source.filter((p) => p.active && p.country).map((p) => p.country))).sort((a, b) => a.localeCompare(b));
+  }, [data]);
   const settings = data?.settings ?? {};
   const title = settings[storyKey(lang, "hero_title")] || settings.hero_title_en;
   const body = settings[storyKey(lang, "hero_body")] || settings.hero_body_en;
@@ -85,10 +89,10 @@ export function HomePage() {
           >
             <p className="kicker">{t("calc_kicker")}</p>
             <h2 className="display mt-3 text-3xl">{t("calc_title")}</h2>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_citizenship")}
-                <select className="field" value={citizenship} onChange={(e) => setCitizenship(e.target.value)}>
+                <select className="field min-w-0" value={citizenship} onChange={(e) => setCitizenship(e.target.value)}>
                   <option value="">{t("calc_pick")}</option>
                   {CITIZENSHIPS.map((c) => (
                     <option key={c}>{c}</option>
@@ -98,7 +102,7 @@ export function HomePage() {
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_country")}
                 <select
-                  className="field"
+                  className="field min-w-0"
                   value={country}
                   onChange={(e) => {
                     setCountry(e.target.value);
@@ -115,7 +119,7 @@ export function HomePage() {
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_visa")}
                 <select
-                  className="field"
+                  className="field min-w-0"
                   value={productId}
                   disabled={!country}
                   onChange={(e) => {
@@ -133,7 +137,7 @@ export function HomePage() {
               </label>
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_speed")}
-                <select className="field" value={speed} disabled={!product} onChange={(e) => setSpeed(e.target.value as Processing)}>
+                <select className="field min-w-0" value={speed} disabled={!product} onChange={(e) => setSpeed(e.target.value as Processing)}>
                   <option value="">{t("calc_pick")}</option>
                   {product?.allowedProcessing.map((p) => (
                     <option key={p} value={p}>
@@ -143,7 +147,7 @@ export function HomePage() {
                 </select>
               </label>
               {product && speed ? (
-                <p className="display ember text-5xl sm:col-span-2 xl:col-span-4">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
+                <p className="display ember text-5xl sm:col-span-2">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
               ) : null}
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}

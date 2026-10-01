@@ -18,7 +18,14 @@ export function prepareGoogle(): Promise<WorkspacePrep> {
 
 async function run(): Promise<WorkspacePrep> {
   const sheets = await ensureAllSheets();
-  const folders = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID?.trim() ? await ensureVaultFolders() : [];
+  let folders: string[] = [];
+  if (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID?.trim()) {
+    try {
+      folders = await ensureVaultFolders();
+    } catch (err) {
+      console.error("[google] vault folders were not created", err);
+    }
+  }
   const conflicts = sheets.filter((item) => item.action === "conflict");
   if (conflicts.length) console.warn("[google] tabs left unchanged because headers differ", conflicts);
   console.log("[google] workspace", {

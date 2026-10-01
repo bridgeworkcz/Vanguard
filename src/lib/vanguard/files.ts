@@ -10,6 +10,8 @@ export function storedDriveId(stored: string): string {
   if (stored.startsWith("file:")) return stored.slice(5);
   const fromQuery = stored.match(/[?&]id=([^&]+)/);
   if (fromQuery?.[1]) return decodeURIComponent(fromQuery[1]);
-  if (!stored.includes("/") && !stored.includes(" ")) return stored;
+  const fromPath = stored.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (fromPath?.[1]) return fromPath[1];
+  if (!stored.includes("/") && !stored.includes(" ") && !stored.includes("google")) return stored;
   return "";
 }
