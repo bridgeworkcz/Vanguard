@@ -199,7 +199,7 @@ export function PortalPage({ id }: { id: string }) {
   return (
     <Shell>
       <div className="mx-auto max-w-5xl px-4 py-12">
-        <p className="kicker">{t("portal_kicker")}</p>
+        <p className="kicker ember">{t("portal_kicker")}</p>
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
         {!id ? (

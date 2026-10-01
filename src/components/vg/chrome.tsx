@@ -68,7 +68,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             <Mark className="size-9" />
             <span className="leading-tight">
               <span className="wordmark block">{t("brand")}</span>
-              <span className="mt-0.5 block text-[8px] tracking-[0.18em] text-[#858585] uppercase">{t("brand_sub")}</span>
+              <span className="ember mt-0.5 block text-[8px] tracking-[0.18em] uppercase">{t("brand_sub")}</span>
             </span>
           </Link>
           <nav className="flex flex-wrap items-center gap-x-4">

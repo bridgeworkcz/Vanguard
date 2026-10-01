@@ -70,7 +70,7 @@ export function HomePage() {
   return (
     <Shell>
       <section>
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-12 lg:py-24">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-12 lg:py-14">
           <div className="lg:col-span-6">
             <p className="kicker ember">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-5xl sm:text-6xl">{title}</h1>
@@ -154,7 +154,7 @@ export function HomePage() {
           </form>
         </div>
       </section>
-      <section className="mx-auto grid max-w-6xl gap-3 px-4 md:grid-cols-3">
+      <section className="banner-row">
         <article className="banner banner-orange">
           <span>01</span>
           <b>{t("banner_fee")}</b>
@@ -169,7 +169,7 @@ export function HomePage() {
         </article>
       </section>
       <section className="mx-auto grid max-w-6xl gap-8 px-4 py-16 md:grid-cols-3">
-        <p className="kicker md:col-span-3">{t("steps_kicker")}</p>
+        <p className="kicker ember md:col-span-3">{t("steps_kicker")}</p>
         {[
           [t("step1_t"), t("step1_b")],
           [t("step2_t"), t("step2_b")],
@@ -249,7 +249,7 @@ export function SearchPage({
                     <h2 className="display text-3xl">{job.title}</h2>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
                   </div>
-                  <p className="text-sm">{job.salaryNet}</p>
+                  <p className="text-sm ember">{job.salaryNet}</p>
                   <p className="text-sm text-metal">
                     {job.quota} {t("search_quota")}
                   </p>
@@ -313,7 +313,7 @@ export function VacancyPage({
         <button type="button" className="text-sm text-mist" onClick={() => history.back()}>
           {t("search_back")}
         </button>
-        <p className="kicker mt-6">{job.country}</p>
+        <p className="kicker ember mt-6">{job.country}</p>
         <h1 className="display mt-3 text-5xl">{job.title}</h1>
         <p className="mt-3 text-lg text-metal">{job.employer}</p>
         <p className="mt-6 leading-relaxed text-paper/85">{job.description}</p>
@@ -328,7 +328,7 @@ export function VacancyPage({
           ].map(([k, v]) => (
             <div key={k} className="border-t border-white/15 pt-3">
               <dt className="text-xs uppercase tracking-widest text-mist">{k}</dt>
-              <dd className="mt-1">{v}</dd>
+              <dd className={`mt-1 ${k === t("fee") ? "ember" : ""}`}>{v}</dd>
             </div>
           ))}
         </dl>
@@ -355,11 +355,15 @@ export function AboutPage() {
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-16">
-        <p className="kicker">{t("nav_about")}</p>
+        <p className="kicker ember">{t("nav_about")}</p>
         <h1 className="display mt-4 text-5xl sm:text-6xl">{lead}</h1>
         <div className="mt-8 space-y-4 text-base leading-relaxed whitespace-pre-line">{story}</div>
       </article>
-      <section className="mx-auto max-w-6xl px-4 pb-16">
+      <section className="banner banner-orange">
+        <span>30 · 40 · 30</span>
+        <b>{t("banner_split")}</b>
+      </section>
+      <section className="mx-auto max-w-6xl px-4 py-16">
         <h2 className="display text-4xl">{t("about_office")}</h2>
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           {office.map((m) => (
@@ -451,7 +455,7 @@ export function ContactPage() {
     <Shell>
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2">
         <div>
-          <p className="kicker">{t("contact_kicker")}</p>
+          <p className="kicker ember">{t("contact_kicker")}</p>
           <h1 className="display mt-4 text-5xl">{t("contact_title")}</h1>
         </div>
         <dl className="grid gap-6 text-lg">
@@ -461,7 +465,7 @@ export function ContactPage() {
           </div>
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>
-            <dd className="mt-2">
+            <dd className="mt-2 ember">
               <a href={`tel:${s?.support_phone ?? ""}`}>{s?.support_phone}</a>
             </dd>
           </div>
@@ -473,6 +477,10 @@ export function ContactPage() {
           </div>
         </dl>
       </div>
+      <section className="banner banner-blue">
+        <span>03</span>
+        <b>{t("banner_ministry")}</b>
+      </section>
     </Shell>
   );
 }
