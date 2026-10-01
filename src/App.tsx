@@ -5,6 +5,7 @@ import { HomeCalculator, VacanciesPage, AboutPage } from './components/PublicPag
 import { LanguageProvider, useLanguage } from './i18n/LanguageContext';
 import { ClientPortal } from './components/ClientPortal';
 import { AdminConsole } from './components/AdminConsole';
+import { ServicePicker } from './components/ServicePicker';
 import { contentApi } from './services/api';
 import { ArrowRight, ShieldCheck, LockKeyhole, Globe2, Eye, LayoutDashboard } from 'lucide-react';
 
@@ -60,6 +61,7 @@ const MainRouter: React.FC = () => {
     return (['home', 'vacancies', 'about'] as string[]).includes(p) ? (p as AppRoute) : 'home';
   });
   const [previewPublicSite, setPreviewPublicSite] = useState(false);
+  const [portalKey, setPortalKey] = useState(0);
 
   useEffect(() => {
     const onPop = () => {
@@ -127,7 +129,14 @@ const MainRouter: React.FC = () => {
             <button className="nav-auth" onClick={logout}>Sign out</button>
           </div>
         </header>
-        <main>{publicRoute === 'vacancies' ? <VacanciesPage onApply={() => navigatePublic('home')} /> : <ClientPortal />}</main>
+        <main>
+          {publicRoute === 'vacancies' ? <VacanciesPage onApply={() => navigatePublic('home')} /> : (
+            <>
+              <section className="page-wrap" style={{ paddingBottom: 0 }}><ServicePicker onCreated={() => setPortalKey(k => k + 1)} /></section>
+              <ClientPortal key={portalKey} />
+            </>
+          )}
+        </main>
         <footer className="footer"><div><b>VANGUARD GLOBAL MOBILITY</b><span>Client portal</span></div><span>© 2026 Vanguard</span></footer>
       </div>
     );
