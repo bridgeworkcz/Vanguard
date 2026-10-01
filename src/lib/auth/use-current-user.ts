@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { authClient, authEnabled } from "./client";
+import { accountSession } from "@/lib/vanguard/account.server";
 
 /** Normalized user shape used across the app, auth on or off. */
 export type AppUser = {
@@ -55,9 +57,40 @@ export type CurrentUserState = {
  * call keeps a stable hook order across every render of a given component.
  */
 export function useCurrentUserState(): CurrentUserState {
-  if (!authEnabled) return { user: DEV_USER, isPending: false };
+  const [sheetUser, setSheetUser] = useState<AppUser | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    accountSession()
+      .then((user) => {
+        if (!live) return;
+        setSheetUser(
+          user
+            ? {
+                id: user.id,
+                displayName: user.fullName || null,
+                primaryEmail: user.email || null,
+                profileImageUrl: null,
+                isDevFallback: false,
+              }
+            : null,
+        );
+      })
+      .catch(() => {
+        if (live) setSheetUser(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!authEnabled) {
+    if (sheetUser) return { user: sheetUser, isPending: false };
+    if (sheetUser === undefined) return { user: null, isPending: true };
+    return { user: DEV_USER, isPending: false };
+  }
   // eslint-disable-next-line react-hooks/rules-of-hooks -- authEnabled is constant for the app's lifetime
   const { data, isPending } = authClient.useSession();
+  if (sheetUser) return { user: sheetUser, isPending: false };
+  if (sheetUser === undefined || isPending) return { user: null, isPending: true };
   const user = data?.user;
   return {
     user: user
@@ -69,7 +102,7 @@ export function useCurrentUserState(): CurrentUserState {
           isDevFallback: false,
         }
       : null,
-    isPending,
+    isPending: false,
   };
 }
 

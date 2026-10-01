@@ -1,11 +1,13 @@
-# Vanguard — preview branch
+# Vanguard Global Mobility
 
-This branch is the working site with the black-and-white glass look from earlier today.
-`main` is unchanged and still holds the Google Sheets / Drive server.
+When these Vercel environment variables are set, accounts, applications and files use Google. They are not stored in GitHub.
 
-In Vercel, deploy this branch (`preview`), not `main`.
-Build command: `npm run build`.
+GOOGLE_CLIENT_EMAIL
+GOOGLE_PRIVATE_KEY
+GOOGLE_SPREADSHEET_ID
+GOOGLE_DRIVE_ROOT_FOLDER_ID
+SESSION_SECRET
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
 
-Accounts and applications on this branch use the app database.
-Set `DATABASE_URL` on Vercel if the data must survive a restart.
-Google keys stay on `main` and are not in this branch.
+Registration writes a row on the Users tab and sends a Telegram message. The password is stored as a hash in `passwordHash`, the same way the previous server did. Documents go to the Drive folder.

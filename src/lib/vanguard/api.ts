@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
-import { authMiddleware } from "@/lib/auth/middleware";
+import { vgMiddleware as authMiddleware } from "./vg-middleware";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
@@ -237,6 +237,10 @@ function settingMap(rows: { key: string; value: string }[]): Record<string, stri
 }
 
 export const getPublicSite = createServerFn({ method: "GET" }).handler(async () => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.publicSite();
+    }
   const sql = await getSql();
   await ensureSeed(sql);
   await expireUnpaid(sql);
@@ -275,6 +279,10 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
 export const getSessionProfile = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.sessionProfile(context.userId);
+    }
     const sql = await getSql();
     return ctxProfile(sql, context.userId);
   });
@@ -282,6 +290,10 @@ export const getSessionProfile = createServerFn({ method: "GET" })
 export const listMyApplications = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.listMine(context.userId);
+    }
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const rows = await sql<AppRow>`select a.id, a.user_id as "userId", a.client_email as "clientEmail", a.vacancy_id as "vacancyId",
@@ -306,6 +318,10 @@ export const getMyApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.getMine(context.userId, id);
+    }
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
@@ -325,6 +341,10 @@ export const createApplication = createServerFn({ method: "POST" })
     processing: input?.processing,
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.createApp(context.userId, data);
+    }
     const sql = await getSql();
     const profile = await ctxProfile(sql, context.userId);
     if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") {
@@ -358,6 +378,10 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     questionnaire: input?.questionnaire,
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.saveQuestionnaire(context.userId, data);
+    }
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, data.id);
@@ -377,6 +401,10 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: UploadInput) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.uploadDoc(context.userId, data);
+    }
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, clean(data?.applicationId, 40));
@@ -401,6 +429,10 @@ export const postMessage = createServerFn({ method: "POST" })
     body: clean(input?.body, 2000),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.postMessage(context.userId, data); return;
+    }
     const sql = await getSql();
     const profile = await ctxProfile(sql, context.userId);
     if (!data.body) return;
@@ -415,6 +447,10 @@ export const downloadDocument = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.downloadDoc(context.userId, id);
+    }
     const sql = await getSql();
     const profile = await ctxProfile(sql, context.userId);
     const rows = await sql<{
@@ -436,6 +472,10 @@ export const downloadDocument = createServerFn({ method: "POST" })
 export const adminOverview = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminOverview(context.userId);
+    }
     const sql = await getSql();
     const profile = await requireStaff(sql, context.userId);
     const waiting = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN' and stage = 1 and profile_complete = true`;
@@ -458,6 +498,10 @@ export const adminListApplications = createServerFn({ method: "POST" })
     includeIncomplete: Boolean(input?.includeIncomplete),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminList(context.userId, data.includeIncomplete);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     const rows = await sql<AppRow>`select a.id, a.user_id as "userId", a.client_email as "clientEmail", a.vacancy_id as "vacancyId",
@@ -484,6 +528,10 @@ export const adminGetApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminGet(context.userId, id);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     const app = await loadApp(sql, id);
@@ -499,6 +547,10 @@ export const adminSetStage = createServerFn({ method: "POST" })
     reason: clean(input?.reason, 500),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminSetStage(context.userId, data);
+    }
     const sql = await getSql();
     const profile = await requireStaff(sql, context.userId);
     const app = await loadApp(sql, data.id);
@@ -536,6 +588,10 @@ export const adminSetProcess = createServerFn({ method: "POST" })
     processStage: clean(input?.processStage, 60),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminSetProcess(context.userId, data); return;
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
@@ -552,6 +608,10 @@ export const adminSaveDispatch = createServerFn({ method: "POST" })
     note: clean(input?.note, 2000),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminSaveDispatch(context.userId, data); return;
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     await sql`update applications set dispatch_note = ${data.note}, updated_at = now() where id = ${data.id}`;
@@ -562,6 +622,10 @@ export const adminUploadFinal = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: UploadInput) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminUploadFinal(context.userId, data);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     const app = await loadApp(sql, clean(data.applicationId, 40));
@@ -585,6 +649,10 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     processing: input?.processing,
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminCreateApplication(context.userId, data);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     if (!data.email.includes("@")) throw new Error("Email");
@@ -609,6 +677,10 @@ export const adminSaveVacancy = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: Vacancy) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminSaveVacancy(context.userId, data);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     const id = clean(data.id, 40) || newId("VAC");
@@ -634,6 +706,10 @@ export const adminDeleteVacancy = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeleteVacancy(context.userId, id); return;
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     await sql`update vacancies set active = false where id = ${id}`;
@@ -647,6 +723,10 @@ export const adminSaveTeam = createServerFn({ method: "POST" })
       input,
   )
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminSaveTeam(context.userId, data);
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const id = clean(data.id, 40) || newId("TM");
@@ -669,6 +749,10 @@ export const adminDeleteTeam = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeleteTeam(context.userId, id); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     await sql`delete from team_members where id = ${id}`;
@@ -679,6 +763,10 @@ export const adminSaveSettings = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: Record<string, string>) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminSaveSettings(context.userId, data); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const allowed = new Set(Object.keys(DEFAULT_SETTINGS));
@@ -694,6 +782,10 @@ export const adminSaveProduct = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: VisaProduct) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminSaveProduct(context.userId, data); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const lanes = (data.allowedProcessing ?? []).filter((p) => p === "STANDARD" || p === "PRIORITY" || p === "EXPRESS");
@@ -710,6 +802,10 @@ export const adminSaveMedia = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { id?: string; kind: string; title: string; caption: string; imageData: string }) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminSaveMedia(context.userId, data);
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const kind = data.kind === "license" ? "license" : "office";
@@ -725,6 +821,10 @@ export const adminDeleteMedia = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeleteMedia(context.userId, id); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     await sql`delete from media_items where id = ${id}`;
@@ -735,6 +835,10 @@ export const adminSavePartner = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { id?: string; country: string; name: string }) => input)
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminSavePartner(context.userId, data);
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const name = clean(data.name, 160);
@@ -752,6 +856,10 @@ export const adminDeletePartner = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeletePartner(context.userId, id); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     await sql`delete from partners where id = ${id}`;
@@ -764,6 +872,10 @@ export const adminSetRole = createServerFn({ method: "POST" })
     role: clean(input?.role, 20),
   }))
   .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminSetRole(context.userId, data); return;
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT") throw new Error("Role");
@@ -779,6 +891,10 @@ export const adminSetRole = createServerFn({ method: "POST" })
 export const adminAudit = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminAudit(context.userId);
+    }
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     return sql<{ id: string; actorId: string; action: string; target: string; details: string; createdAt: string }>`select id, actor_id as "actorId", action, target, details, created_at::text as "createdAt" from audit_log order by created_at desc limit 80`;
@@ -787,6 +903,10 @@ export const adminAudit = createServerFn({ method: "GET" })
 export const adminAllTeam = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminAllTeam(context.userId);
+    }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     return sql<{

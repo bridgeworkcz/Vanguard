@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
+import { accountAuth } from "@/lib/vanguard/account.server";
 import { useI18n } from "@/lib/vanguard/i18n";
 import { Shell } from "@/components/vg/chrome";
 
@@ -15,6 +16,7 @@ function LoginPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -27,12 +29,23 @@ function LoginPage() {
     }
     setBusy(true);
     try {
-      if (mode === "up") {
-        const res = await authClient.signUp.email({ email, password, name: name || email });
-        if (res.error) throw new Error(res.error.message || "Error");
-      } else {
-        const res = await authClient.signIn.email({ email, password });
-        if (res.error) throw new Error(res.error.message || "Error");
+      const account = await accountAuth({
+        data: {
+          action: mode === "up" ? "register" : "login",
+          email,
+          password,
+          fullName: name,
+          phone,
+        },
+      });
+      if (account.mode === "local") {
+        if (mode === "up") {
+          const res = await authClient.signUp.email({ email, password, name: name || email });
+          if (res.error) throw new Error(res.error.message || "Error");
+        } else {
+          const res = await authClient.signIn.email({ email, password });
+          if (res.error) throw new Error(res.error.message || "Error");
+        }
       }
       void navigate({ to: "/portal", search: { id: "" } });
     } catch (error) {
@@ -49,7 +62,10 @@ function LoginPage() {
           <h1 className="display mt-3 text-4xl">{t("login_title")}</h1>
           <form className="mt-6 grid gap-3" onSubmit={(e) => void submit(e)}>
             {mode === "up" ? (
-              <input className="field" placeholder={t("login_name")} value={name} onChange={(e) => setName(e.target.value)} />
+              <>
+                <input className="field" placeholder={t("login_name")} value={name} onChange={(e) => setName(e.target.value)} />
+                <input className="field" placeholder={t("contact_phone")} value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </>
             ) : null}
             <input className="field" type="email" required placeholder={t("login_email")} value={email} onChange={(e) => setEmail(e.target.value)} />
             <input className="field" type="password" required placeholder={t("login_password")} value={password} onChange={(e) => setPassword(e.target.value)} />

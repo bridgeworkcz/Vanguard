@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { signOut } from "@/lib/auth/client";
+import { accountSignOut } from "@/lib/vanguard/account.server";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
@@ -98,7 +99,12 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 disabled={signingOut}
                 onClick={() => {
                   setSigningOut(true);
-                  void signOut().catch(() => setSigningOut(false));
+                  void accountSignOut()
+                    .catch(() => undefined)
+                    .then(() => signOut())
+                    .catch(() => {
+                      window.location.assign("/");
+                    });
                 }}
               >
                 {signingOut ? t("signing_out") : t("sign_out")}

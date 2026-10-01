@@ -1,0 +1,829 @@
+import { getDossierCategoryFolder, downloadFileFromDrive, makeFilePublic, uploadFileToDrive } from "@/lib/google/drive";
+import { appendSheetRow, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import {
+  DOC_CATEGORIES,
+  PROCESS_STAGES,
+  clientName,
+  newId,
+  parseQuestionnaire,
+  priceFor,
+  productionWeeks,
+  questionnaireError,
+  sameCountry,
+  type DocCategory,
+  type Processing,
+  type ProcessStage,
+  type Questionnaire,
+  type Vacancy,
+  type VisaProduct,
+} from "./domain";
+import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { readSheetSessionUser } from "./account.server";
+
+const MAX_DATA = 900_000;
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+
+type Extra = {
+  clientEmail: string;
+  citizenship: string;
+  productionWeeks: number;
+  profileComplete: boolean;
+  dispatchNote: string;
+  questionnaire: Questionnaire;
+  stage2At: string | null;
+  stage3At: string | null;
+  cancelDeadlineAt: string | null;
+};
+
+type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function plusDays(days: number) {
+  return new Date(Date.now() + days * 86400000).toISOString();
+}
+
+function bool(value: string | boolean | undefined) {
+  return value === true || value === "true" || value === "TRUE" || value === "1";
+}
+
+function rolesOf(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    /* plain string */
+  }
+  const list = raw.split(",").map((item) => item.trim()).filter(Boolean);
+  return list.length ? list : ["CLIENT"];
+}
+
+function roleOf(roles: string[]) {
+  if (roles.includes("ADMIN")) return "ADMIN";
+  if (roles.includes("MANAGER")) return "MANAGER";
+  return "CLIENT";
+}
+
+async function settingsRows() {
+  return readSheetRows("SystemSettings");
+}
+
+async function settingMap() {
+  const out: Record<string, string> = { ...DEFAULT_SETTINGS };
+  for (const row of await settingsRows()) if (row.key) out[row.key] = row.value;
+  return out;
+}
+
+async function putSetting(key: string, value: string, actor: string) {
+  const rows = await settingsRows();
+  const found = rows.find((row) => row.key === key);
+  const stamp = nowIso();
+  if (found) await updateSheetRowById("SystemSettings", found.id, { value, updatedAt: stamp, updatedBy: actor });
+  else await appendSheetRow("SystemSettings", { id: newId("SET"), key, value, updatedAt: stamp, updatedBy: actor });
+}
+
+async function readJson<T>(key: string, fallback: T): Promise<T> {
+  const map = await settingMap();
+  if (!map[key]) return fallback;
+  try {
+    return JSON.parse(map[key]) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function vacancyFrom(row: SheetRow): Vacancy {
+  return {
+    id: row.id,
+    title: row.title,
+    country: row.country,
+    visaProductId: row.visaProductId,
+    employer: row.employerLabel,
+    salaryNet: row.salaryNet,
+    accommodation: row.accommodation,
+    workingHours: row.workingHours,
+    description: row.description,
+    requirements: row.requirements,
+    quota: Number(row.quotaRemaining) || 0,
+    active: bool(row.isActive),
+  };
+}
+
+function vacancyTo(v: Vacancy, previous?: SheetRow): SheetRow {
+  const stamp = nowIso();
+  return {
+    id: v.id,
+    title: v.title,
+    category: previous?.category ?? "",
+    country: v.country,
+    salaryNet: v.salaryNet,
+    salaryGross: previous?.salaryGross ?? "",
+    accommodation: v.accommodation,
+    workingHours: v.workingHours,
+    description: v.description,
+    quotaRemaining: String(v.quota),
+    isActive: String(v.active),
+    visaProductId: v.visaProductId,
+    visaDuration: previous?.visaDuration ?? "",
+    processingOptions: previous?.processingOptions ?? "[]",
+    employerLabel: v.employer,
+    requirements: v.requirements,
+    createdAt: previous?.createdAt || stamp,
+    updatedAt: stamp,
+  };
+}
+
+async function loadVacancies() {
+  return (await readSheetRows("Vacancies")).map(vacancyFrom);
+}
+
+async function loadProducts(): Promise<VisaProduct[]> {
+  const stored = await readJson<VisaProduct[]>("visa_products", []);
+  return stored.length ? stored : VISA_PRODUCTS;
+}
+
+async function saveProducts(products: VisaProduct[], actor: string) {
+  await putSetting("visa_products", JSON.stringify(products), actor);
+}
+
+function emptyExtra(): Extra {
+  return {
+    clientEmail: "",
+    citizenship: "",
+    productionWeeks: 0,
+    profileComplete: false,
+    dispatchNote: "",
+    questionnaire: parseQuestionnaire("{}"),
+    stage2At: null,
+    stage3At: null,
+    cancelDeadlineAt: null,
+  };
+}
+
+function extraOf(raw: string): Extra {
+  const base = emptyExtra();
+  try {
+    const value = JSON.parse(raw || "{}") as Partial<Extra> & { questionnaire?: Questionnaire };
+    if (!value || typeof value !== "object") return base;
+    if (!("questionnaire" in value) && !("clientEmail" in value) && !("profileComplete" in value)) return base;
+    return { ...base, ...value, questionnaire: { ...base.questionnaire, ...(value.questionnaire ?? {}) } };
+  } catch {
+    return base;
+  }
+}
+
+function appFrom(row: SheetRow, vacancies: Vacancy[]) {
+  const extra = extraOf(row.applicantData);
+  const vacancy = vacancies.find((item) => item.id === row.vacancyId);
+  return {
+    id: row.id,
+    userId: row.userId || null,
+    clientEmail: extra.clientEmail,
+    vacancyId: row.vacancyId,
+    visaProductId: row.visaProductId,
+    country: row.country,
+    citizenship: extra.citizenship,
+    processing: (row.processingOption || "STANDARD") as Processing,
+    totalCost: Number(row.totalCost) || 0,
+    currency: row.currency || "EUR",
+    productionWeeks: extra.productionWeeks,
+    stage: Number(row.stage) || 1,
+    status: row.status || "OPEN",
+    processStage: row.processStage || "IN_PROCESS",
+    questionnaire: JSON.stringify(extra.questionnaire),
+    profileComplete: Boolean(extra.profileComplete),
+    rejectionReason: row.rejectedReason || "",
+    dispatchNote: extra.dispatchNote,
+    stage2At: extra.stage2At,
+    stage3At: extra.stage3At,
+    cancelDeadlineAt: extra.cancelDeadlineAt || row.paymentDeadlineAt || null,
+    docDeadlineAt: row.documentDeadlineAt || null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    vacancyTitle: vacancy?.title ?? "",
+    employer: vacancy?.employer ?? "",
+    extra,
+    row,
+  };
+}
+
+async function loadApps() {
+  const [rows, vacancies] = await Promise.all([readSheetRows("Applications"), loadVacancies()]);
+  return rows.map((row) => appFrom(row, vacancies));
+}
+
+async function saveApp(app: ReturnType<typeof appFrom>, extra: Extra, patch: Partial<SheetRow> = {}) {
+  const row: SheetRow = {
+    ...app.row,
+    applicantData: JSON.stringify(extra),
+    status: patch.status ?? app.status,
+    stage: String(patch.stage ?? app.stage),
+    processStage: patch.processStage ?? app.processStage,
+    paymentDeadlineAt: patch.paymentDeadlineAt ?? extra.cancelDeadlineAt ?? "",
+    documentDeadlineAt: patch.documentDeadlineAt ?? app.docDeadlineAt ?? "",
+    rejectedReason: patch.rejectedReason ?? app.rejectionReason,
+    updatedAt: nowIso(),
+    approvedAt: patch.approvedAt ?? app.row.approvedAt ?? "",
+  };
+  await updateSheetRowById("Applications", app.id, row);
+}
+
+async function docsFor(applicationId: string) {
+  const rows = await readSheetRows("DossierDocuments");
+  return rows
+    .filter((row) => row.dossierId === applicationId)
+    .map((row) => ({
+      id: row.id,
+      category: row.category,
+      fileName: row.fileName,
+      mime: row.reviewedBy || "",
+      status: row.status || "UPLOADED",
+      createdAt: row.uploadedAt,
+      driveFileId: row.driveFileId,
+    }));
+}
+
+async function messagesFor(applicationId: string) {
+  const rows = await readSheetRows("SupportTickets");
+  return rows
+    .filter((row) => row.subject === applicationId)
+    .map((row) => ({
+      id: row.id,
+      authorRole: row.assignedManagerId || "CLIENT",
+      body: row.message,
+      createdAt: row.createdAt,
+    }));
+}
+
+async function audit(actor: string, action: string, target: string, details: string) {
+  await appendSheetRow("AuditLog", {
+    id: newId("AUD"),
+    actorUserId: actor,
+    action,
+    targetEntity: "record",
+    targetEntityId: target,
+    details: details.slice(0, 500),
+    timestamp: nowIso(),
+  });
+}
+
+async function ensureSeed() {
+  const map = await settingMap();
+  if (map.seed_version === "2") return;
+  const apps = await readSheetRows("Applications");
+  if (apps.length > 0) {
+    await putSetting("seed_version", "2", "system");
+    return;
+  }
+  const vacancies = await readSheetRows("Vacancies");
+  if (vacancies.length === 0) {
+    for (const vacancy of buildVacancies()) await appendSheetRow("Vacancies", vacancyTo(vacancy));
+  }
+  if (!map.visa_products) await putSetting("visa_products", JSON.stringify(VISA_PRODUCTS), "system");
+  if (!map.partners) await putSetting("partners", JSON.stringify(partnerRows()), "system");
+  const team = await readSheetRows("Team");
+  if (team.length === 0) {
+    for (const member of TEAM) {
+      await appendSheetRow("Team", {
+        id: member.id,
+        fullName: member.name,
+        position: member.position,
+        photoUrl: "",
+        contactPhone: member.phone,
+        languages: "[]",
+        bio: "",
+        order: String(member.sort),
+        isActive: "true",
+      });
+    }
+  }
+  const gallery = await readSheetRows("Gallery");
+  if (gallery.length === 0) {
+    for (const item of OFFICE) {
+      await appendSheetRow("Gallery", {
+        id: item.id,
+        title: item.title,
+        imageUrl: item.image,
+        caption: `${item.kind}|${item.caption}`,
+        order: String(item.sort),
+        isActive: "true",
+      });
+    }
+  }
+  for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+    if (map[key] === undefined) await putSetting(key, value, "system");
+  }
+  await putSetting("seed_version", "2", "system");
+}
+
+async function expireUnpaid() {
+  const apps = await loadApps();
+  const docs = await readSheetRows("DossierDocuments");
+  for (const app of apps) {
+    if (app.status !== "OPEN" || app.stage !== 2 || !app.cancelDeadlineAt) continue;
+    if (Date.parse(app.cancelDeadlineAt) > Date.now()) continue;
+    if (docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF")) continue;
+    await saveApp(app, app.extra, { status: "CANCELLED" });
+  }
+}
+
+async function profile(userId: string): Promise<Profile> {
+  await ensureSeed();
+  await expireUnpaid();
+  const session = await readSheetSessionUser();
+  const rows = await readSheetRows("Users");
+  const row = rows.find((item) => item.id === userId);
+  if (!row && session?.id === userId) {
+    return { userId, email: session.email, fullName: session.fullName, phone: session.phone, role: session.role };
+  }
+  if (!row) throw new Error("Profile missing");
+  const roles = rolesOf(row.roles);
+  return { userId: row.id, email: row.email, fullName: row.fullName, phone: row.phone, role: roleOf(roles) };
+}
+
+async function requireStaff(userId: string) {
+  const person = await profile(userId);
+  if (person.role !== "ADMIN" && person.role !== "MANAGER") throw new Error("Forbidden");
+  return person;
+}
+
+async function requireAdmin(userId: string) {
+  const person = await profile(userId);
+  if (person.role !== "ADMIN") throw new Error("Forbidden");
+  return person;
+}
+
+function present(app: ReturnType<typeof appFrom>) {
+  const { extra: _extra, row: _row, ...rest } = app;
+  return rest;
+}
+
+export async function publicSite() {
+  await ensureSeed();
+  await expireUnpaid();
+  const settings = await settingMap();
+  const products = (await loadProducts()).filter((item) => item.active);
+  const vacancies = (await loadVacancies()).filter((item) => item.active);
+  const team = (await readSheetRows("Team"))
+    .filter((row) => bool(row.isActive) || row.isActive === "")
+    .map((row) => ({
+      id: row.id,
+      fullName: row.fullName,
+      position: row.position,
+      phone: row.contactPhone,
+      photoData: row.photoUrl,
+      sortOrder: Number(row.order) || 0,
+      active: true,
+    }));
+  const media = (await readSheetRows("Gallery"))
+    .filter((row) => bool(row.isActive))
+    .map((row) => {
+      const [kind, ...rest] = (row.caption || "office|").split("|");
+      return {
+        id: row.id,
+        kind: kind === "license" ? "license" : "office",
+        title: row.title,
+        caption: rest.join("|"),
+        imageData: row.imageUrl,
+        sortOrder: Number(row.order) || 0,
+      };
+    });
+  const partners = (await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", [])).map((item) => ({
+    id: item.id,
+    country: item.country,
+    name: item.name,
+    sortOrder: item.sort,
+  }));
+  return { settings, products, vacancies, team, media, partners };
+}
+
+export async function sessionProfile(userId: string) {
+  return profile(userId);
+}
+
+export async function listMine(userId: string) {
+  await profile(userId);
+  return (await loadApps())
+    .filter((app) => app.userId === userId)
+    .map(present)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function getMine(userId: string, id: string) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app || app.userId !== userId) throw new Error("Not found");
+  return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
+}
+
+export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing }) {
+  const person = await profile(userId);
+  if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
+  const vacancies = await loadVacancies();
+  const products = await loadProducts();
+  const vacancy = vacancies.find((item) => item.id === data.vacancyId && item.active);
+  if (!vacancy || vacancy.quota < 1) throw new Error("Opening unavailable");
+  const product = products.find((item) => item.id === vacancy.visaProductId && item.active);
+  if (!product) throw new Error("Permit unavailable");
+  if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
+  if (!data.citizenship || sameCountry(data.citizenship, product.country)) throw new Error("Citizenship");
+  const existing = (await loadApps()).find((app) => app.userId === userId && app.vacancyId === vacancy.id && app.status === "OPEN");
+  if (existing) return { id: existing.id };
+  const id = newId("VG");
+  const stamp = nowIso();
+  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship } };
+  await appendSheetRow("Applications", {
+    id,
+    userId,
+    vacancyId: vacancy.id,
+    applicantData: JSON.stringify(extra),
+    status: "OPEN",
+    stage: "1",
+    visaProductId: product.id,
+    country: product.country,
+    processingOption: data.processing,
+    totalCost: String(priceFor(product.basePrice, data.processing)),
+    currency: "EUR",
+    processStage: "IN_PROCESS",
+    paymentDeadlineAt: "",
+    documentDeadlineAt: "",
+    assignedManagerId: "",
+    createdAt: stamp,
+    updatedAt: stamp,
+    approvedAt: "",
+    rejectedReason: "",
+  });
+  const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancy.id);
+  if (raw) await updateSheetRowById("Vacancies", vacancy.id, vacancyTo({ ...vacancy, quota: Math.max(0, vacancy.quota - 1) }, raw));
+  await audit(userId, "APPLICATION_OPENED", id, vacancy.title);
+  return { id };
+}
+
+export async function saveQuestionnaire(userId: string, data: { id: string; questionnaire: Questionnaire }) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (app.stage !== 1 || app.status !== "OPEN") throw new Error("Locked");
+  const questionnaire = { ...parseQuestionnaire("{}"), ...data.questionnaire };
+  const error = questionnaireError(questionnaire);
+  if (error) return { ok: false as const, error };
+  await saveApp(app, { ...app.extra, questionnaire, profileComplete: true, citizenship: questionnaire.citizenship });
+  await audit(userId, "QUESTIONNAIRE", app.id, clientName(questionnaire));
+  return { ok: true as const };
+}
+
+async function storeFile(applicationId: string, userId: string, category: string, fileName: string, mime: string, data: string, status: string) {
+  if (!ALLOWED_MIME.has(mime) || !data.startsWith("data:") || data.length > MAX_DATA) throw new Error("File");
+  const encoded = data.split(",")[1] ?? "";
+  const buffer = Buffer.from(encoded, "base64");
+  const folder = await getDossierCategoryFolder(applicationId, category);
+  const uploaded = await uploadFileToDrive(folder, fileName || "file", mime, buffer);
+  await makeFilePublic(uploaded.fileId).catch(() => undefined);
+  const id = newId("DOC");
+  await appendSheetRow("DossierDocuments", {
+    id,
+    dossierId: applicationId,
+    category,
+    fileName: fileName || "file",
+    driveFileId: uploaded.fileId,
+    status,
+    uploadedAt: nowIso(),
+    reviewedAt: "",
+    reviewedBy: mime,
+    rejectionReason: "",
+  });
+  await audit(userId, "UPLOAD", applicationId, category);
+  return { id };
+}
+
+export async function uploadDoc(userId: string, data: { applicationId: string; category: DocCategory; fileName: string; mime: string; data: string }) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === data.applicationId);
+  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
+  if (!DOC_CATEGORIES.includes(data.category) || data.category === "FINAL") throw new Error("Category");
+  if (data.category === "PAYMENT_PROOF" && app.stage !== 2) throw new Error("Locked");
+  return storeFile(app.id, userId, data.category, data.fileName, data.mime, data.data, "UPLOADED");
+}
+
+export async function postMessage(userId: string, data: { applicationId: string; body: string }) {
+  const person = await profile(userId);
+  if (!data.body) return;
+  const app = (await loadApps()).find((item) => item.id === data.applicationId);
+  if (!app) throw new Error("Not found");
+  const staff = person.role === "ADMIN" || person.role === "MANAGER";
+  if (!staff && app.userId !== userId) throw new Error("Forbidden");
+  const stamp = nowIso();
+  await appendSheetRow("SupportTickets", {
+    id: newId("MSG"),
+    userId,
+    dossierId: app.id,
+    subject: app.id,
+    message: data.body,
+    status: "OPEN",
+    assignedManagerId: person.role,
+    createdAt: stamp,
+    updatedAt: stamp,
+  });
+}
+
+export async function downloadDoc(userId: string, id: string) {
+  const person = await profile(userId);
+  const docs = await readSheetRows("DossierDocuments");
+  const doc = docs.find((item) => item.id === id);
+  if (!doc) throw new Error("Not found");
+  const app = (await loadApps()).find((item) => item.id === doc.dossierId);
+  if (!app) throw new Error("Not found");
+  const staff = person.role === "ADMIN" || person.role === "MANAGER";
+  if (!staff && app.userId !== userId) throw new Error("Forbidden");
+  if (!doc.driveFileId) throw new Error("File missing");
+  const file = await downloadFileFromDrive(doc.driveFileId);
+  return {
+    applicationId: app.id,
+    fileName: doc.fileName || file.name,
+    mime: file.mimeType,
+    data: `data:${file.mimeType};base64,${file.buffer.toString("base64")}`,
+    category: doc.category,
+  };
+}
+
+export async function adminOverview(userId: string) {
+  const person = await requireStaff(userId);
+  const apps = await loadApps();
+  const docs = await readSheetRows("DossierDocuments");
+  const users = (await readSheetRows("Users")).map((row) => ({
+    userId: row.id,
+    email: row.email,
+    fullName: row.fullName,
+    role: roleOf(rolesOf(row.roles)),
+  }));
+  return {
+    role: person.role,
+    waiting: apps.filter((app) => app.status === "OPEN" && app.stage === 1 && app.profileComplete).length,
+    proofs: apps.filter((app) => app.status === "OPEN" && app.stage === 2 && docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status === "UPLOADED")).length,
+    live: apps.filter((app) => app.status === "OPEN").length,
+    users,
+  };
+}
+
+export async function adminList(userId: string, includeIncomplete: boolean) {
+  await requireStaff(userId);
+  return (await loadApps())
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(present)
+    .filter((app) => includeIncomplete || app.profileComplete || app.stage > 1);
+}
+
+export async function adminGet(userId: string, id: string) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app) throw new Error("Not found");
+  return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
+}
+
+export async function adminSetStage(userId: string, data: { id: string; action: string; reason: string }) {
+  const person = await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app) throw new Error("Not found");
+  if (data.action === "accept") {
+    if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
+    await saveApp(app, { ...app.extra, stage2At: nowIso(), cancelDeadlineAt: plusDays(5) }, { stage: "2", paymentDeadlineAt: plusDays(5) });
+  } else if (data.action === "reject") {
+    await saveApp(app, app.extra, { status: "REJECTED", rejectedReason: data.reason });
+  } else if (data.action === "cancel") {
+    await saveApp(app, app.extra, { status: "CANCELLED" });
+  } else if (data.action === "confirm-payment") {
+    if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
+    const docs = await docsFor(app.id);
+    if (!docs.some((doc) => doc.category === "PAYMENT_PROOF")) throw new Error("No proof");
+    const rawDocs = await readSheetRows("DossierDocuments");
+    for (const doc of rawDocs) {
+      if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF") await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED" });
+    }
+    const deadline = plusDays(app.productionWeeks * 7);
+    await saveApp(app, { ...app.extra, stage3At: nowIso() }, { stage: "3", processStage: "IN_PROCESS", documentDeadlineAt: deadline });
+  } else if (data.action === "stage4") {
+    if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
+    const docs = await docsFor(app.id);
+    if (!docs.some((doc) => doc.category === "FINAL")) throw new Error("No finals");
+    await saveApp(app, app.extra, { stage: "4" });
+  } else throw new Error("Action");
+  await audit(person.userId, data.action, app.id, data.reason);
+  return { ok: true };
+}
+
+export async function adminSetProcess(userId: string, data: { id: string; processStage: string }) {
+  await requireStaff(userId);
+  if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
+  await saveApp(app, app.extra, { processStage: data.processStage });
+  await audit(userId, "PROCESS", app.id, data.processStage);
+}
+
+export async function adminSaveDispatch(userId: string, data: { id: string; note: string }) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app) throw new Error("Not found");
+  await saveApp(app, { ...app.extra, dispatchNote: data.note });
+  await audit(userId, "DISPATCH", data.id, "");
+}
+
+export async function adminUploadFinal(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.applicationId);
+  if (!app || app.processStage !== "FINAL_LEGAL_SERVICE" || app.stage < 3) throw new Error("Locked");
+  return storeFile(app.id, userId, "FINAL", data.fileName, data.mime, data.data, "APPROVED");
+}
+
+export async function adminCreateApplication(userId: string, data: { email: string; vacancyId: string; citizenship: string; processing: Processing }) {
+  await requireStaff(userId);
+  if (!data.email.includes("@")) throw new Error("Email");
+  if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
+  const vacancies = await loadVacancies();
+  const products = await loadProducts();
+  const vacancy = vacancies.find((item) => item.id === data.vacancyId);
+  const product = products.find((item) => item.id === vacancy?.visaProductId);
+  if (!vacancy || !product) throw new Error("Opening");
+  if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
+  const user = (await readSheetRows("Users")).find((row) => row.email.toLowerCase() === data.email);
+  const id = newId("VG");
+  const stamp = nowIso();
+  const extra: Extra = { ...emptyExtra(), clientEmail: data.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship } };
+  await appendSheetRow("Applications", {
+    id,
+    userId: user?.id ?? "",
+    vacancyId: vacancy.id,
+    applicantData: JSON.stringify(extra),
+    status: "OPEN",
+    stage: "1",
+    visaProductId: product.id,
+    country: product.country,
+    processingOption: data.processing,
+    totalCost: String(priceFor(product.basePrice, data.processing)),
+    currency: "EUR",
+    processStage: "IN_PROCESS",
+    paymentDeadlineAt: "",
+    documentDeadlineAt: "",
+    assignedManagerId: "",
+    createdAt: stamp,
+    updatedAt: stamp,
+    approvedAt: "",
+    rejectedReason: "",
+  });
+  await audit(userId, "APPLICATION_CREATED", id, data.email);
+  return { id };
+}
+
+export async function adminSaveVacancy(userId: string, data: Vacancy) {
+  await requireStaff(userId);
+  const id = data.id || newId("VAC");
+  const vacancy: Vacancy = { ...data, id, quota: Math.max(0, Number(data.quota) || 0), active: Boolean(data.active) };
+  if (!vacancy.title) throw new Error("Title");
+  const raw = (await readSheetRows("Vacancies")).find((row) => row.id === id);
+  if (raw) await updateSheetRowById("Vacancies", id, vacancyTo(vacancy, raw));
+  else await appendSheetRow("Vacancies", vacancyTo(vacancy));
+  await audit(userId, "VACANCY", id, vacancy.title);
+  return { id };
+}
+
+export async function adminDeleteVacancy(userId: string, id: string) {
+  await requireStaff(userId);
+  const raw = (await readSheetRows("Vacancies")).find((row) => row.id === id);
+  if (raw) await updateSheetRowById("Vacancies", id, { ...raw, isActive: "false", updatedAt: nowIso() });
+  await audit(userId, "VACANCY_ARCHIVE", id, "");
+}
+
+export async function adminSaveTeam(userId: string, data: { id?: string; fullName: string; position: string; phone: string; photoData: string; active: boolean }) {
+  await requireAdmin(userId);
+  const id = data.id || newId("TM");
+  if (!data.fullName) throw new Error("Name");
+  let photoUrl = data.photoData && data.photoData.length < 400 ? data.photoData : "";
+  if (data.photoData?.startsWith("data:") && data.photoData.length < MAX_DATA) {
+    const mime = data.photoData.slice(5, data.photoData.indexOf(";"));
+    const saved = await storeFile("team", userId, "PHOTO", `${id}.jpg`, mime, data.photoData, "APPROVED");
+    const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
+    photoUrl = doc?.driveFileId ? `https://drive.google.com/thumbnail?id=${doc.driveFileId}&sz=w800` : "";
+  }
+  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
+  const row = {
+    id,
+    fullName: data.fullName,
+    position: data.position,
+    photoUrl: photoUrl || raw?.photoUrl || "",
+    contactPhone: data.phone,
+    languages: raw?.languages || "[]",
+    bio: raw?.bio || "",
+    order: raw?.order || "9",
+    isActive: String(data.active !== false),
+  };
+  if (raw) await updateSheetRowById("Team", id, row);
+  else await appendSheetRow("Team", row);
+  await audit(userId, "TEAM", id, data.fullName);
+  return { id };
+}
+
+export async function adminDeleteTeam(userId: string, id: string) {
+  await requireAdmin(userId);
+  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
+  if (raw) await updateSheetRowById("Team", id, { ...raw, isActive: "false" });
+  await audit(userId, "TEAM_DELETE", id, "");
+}
+
+export async function adminSaveSettings(userId: string, data: Record<string, string>) {
+  await requireAdmin(userId);
+  const allowed = new Set(Object.keys(DEFAULT_SETTINGS));
+  for (const [key, value] of Object.entries(data ?? {})) {
+    if (!allowed.has(key) || typeof value !== "string") continue;
+    await putSetting(key, value.slice(0, 8000), userId);
+  }
+  await audit(userId, "SETTINGS", "site", Object.keys(data ?? {}).join(","));
+}
+
+export async function adminSaveProduct(userId: string, data: VisaProduct) {
+  await requireAdmin(userId);
+  const products = await loadProducts();
+  const lanes = (data.allowedProcessing ?? []).filter((item) => item === "STANDARD" || item === "PRIORITY" || item === "EXPRESS");
+  if (!lanes.includes("STANDARD")) lanes.unshift("STANDARD");
+  const next = products.map((item) =>
+    item.id === data.id
+      ? { ...item, basePrice: Math.max(0, Math.round(Number(data.basePrice) || 0)), productionMinWeeks: Math.max(1, Number(data.productionMinWeeks) || 1), productionMaxWeeks: Math.max(1, Number(data.productionMaxWeeks) || 1), allowedProcessing: lanes, active: Boolean(data.active), description: data.description }
+      : item,
+  );
+  await saveProducts(next, userId);
+  await audit(userId, "PRICING", data.id, String(data.basePrice));
+}
+
+export async function adminSaveMedia(userId: string, data: { id?: string; kind: string; title: string; caption: string; imageData: string }) {
+  await requireAdmin(userId);
+  if (!data.imageData?.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
+  const id = data.id || newId("MED");
+  const kind = data.kind === "license" ? "license" : "office";
+  const mime = data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg";
+  const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
+  const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
+  const imageUrl = doc?.driveFileId ? `https://drive.google.com/thumbnail?id=${doc.driveFileId}&sz=w1200` : "";
+  await appendSheetRow("Gallery", { id, title: data.title, imageUrl, caption: `${kind}|${data.caption}`, order: "5", isActive: "true" });
+  await audit(userId, "MEDIA", id, kind);
+  return { id };
+}
+
+export async function adminDeleteMedia(userId: string, id: string) {
+  await requireAdmin(userId);
+  const raw = (await readSheetRows("Gallery")).find((row) => row.id === id);
+  if (raw) await updateSheetRowById("Gallery", id, { ...raw, isActive: "false" });
+  await audit(userId, "MEDIA_DELETE", id, "");
+}
+
+export async function adminSavePartner(userId: string, data: { id?: string; country: string; name: string }) {
+  await requireAdmin(userId);
+  if (!data.name || !data.country) throw new Error("Name");
+  const id = data.id || newId("PT");
+  const rows = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
+  const next = rows.some((row) => row.id === id) ? rows.map((row) => (row.id === id ? { ...row, country: data.country, name: data.name } : row)) : [...rows, { id, country: data.country, name: data.name, sort: 9 }];
+  await putSetting("partners", JSON.stringify(next), userId);
+  await audit(userId, "PARTNER", id, data.name);
+  return { id };
+}
+
+export async function adminDeletePartner(userId: string, id: string) {
+  await requireAdmin(userId);
+  const rows = await readJson<{ id: string }[]>("partners", []);
+  await putSetting("partners", JSON.stringify(rows.filter((row) => row.id !== id)), userId);
+}
+
+export async function adminSetRole(userId: string, data: { userId: string; role: string }) {
+  await requireAdmin(userId);
+  if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT") throw new Error("Role");
+  const rows = await readSheetRows("Users");
+  const target = rows.find((row) => row.id === data.userId);
+  if (!target) throw new Error("Not found");
+  const admins = rows.filter((row) => row.id !== data.userId && roleOf(rolesOf(row.roles)) === "ADMIN");
+  if (data.role !== "ADMIN" && roleOf(rolesOf(target.roles)) === "ADMIN" && admins.length < 1) throw new Error("Last admin");
+  const roles = data.role === "ADMIN" ? ["ADMIN"] : data.role === "MANAGER" ? ["MANAGER"] : ["CLIENT"];
+  await updateSheetRowById("Users", target.id, { ...target, roles: JSON.stringify(roles) });
+  await audit(userId, "ROLE", data.userId, data.role);
+}
+
+export async function adminAudit(userId: string) {
+  await requireStaff(userId);
+  return (await readSheetRows("AuditLog"))
+    .map((row) => ({ id: row.id, actorId: row.actorUserId, action: row.action, target: row.targetEntityId, details: row.details, createdAt: row.timestamp }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 80);
+}
+
+export async function adminAllTeam(userId: string) {
+  await requireAdmin(userId);
+  return (await readSheetRows("Team")).map((row) => ({
+    id: row.id,
+    fullName: row.fullName,
+    position: row.position,
+    phone: row.contactPhone,
+    photoData: row.photoUrl,
+    active: bool(row.isActive) || row.isActive === "",
+  }));
+}
+
