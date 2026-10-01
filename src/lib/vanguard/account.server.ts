@@ -1,4 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
 import { getCookie, setCookie } from "@tanstack/react-start/server";
 
 const COOKIE = "vg_session";
@@ -58,6 +57,10 @@ function writeCookie(token: string) {
   });
 }
 
+export function clearSessionCookie() {
+  setCookie(COOKIE, "", { path: "/", httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 0 });
+}
+
 export async function readSheetSessionUser() {
   if (!sheetsConfigured()) return null;
   const token = getCookie(COOKIE);
@@ -72,73 +75,55 @@ export async function readSheetSessionUser() {
   return publicUser(row);
 }
 
-export const accountSession = createServerFn({ method: "GET" }).handler(async () => {
-  if (!sheetsConfigured()) return null;
-  return readSheetSessionUser();
-});
-
-export const accountSignOut = createServerFn({ method: "POST" }).handler(async () => {
-  setCookie(COOKIE, "", { path: "/", httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 0 });
-  return { ok: true };
-});
-
 type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };
 
-export const accountAuth = createServerFn({ method: "POST" })
-  .validator((input: AccountInput) => ({
-    action: input?.action === "register" ? "register" : "login",
-    email: String(input?.email ?? "").trim(),
-    password: String(input?.password ?? ""),
-    fullName: String(input?.fullName ?? "").trim(),
-    phone: String(input?.phone ?? "").trim(),
-  }))
-  .handler(async ({ data }) => {
-    if (!sheetsConfigured()) return { mode: "local" as const };
-    const { prepareGoogle } = await import("@/lib/google/prepare");
-    await prepareGoogle();
-    if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
-    const { appendSheetRow, readSheetRows, updateSheetRowById } = await import("@/lib/google/sheets");
-    const { createSessionToken, hashPassword, verifyPassword } = await import("@/lib/google/session");
-    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
-    const rows = await readSheetRows("Users");
+export async function runAccountAuth(data: AccountInput) {
+  if (!sheetsConfigured()) return { mode: "local" as const };
+  const { prepareGoogle } = await import("@/lib/google/prepare");
+  await prepareGoogle();
+  if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
+  const { appendSheetRow, readSheetRows, updateSheetRowById } = await import("@/lib/google/sheets");
+  const { createSessionToken, hashPassword, verifyPassword } = await import("@/lib/google/session");
+  const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+  const rows = await readSheetRows("Users");
 
-    if (data.action === "register") {
-      const email = emailOf(data.email);
-      const phone = phoneOf(data.phone);
-      if (!email.includes("@")) throw new Error("A valid email is required.");
-      if (!data.fullName) throw new Error("Full name is required.");
-      if (phone.replace(/\D/g, "").length < 7) throw new Error("A valid phone number is required.");
-      if (rows.some((row) => emailOf(row.email) === email)) throw new Error("User with this email already exists.");
-      if (rows.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
-      const hasAdmin = rows.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));
-      const roles = withOwner(email, hasAdmin ? ["CLIENT"] : ["ADMIN"]);
-      const now = new Date().toISOString();
-      const id = `USR-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
-      const record = {
-        id,
-        email,
-        phone,
-        fullName: data.fullName,
-        roles: JSON.stringify(roles),
-        passwordHash: hashPassword(data.password),
-        createdAt: now,
-        lastLoginAt: now,
-        isActive: "true",
-      };
-      await appendSheetRow("Users", record);
-      writeCookie(createSessionToken({ userId: id, email, roles }));
-      await sendSafeTelegramAlert(`New registration\n${data.fullName}\n${email}`);
-      return { mode: "google" as const, user: publicUser(record) };
-    }
-
+  if (data.action === "register") {
     const email = emailOf(data.email);
-    const phone = phoneOf(data.email);
-    const row = rows.find((item) => emailOf(item.email) === email || (phone && phoneOf(item.phone) === phone));
-    if (!row || row.isActive === "false") throw new Error("Invalid email/phone or password.");
-    if (!verifyPassword(data.password, row.passwordHash)) throw new Error("Invalid email/phone or password.");
-    const user = publicUser(row);
-    const lastLoginAt = new Date().toISOString();
-    await updateSheetRowById("Users", row.id, { ...row, roles: JSON.stringify(user.roles), lastLoginAt });
-    writeCookie(createSessionToken({ userId: user.id, email: user.email, roles: user.roles }));
-    return { mode: "google" as const, user: { ...user, lastLoginAt } };
-  });
+    const phone = phoneOf(data.phone);
+    if (!email.includes("@")) throw new Error("A valid email is required.");
+    if (!data.fullName) throw new Error("Full name is required.");
+    if (phone.replace(/\D/g, "").length < 7) throw new Error("A valid phone number is required.");
+    if (rows.some((row) => emailOf(row.email) === email)) throw new Error("User with this email already exists.");
+    if (rows.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
+    const hasAdmin = rows.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));
+    const roles = withOwner(email, hasAdmin ? ["CLIENT"] : ["ADMIN"]);
+    const now = new Date().toISOString();
+    const id = `USR-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    const record = {
+      id,
+      email,
+      phone,
+      fullName: data.fullName,
+      roles: JSON.stringify(roles),
+      passwordHash: hashPassword(data.password),
+      createdAt: now,
+      lastLoginAt: now,
+      isActive: "true",
+    };
+    await appendSheetRow("Users", record);
+    writeCookie(createSessionToken({ userId: id, email, roles }));
+    await sendSafeTelegramAlert(`New registration\n${data.fullName}\n${email}`);
+    return { mode: "google" as const, user: publicUser(record) };
+  }
+
+  const email = emailOf(data.email);
+  const phone = phoneOf(data.email);
+  const row = rows.find((item) => emailOf(item.email) === email || (phone && phoneOf(item.phone) === phone));
+  if (!row || row.isActive === "false") throw new Error("Invalid email/phone or password.");
+  if (!verifyPassword(data.password, row.passwordHash)) throw new Error("Invalid email/phone or password.");
+  const user = publicUser(row);
+  const lastLoginAt = new Date().toISOString();
+  await updateSheetRowById("Users", row.id, { ...row, roles: JSON.stringify(user.roles), lastLoginAt });
+  writeCookie(createSessionToken({ userId: user.id, email: user.email, roles: user.roles }));
+  return { mode: "google" as const, user: { ...user, lastLoginAt } };
+}

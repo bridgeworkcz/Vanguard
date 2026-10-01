@@ -55,6 +55,7 @@ export type Vacancy = {
   requirements: string;
   quota: number;
   active: boolean;
+  blockedCitizenships?: string;
 };
 
 export type Questionnaire = {

@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { signOut } from "@/lib/auth/client";
-import { accountSignOut } from "@/lib/vanguard/account.server";
+import { accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
@@ -82,7 +82,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 key={code}
                 type="button"
                 onClick={() => setLang(code)}
-                className={`min-h-11 min-w-11 px-2 text-xs tracking-widest ${lang === code ? "text-metal" : tone === "light" ? "text-ink/45" : "text-mist"}`}
+                className={`min-h-8 px-1.5 text-[10px] tracking-widest ${lang === code ? "text-metal" : tone === "light" ? "text-ink/45" : "text-mist"}`}
               >
                 {code.toUpperCase()}
               </button>

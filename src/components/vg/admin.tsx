@@ -24,11 +24,17 @@ import {
   adminSetRole,
   adminSetStage,
   adminUploadFinal,
+  assignManagers,
+  downloadDocument,
+  exportOpenCases,
   postMessage,
+  reviewDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, PROCESS_STAGES, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { isOverdue } from "@/lib/vanguard/ops";
+import { downloadStamped } from "@/lib/vanguard/pdf";
 import { Shell, storyKey, useSite } from "./chrome";
 
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
@@ -65,6 +71,15 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [draft, setDraft] = useState<Partial<Vacancy>>({});
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
   const [newApp, setNewApp] = useState({ email: "", vacancyId: "", citizenship: "Ukraine", processing: "STANDARD" as Processing });
+  const [userQuery, setUserQuery] = useState("");
+  const [qCountry, setQCountry] = useState("");
+  const [qStage, setQStage] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [managerId, setManagerId] = useState("");
+  const [exportNote, setExportNote] = useState("");
+  const [docReason, setDocReason] = useState("");
 
   function go(next: Tab, nextId = "") {
     void navigate({ to: "/admin", search: { tab: next, id: nextId } });
@@ -146,9 +161,19 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
   return (
     <Shell>
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <p className="kicker">{t("admin_kicker")}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mx-auto flex max-w-6xl gap-6 px-4 py-10">
+        <aside className="hidden w-44 shrink-0 md:block">
+          <p className="kicker">{t("admin_kicker")}</p>
+          <nav className="mt-4 grid gap-1">
+            {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
+              <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
+                {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
+              </button>
+            ))}
+          </nav>
+        </aside>
+        <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap gap-2 md:hidden">
           {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
             <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
               {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
@@ -172,8 +197,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             {isAdmin ? (
               <div className="sm:col-span-3">
                 <h2 className="mt-6 text-lg">{t("admin_users")}</h2>
+                <input className="field mt-3 max-w-sm" placeholder={t("admin_search")} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} />
                 <ul className="mt-3 grid gap-2">
-                  {overview.users.map((u) => (
+                  {overview.users
+                    .filter((u) => `${u.email} ${u.fullName} ${u.phone ?? ""}`.toLowerCase().includes(userQuery.trim().toLowerCase()))
+                    .map((u) => (
                     <li key={u.userId} className="flex flex-wrap items-center gap-3 border-t border-white/10 py-2 text-sm">
                       <span className="min-w-40">{u.email || u.fullName}</span>
                       <span className="text-metal">{u.role}</span>
@@ -200,6 +228,66 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
               {t("admin_show_all")}
             </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-xs text-mist">
+                {t("admin_country")}
+                <select className="field" value={qCountry} onChange={(e) => setQCountry(e.target.value)}>
+                  <option value="">{t("all")}</option>
+                  {Array.from(new Set(apps.map((a) => a.country))).map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-mist">
+                {t("admin_stage")}
+                <select className="field" value={qStage} onChange={(e) => setQStage(e.target.value)}>
+                  <option value="">{t("all")}</option>
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={String(n)}>{n}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
+                {t("admin_overdue")}
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={unassignedOnly} onChange={(e) => setUnassignedOnly(e.target.checked)} />
+                {t("admin_unassigned")}
+              </label>
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  void exportOpenCases()
+                    .then((r) => setExportNote(`${t("admin_exported")}: ${r.count}`))
+                    .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
+                }
+              >
+                {t("admin_export")}
+              </button>
+              {exportNote ? <span className="text-sm text-mist">{exportNote}</span> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select className="field max-w-xs" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
+                <option value="">{t("admin_assign")}</option>
+                {overview?.users.filter((u) => u.role === "ADMIN" || u.role === "MANAGER").map((u) => (
+                  <option key={u.userId} value={u.userId}>{u.email || u.fullName}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn"
+                disabled={!managerId || picked.length === 0}
+                onClick={() =>
+                  void assignManagers({ data: { ids: picked, managerId } })
+                    .then(() => adminListApplications({ data: { includeIncomplete: showAll } }).then(setApps))
+                    .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
+                }
+              >
+                {t("admin_assign")} · {picked.length}
+              </button>
+            </div>
             <form
               className="glass grid gap-2 p-4 md:grid-cols-4"
               onSubmit={(e) => {
@@ -225,14 +313,26 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <button className="btn-solid" type="submit">{t("admin_create")}</button>
             </form>
             <ul className="grid gap-2">
-              {apps.map((a) => (
-                <li key={a.id}>
+              {apps
+                .filter((a) => !qCountry || a.country === qCountry)
+                .filter((a) => !qStage || String(a.stage) === qStage)
+                .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
+                .filter((a) => !unassignedOnly || !a.assignedManagerId)
+                .map((a) => (
+                <li key={a.id} className="flex items-start gap-3">
+                  <input
+                    className="mt-4"
+                    type="checkbox"
+                    checked={picked.includes(a.id)}
+                    onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, a.id] : cur.filter((id) => id !== a.id)))}
+                  />
                   <button type="button" className="glass grid w-full gap-1 p-3 text-start sm:grid-cols-4" onClick={() => go("applications", a.id)}>
                     <span>{a.clientEmail || a.id}</span>
                     <span>{a.country}</span>
                     <span>{a.vacancyTitle}</span>
                     <span className="text-metal">
                       {a.status} · {a.stage}
+                      {a.assignedManagerId ? "" : ` · ${t("admin_unassigned")}`}
                       {!a.profileComplete && a.stage === 1 ? ` · ${t("admin_incomplete")}` : ""}
                     </span>
                   </button>
@@ -300,13 +400,48 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     {t("save")}
                   </button>
                 </label>
-                <ul className="mt-4 text-sm">
+                <ul className="mt-4 grid gap-2 text-sm">
                   {detail.documents.map((d) => (
-                    <li key={d.id}>
-                      {d.category} · {d.fileName} · {d.status}
+                    <li key={d.id} className="glass p-3">
+                      <p>{d.category} · {d.fileName}</p>
+                      <p className="text-mist">{d.createdAt?.slice(0, 16)} · {d.status}{d.rejectionReason ? ` · ${d.rejectionReason}` : ""}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() =>
+                            void downloadDocument({ data: d.id }).then((full) => downloadStamped(full.data, full.fileName, full.mime))
+                          }
+                        >
+                          {t("admin_open")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() =>
+                            void reviewDocument({ data: { id: d.id, status: "APPROVED", reason: "" } }).then(() =>
+                              adminGetApplication({ data: detail.app.id }).then(setDetail),
+                            )
+                          }
+                        >
+                          {t("admin_doc_ok")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() =>
+                            void reviewDocument({ data: { id: d.id, status: "REJECTED", reason: docReason } }).then(() =>
+                              adminGetApplication({ data: detail.app.id }).then(setDetail),
+                            )
+                          }
+                        >
+                          {t("admin_doc_no")}
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
+                <input className="field mt-2" placeholder={t("admin_reason")} value={docReason} onChange={(e) => setDocReason(e.target.value)} />
                 <form
                   className="mt-4 flex gap-2"
                   onSubmit={(e) => {
@@ -345,12 +480,48 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             />
             <ul className="grid gap-2">
               {data.vacancies.map((v) => (
-                <li key={v.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 py-2 text-sm">
-                  <span>
+                <li key={v.id} className="grid items-center gap-2 border-t border-white/10 py-2 text-sm md:grid-cols-6">
+                  <span className="md:col-span-2">
                     {v.active ? "" : "— "}
-                    {v.country} · {v.title} · {v.employer}
+                    {v.country} · {v.title}
                   </span>
+                  <input
+                    className="field"
+                    defaultValue={v.salaryNet}
+                    aria-label={t("salary")}
+                    onBlur={(e) => {
+                      if (e.target.value !== v.salaryNet) void adminSaveVacancy({ data: { ...v, salaryNet: e.target.value } }).then(reload);
+                    }}
+                  />
+                  <input
+                    className="field"
+                    type="number"
+                    defaultValue={v.quota}
+                    aria-label={t("quota")}
+                    onBlur={(e) => {
+                      const quota = Number(e.target.value);
+                      if (quota !== v.quota) void adminSaveVacancy({ data: { ...v, quota } }).then(reload);
+                    }}
+                  />
+                  <input
+                    className="field"
+                    defaultValue={v.blockedCitizenships || ""}
+                    placeholder={t("blocked")}
+                    onBlur={(e) => {
+                      if (e.target.value !== (v.blockedCitizenships || "")) {
+                        void adminSaveVacancy({ data: { ...v, blockedCitizenships: e.target.value } }).then(reload);
+                      }
+                    }}
+                  />
                   <span className="flex gap-2">
+                    <label className="flex items-center gap-1 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={v.active}
+                        onChange={(e) => void adminSaveVacancy({ data: { ...v, active: e.target.checked } }).then(reload)}
+                      />
+                      {t("active")}
+                    </label>
                     <button type="button" className="btn" onClick={() => setDraft(v)}>{t("edit")}</button>
                     <button type="button" className="btn" onClick={() => void adminDeleteVacancy({ data: v.id }).then(reload)}>{t("remove")}</button>
                   </span>
@@ -393,6 +564,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             ))}
           </ul>
         ) : null}
+        </div>
       </div>
     </Shell>
   );
@@ -421,6 +593,7 @@ function VacancyForm({
     requirements: "",
     quota: 4,
     active: true,
+    blockedCitizenships: "",
   });
   useEffect(() => {
     if (initial.id) setV({ ...v, ...initial, quota: Number(initial.quota ?? v.quota) });
@@ -456,6 +629,7 @@ function VacancyForm({
       <textarea className="field md:col-span-2" placeholder={t("description")} value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} />
       <textarea className="field md:col-span-2" placeholder={t("field_requirements")} value={v.requirements} onChange={(e) => setV({ ...v, requirements: e.target.value })} />
       <input className="field" type="number" value={v.quota} onChange={(e) => setV({ ...v, quota: Number(e.target.value) })} />
+      <input className="field" placeholder={t("blocked")} value={v.blockedCitizenships || ""} onChange={(e) => setV({ ...v, blockedCitizenships: e.target.value })} />
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={v.active} onChange={(e) => setV({ ...v, active: e.target.checked })} />
         {t("active")}
@@ -554,7 +728,7 @@ function ContentEditor({
   onSaved: () => void;
 }) {
   const { t } = useI18n();
-  const keys = ["legal_entity", "registration_number", "vat_number", "legal_address", "court_record", "regulator", "support_email", "support_phone", "usdt_wallet", "usdt_network"] as const;
+  const keys = ["legal_entity", "registration_number", "vat_number", "legal_address", "court_record", "regulator", "support_email", "support_phone", "usdt_wallet", "usdt_network", "telegram_owner_chat", "telegram_staff_chat"] as const;
   const story = storyKey(lang, "about_story");
   const lead = storyKey(lang, "about_lead");
   const title = storyKey(lang, "hero_title");

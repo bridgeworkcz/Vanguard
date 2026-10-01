@@ -3,12 +3,16 @@ import { useEffect, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import {
+  cancelMyApplication,
   createApplication,
   downloadDocument,
   getMyApplication,
+  getSessionProfile,
   listMyApplications,
   postMessage,
+  resubmitApplication,
   saveQuestionnaire,
+  updateMyContact,
   uploadMyDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
@@ -23,6 +27,7 @@ import {
   type Questionnaire,
 } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { canCancel } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, downloadStamped } from "@/lib/vanguard/pdf";
 import { Shell, useSite } from "./chrome";
 
@@ -75,6 +80,8 @@ export function PortalPage({ id }: { id: string }) {
   const [note, setNote] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState("");
+  const [contact, setContact] = useState({ email: "", phone: "" });
+  const [contactMsg, setContactMsg] = useState("");
 
   async function refreshList() {
     const list = await listMyApplications();
@@ -90,6 +97,13 @@ export function PortalPage({ id }: { id: string }) {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    getSessionProfile()
+      .then((p) => setContact({ email: p.email, phone: p.phone }))
+      .catch(() => undefined);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) return;
@@ -189,7 +203,28 @@ export function PortalPage({ id }: { id: string }) {
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
         {!id ? (
-          <ul className="mt-8 grid gap-3">
+          <div className="mt-8 grid gap-6">
+            <form
+              className="glass grid gap-3 p-4 sm:grid-cols-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setContactMsg("");
+                void updateMyContact({ data: contact })
+                  .then(() => setContactMsg(t("contact_saved")))
+                  .catch((e: unknown) => {
+                    const text = e instanceof Error ? e.message : "Error";
+                    setContactMsg(text === "Locked" ? t("contact_locked") : text);
+                  });
+              }}
+            >
+              <p className="sm:col-span-3 text-sm text-mist">{t("contact_edit")}</p>
+              <p className="sm:col-span-3 text-xs text-mist">{t("contact_once")}</p>
+              <input className="field" type="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} />
+              <input className="field" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} />
+              <button className="btn" type="submit">{t("save")}</button>
+              {contactMsg ? <p className="sm:col-span-3 text-sm text-metal">{contactMsg}</p> : null}
+            </form>
+          <ul className="grid gap-3">
             {rows && rows.length === 0 ? <li className="text-mist">{t("portal_empty")}</li> : null}
             {rows?.map((row) => (
               <li key={row.id}>
@@ -201,6 +236,7 @@ export function PortalPage({ id }: { id: string }) {
               </li>
             ))}
           </ul>
+          </div>
         ) : app ? (
           <div className="mt-8 grid gap-6">
             <Link to="/portal" search={{ id: "" }} className="text-sm text-mist">
@@ -213,7 +249,26 @@ export function PortalPage({ id }: { id: string }) {
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
               <p className="mt-4 text-metal">{statusLabel(app, t)}</p>
+              <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => (
+                  <li key={label} className={app.stage >= index + 1 ? "border-t-2 border-paper pt-2 text-sm" : "border-t border-white/20 pt-2 text-sm text-mist"}>
+                    <span className="text-metal">0{index + 1}</span>
+                    <span className="mt-1 block">{label}</span>
+                  </li>
+                ))}
+              </ol>
               {app.status === "REJECTED" && app.rejectionReason ? <p className="mt-2">{app.rejectionReason}</p> : null}
+              {app.status === "REJECTED" ? (
+                <button
+                  type="button"
+                  className="btn-solid mt-3"
+                  onClick={() =>
+                    void resubmitApplication({ data: app.id }).then((res) => navigate({ to: "/portal", search: { id: res.id } }))
+                  }
+                >
+                  {t("resubmit")}
+                </button>
+              ) : null}
               {parts ? (
                 <p className="mt-3 text-sm text-mist">
                   30% {parts.first} · 40% {parts.second} · 30% {parts.final} EUR
@@ -290,6 +345,17 @@ export function PortalPage({ id }: { id: string }) {
                 <p>
                   {t("cancel_in")}: {proof ? t("proof_pending") : remain(app.cancelDeadlineAt, now)}
                 </p>
+                {canCancel(app.status, app.stage, app.cancelDeadlineAt, Boolean(proof)) ? (
+                  <button
+                    type="button"
+                    className="btn mt-3"
+                    onClick={() =>
+                      void cancelMyApplication({ data: app.id }).then(() => Promise.all([refreshDetail(app.id), refreshList()]))
+                    }
+                  >
+                    {t("cancel_btn")}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -330,12 +396,26 @@ export function PortalPage({ id }: { id: string }) {
                 <p className="mt-2 text-sm text-mist">{t("docs_help")}</p>
                 <ul className="mt-4 grid gap-3">
                   {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
-                    const got = detail?.documents.some((d) => d.category === cat);
+                    const files = detail?.documents.filter((d) => d.category === cat) ?? [];
                     return (
-                      <li key={cat} className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 py-3">
-                        <span>{t(`cat_${cat}`)}</span>
-                        <span className="text-sm text-mist">{got ? t("uploaded") : t("upload")}</span>
+                      <li key={cat} className="border-t border-white/10 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span>{t(`cat_${cat}`)}</span>
+                          <span className="text-sm text-mist">{files.length ? t("uploaded") : t("upload")}</span>
+                        </div>
+                        <div className="mt-2 grid gap-2">
+                          {files.map((doc) => (
+                            <article key={doc.id} className="bg-white/5 p-3 text-sm">
+                              <p>{doc.fileName}</p>
+                              <p className="text-mist">
+                                {doc.createdAt?.slice(0, 16)} · {doc.status === "REJECTED" ? t("admin_doc_no") : doc.status === "APPROVED" ? t("admin_doc_ok") : t("uploaded")}
+                              </p>
+                              {doc.rejectionReason ? <p className="mt-1">{doc.rejectionReason}</p> : null}
+                            </article>
+                          ))}
+                        </div>
                         <input
+                          className="mt-2 text-sm"
                           type="file"
                           accept="image/jpeg,image/png,image/webp,application/pdf"
                           onChange={(e) => {

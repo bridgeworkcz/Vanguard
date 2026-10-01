@@ -1,5 +1,5 @@
-import { getDossierCategoryFolder, downloadFileFromDrive, uploadFileToDrive } from "@/lib/google/drive";
-import { appendSheetRow, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import { getDossierCategoryFolder, downloadFileFromDrive, findOrCreateFolder, uploadFileToDrive } from "@/lib/google/drive";
+import { appendSheetRow, clearSheetBody, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
@@ -20,6 +20,7 @@ import {
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
+import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, trancheSplit } from "./ops";
 
 const MAX_DATA = 900_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -34,6 +35,8 @@ type Extra = {
   stage2At: string | null;
   stage3At: string | null;
   cancelDeadlineAt: string | null;
+  paymentReminded: boolean;
+  docReminded: boolean;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -109,6 +112,7 @@ function vacancyFrom(row: SheetRow): Vacancy {
     requirements: row.requirements,
     quota: Number(row.quotaRemaining) || 0,
     active: bool(row.isActive),
+    blockedCitizenships: row.blockedCitizenships || "",
   };
 }
 
@@ -133,6 +137,7 @@ function vacancyTo(v: Vacancy, previous?: SheetRow): SheetRow {
     requirements: v.requirements,
     createdAt: previous?.createdAt || stamp,
     updatedAt: stamp,
+    blockedCitizenships: v.blockedCitizenships || previous?.blockedCitizenships || "",
   };
 }
 
@@ -142,7 +147,14 @@ async function loadVacancies() {
 
 async function loadProducts(): Promise<VisaProduct[]> {
   const stored = await readJson<VisaProduct[]>("visa_products", []);
-  return stored.length ? stored : VISA_PRODUCTS;
+  const base = stored.length ? stored : VISA_PRODUCTS;
+  const pricing = await readSheetRows("Pricing");
+  return base.map((product) => {
+    const row = pricing.find((item) => item.id === product.id || item.name === product.id);
+    if (!row || row.active === "false") return product;
+    const amount = Number(row.amount);
+    return Number.isFinite(amount) && amount > 0 ? { ...product, basePrice: Math.round(amount) } : product;
+  });
 }
 
 async function saveProducts(products: VisaProduct[], actor: string) {
@@ -160,6 +172,8 @@ function emptyExtra(): Extra {
     stage2At: null,
     stage3At: null,
     cancelDeadlineAt: null,
+    paymentReminded: false,
+    docReminded: false,
   };
 }
 
@@ -205,6 +219,7 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     updatedAt: row.updatedAt,
     vacancyTitle: vacancy?.title ?? "",
     employer: vacancy?.employer ?? "",
+    assignedManagerId: row.assignedManagerId || "",
     extra,
     row,
   };
@@ -239,9 +254,10 @@ async function docsFor(applicationId: string) {
       id: row.id,
       category: row.category,
       fileName: row.fileName,
-      mime: row.reviewedBy || "",
+      mime: row.mime || (String(row.reviewedBy || "").includes("/") ? row.reviewedBy : ""),
       status: row.status || "UPLOADED",
       createdAt: row.uploadedAt,
+      rejectionReason: row.rejectionReason || "",
       driveFileId: row.driveFileId,
     }));
 }
@@ -256,6 +272,97 @@ async function messagesFor(applicationId: string) {
       body: row.message,
       createdAt: row.createdAt,
     }));
+}
+
+async function notify(text: string, audience: "owner" | "staff" = "owner") {
+  try {
+    const map = await settingMap();
+    const owner = map.telegram_owner_chat || process.env.TELEGRAM_CHAT_ID || "";
+    const staff = map.telegram_staff_chat || owner;
+    const chatId = audience === "staff" ? staff : owner;
+    if (!chatId || !process.env.TELEGRAM_BOT_TOKEN) return;
+    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    const ok = await sendSafeTelegramAlert(text, { chatId });
+    if (!ok) {
+      await appendSheetRow("AuditLog", {
+        id: newId("AUD"),
+        actorUserId: "system",
+        action: "TELEGRAM_FAILED",
+        targetEntity: "record",
+        targetEntityId: "telegram",
+        details: text.slice(0, 300),
+        timestamp: nowIso(),
+      });
+    }
+  } catch (err) {
+    console.error("[notice]", err);
+  }
+}
+
+async function restoreQuota(vacancyId: string) {
+  const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancyId);
+  if (!raw) return;
+  const vacancy = vacancyFrom(raw);
+  await updateSheetRowById("Vacancies", vacancyId, vacancyTo({ ...vacancy, quota: vacancy.quota + 1 }, raw));
+}
+
+async function writeDossier(userId: string, app: ReturnType<typeof appFrom>, fullName: string, citizenship: string) {
+  const rows = await readSheetRows("Dossiers");
+  const existing = rows.find((row) => row.userId === userId && row.vacancyId === app.vacancyId);
+  const stamp = nowIso();
+  const row = {
+    id: existing?.id || newId("DOS"),
+    userId,
+    fullName,
+    passportNumber: existing?.passportNumber || "",
+    citizenship,
+    targetCountry: app.country,
+    vacancyId: app.vacancyId,
+    vacancyTitle: app.vacancyTitle,
+    processStatus: existing?.processStatus || "NEW",
+    paymentStatus: existing?.paymentStatus || "NOT_DUE",
+    currency: "EUR",
+    totalCost: String(app.totalCost),
+    paidAmount: existing?.paidAmount || "0",
+    remainingAmount: String(Math.max(0, app.totalCost - Number(existing?.paidAmount || 0))),
+    assignedManagerId: existing?.assignedManagerId || "",
+    createdAt: existing?.createdAt || stamp,
+    updatedAt: stamp,
+  };
+  if (existing) await updateSheetRowById("Dossiers", existing.id, row);
+  else await appendSheetRow("Dossiers", row);
+}
+
+async function markTrancheDue(applicationId: string, key: string) {
+  const row = (await readSheetRows("PaymentTransactions")).find(
+    (item) => item.dossierId === applicationId && item.trancheKey === key && item.status === "NOT_DUE",
+  );
+  if (row) await updateSheetRowById("PaymentTransactions", row.id, { ...row, status: "DUE" });
+}
+
+async function ensureTranches(applicationId: string, userId: string, total: number) {
+  const rows = await readSheetRows("PaymentTransactions");
+  if (rows.some((row) => row.dossierId === applicationId)) return;
+  const stamp = nowIso();
+  for (const part of trancheSplit(total)) {
+    await appendSheetRow("PaymentTransactions", {
+      id: newId("PAY"),
+      dossierId: applicationId,
+      userId,
+      amount: String(part.amount),
+      currency: "EUR",
+      network: "",
+      txHash: "",
+      tranchePercent: String(part.percent),
+      trancheKey: part.key,
+      status: part.key === "T1" ? "DUE" : "NOT_DUE",
+      submittedAt: stamp,
+      verifiedAt: "",
+      verifiedBy: "",
+      proofFileId: "",
+      proofFileName: "",
+    });
+  }
 }
 
 async function audit(actor: string, action: string, target: string, details: string) {
@@ -319,6 +426,69 @@ async function ensureSeed() {
     if (map[key] === undefined) await putSetting(key, value, "system");
   }
   await putSetting("seed_version", "2", "system");
+  await housekeeping();
+}
+
+let housekeepingAt = 0;
+
+async function housekeeping() {
+  const now = Date.now();
+  if (now - housekeepingAt < 10 * 60 * 1000) return;
+  housekeepingAt = now;
+  try {
+    const map = await settingMap();
+    if (now - Date.parse(map.last_backup_at || "0") > 20 * 3600 * 1000) await writeBackup();
+    if (now - Date.parse(map.last_digest_at || "0") > 20 * 3600 * 1000) await writeDigest();
+    await remindDeadlines();
+  } catch (err) {
+    housekeepingAt = 0;
+    console.error("[housekeeping]", err);
+  }
+}
+
+async function writeBackup() {
+  const names = ["Users", "Applications", "Vacancies", "DossierDocuments", "PaymentTransactions", "AuditLog"] as const;
+  const lines = [`snapshot ${nowIso()}`];
+  for (const name of names) {
+    const rows = await readSheetRows(name);
+    lines.push(`${name}: ${rows.length}`);
+  }
+  const root = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID?.trim();
+  let driveFileId = "";
+  if (root) {
+    const folder = await findOrCreateFolder(root, "Backups");
+    const fileName = `snapshot-${nowIso().slice(0, 10)}.txt`;
+    const uploaded = await uploadFileToDrive(folder, fileName, "text/plain", Buffer.from(lines.join("\n"), "utf8"));
+    driveFileId = uploaded.fileId;
+    await appendSheetRow("Backups", { id: newId("BAK"), createdBy: "system", driveFileId, fileName, createdAt: nowIso() });
+  }
+  await putSetting("last_backup_at", nowIso(), "system");
+}
+
+async function writeDigest() {
+  const apps = await loadApps();
+  const open = apps.filter((app) => app.status === "OPEN");
+  const late = open.filter((app) => isOverdue(app.cancelDeadlineAt) || isOverdue(app.docDeadlineAt));
+  await notify(`Open files: ${open.length}\nOverdue: ${late.length}`);
+  await putSetting("last_digest_at", nowIso(), "system");
+}
+
+async function remindDeadlines() {
+  const apps = await loadApps();
+  for (const app of apps) {
+    if (app.status !== "OPEN") continue;
+    let extra = app.extra;
+    if (!extra.paymentReminded && dueWithinHours(app.cancelDeadlineAt, 24)) {
+      await notify(`Payment due within 24h\n${app.id}`);
+      extra = { ...extra, paymentReminded: true };
+      await saveApp(app, extra);
+    }
+    if (!extra.docReminded && dueWithinHours(app.docDeadlineAt, 24)) {
+      await notify(`Documents due within 24h\n${app.id}`, "staff");
+      extra = { ...extra, docReminded: true };
+      await saveApp(app, extra);
+    }
+  }
 }
 
 async function expireUnpaid() {
@@ -329,11 +499,13 @@ async function expireUnpaid() {
     if (Date.parse(app.cancelDeadlineAt) > Date.now()) continue;
     if (docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF")) continue;
     await saveApp(app, app.extra, { status: "CANCELLED" });
+    await restoreQuota(app.vacancyId);
   }
 }
 
 async function profile(userId: string): Promise<Profile> {
   await ensureSeed();
+  await housekeeping();
   await expireUnpaid();
   const session = await readSheetSessionUser();
   const rows = await readSheetRows("Users");
@@ -365,6 +537,7 @@ function present(app: ReturnType<typeof appFrom>) {
 
 export async function publicSite() {
   await ensureSeed();
+  await housekeeping();
   await expireUnpaid();
   const settings = await settingMap();
   const products = (await loadProducts()).filter((item) => item.active);
@@ -432,6 +605,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   if (!product) throw new Error("Permit unavailable");
   if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
   if (!data.citizenship || sameCountry(data.citizenship, product.country)) throw new Error("Citizenship");
+  if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
   const existing = (await loadApps()).find((app) => app.userId === userId && app.vacancyId === vacancy.id && app.status === "OPEN");
   if (existing) return { id: existing.id };
   const id = newId("VG");
@@ -461,6 +635,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancy.id);
   if (raw) await updateSheetRowById("Vacancies", vacancy.id, vacancyTo({ ...vacancy, quota: Math.max(0, vacancy.quota - 1) }, raw));
   await audit(userId, "APPLICATION_OPENED", id, vacancy.title);
+  await notify(`New application\n${id}\n${product.country}`);
   return { id };
 }
 
@@ -473,6 +648,7 @@ export async function saveQuestionnaire(userId: string, data: { id: string; ques
   const error = questionnaireError(questionnaire);
   if (error) return { ok: false as const, error };
   await saveApp(app, { ...app.extra, questionnaire, profileComplete: true, citizenship: questionnaire.citizenship });
+  await writeDossier(userId, app, clientName(questionnaire), questionnaire.citizenship);
   await audit(userId, "QUESTIONNAIRE", app.id, clientName(questionnaire));
   return { ok: true as const };
 }
@@ -499,10 +675,12 @@ async function storeFile(applicationId: string, userId: string, category: string
     status,
     uploadedAt: nowIso(),
     reviewedAt: "",
-    reviewedBy: mime,
+    reviewedBy: "",
     rejectionReason: "",
+    mime,
   });
   await audit(userId, "UPLOAD", applicationId, category);
+  await notify(`New file\n${applicationId}\n${category}`, "staff");
   return { id };
 }
 
@@ -535,6 +713,7 @@ export async function postMessage(userId: string, data: { applicationId: string;
     createdAt: stamp,
     updatedAt: stamp,
   });
+  await notify(`New message\n${app.id}`, "staff");
 }
 
 export async function downloadDoc(userId: string, id: string) {
@@ -570,6 +749,7 @@ export async function adminOverview(userId: string) {
     userId: row.id,
     email: row.email,
     fullName: row.fullName,
+    phone: row.phone,
     role: roleOf(rolesOf(row.roles)),
   }));
   return {
@@ -603,9 +783,12 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
   if (data.action === "accept") {
     if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
     await saveApp(app, { ...app.extra, stage2At: nowIso(), cancelDeadlineAt: plusDays(5) }, { stage: "2", paymentDeadlineAt: plusDays(5) });
+    await ensureTranches(app.id, app.userId || person.userId, app.totalCost);
   } else if (data.action === "reject") {
+    if (app.status === "OPEN") await restoreQuota(app.vacancyId);
     await saveApp(app, app.extra, { status: "REJECTED", rejectedReason: data.reason });
   } else if (data.action === "cancel") {
+    if (app.status === "OPEN") await restoreQuota(app.vacancyId);
     await saveApp(app, app.extra, { status: "CANCELLED" });
   } else if (data.action === "confirm-payment") {
     if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
@@ -615,6 +798,18 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     for (const doc of rawDocs) {
       if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF") await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED" });
     }
+    const due = (await readSheetRows("PaymentTransactions")).find((row) => row.dossierId === app.id && row.status === "DUE");
+    const proof = docs.find((doc) => doc.category === "PAYMENT_PROOF");
+    if (due) {
+      await updateSheetRowById("PaymentTransactions", due.id, {
+        ...due,
+        status: "VERIFIED",
+        verifiedAt: nowIso(),
+        verifiedBy: person.userId,
+        proofFileId: proof && "driveFileId" in proof ? String(proof.driveFileId) : "",
+        proofFileName: proof?.fileName || "",
+      });
+    }
     const deadline = plusDays(app.productionWeeks * 7);
     await saveApp(app, { ...app.extra, stage3At: nowIso() }, { stage: "3", processStage: "IN_PROCESS", documentDeadlineAt: deadline });
   } else if (data.action === "stage4") {
@@ -622,6 +817,7 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     const docs = await docsFor(app.id);
     if (!docs.some((doc) => doc.category === "FINAL")) throw new Error("No finals");
     await saveApp(app, app.extra, { stage: "4" });
+    await markTrancheDue(app.id, "T3");
   } else throw new Error("Action");
   await audit(person.userId, data.action, app.id, data.reason);
   return { ok: true };
@@ -633,6 +829,9 @@ export async function adminSetProcess(userId: string, data: { id: string; proces
   const app = (await loadApps()).find((item) => item.id === data.id);
   if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
   await saveApp(app, app.extra, { processStage: data.processStage });
+  if (data.processStage === "EMPLOYER_APPROVED_FOR_MINISTRY" || PROCESS_STAGES.indexOf(data.processStage as ProcessStage) >= PROCESS_STAGES.indexOf("EMPLOYER_APPROVED_FOR_MINISTRY")) {
+    await markTrancheDue(app.id, "T2");
+  }
   await audit(userId, "PROCESS", app.id, data.processStage);
 }
 
@@ -766,6 +965,20 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
       : item,
   );
   await saveProducts(next, userId);
+  const stamp = nowIso();
+  const pricing = await readSheetRows("Pricing");
+  const priceRow = {
+    id: data.id,
+    name: data.id,
+    description: data.name,
+    amount: String(Math.max(0, Math.round(Number(data.basePrice) || 0))),
+    currency: "EUR",
+    active: String(Boolean(data.active)),
+    updatedAt: stamp,
+    updatedBy: userId,
+  };
+  if (pricing.some((row) => row.id === data.id)) await updateSheetRowById("Pricing", data.id, priceRow);
+  else await appendSheetRow("Pricing", priceRow);
   await audit(userId, "PRICING", data.id, String(data.basePrice));
 }
 
@@ -838,5 +1051,91 @@ export async function adminAllTeam(userId: string) {
     photoData: siteFileUrl("team", row.id, row.photoUrl),
     active: bool(row.isActive) || row.isActive === "",
   }));
+}
+
+export async function cancelMine(userId: string, id: string) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app || app.userId !== userId) throw new Error("Not found");
+  const docs = await docsFor(id);
+  if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF"))) {
+    throw new Error("Locked");
+  }
+  await restoreQuota(app.vacancyId);
+  await saveApp(app, app.extra, { status: "CANCELLED" });
+  await audit(userId, "CLIENT_CANCEL", id, "");
+  return { ok: true };
+}
+
+export async function resubmit(userId: string, id: string) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app || app.userId !== userId || app.status !== "REJECTED") throw new Error("Locked");
+  const citizenship = app.citizenship || app.extra.questionnaire.citizenship;
+  if (!citizenship) throw new Error("Citizenship");
+  return createApp(userId, { vacancyId: app.vacancyId, citizenship, processing: app.processing });
+}
+
+export async function reviewDocument(userId: string, data: { id: string; status: string; reason: string }) {
+  await requireStaff(userId);
+  if (data.status !== "APPROVED" && data.status !== "REJECTED") throw new Error("Status");
+  const raw = (await readSheetRows("DossierDocuments")).find((row) => row.id === data.id);
+  if (!raw) throw new Error("Not found");
+  await updateSheetRowById("DossierDocuments", raw.id, {
+    ...raw,
+    status: data.status,
+    reviewedAt: nowIso(),
+    reviewedBy: userId,
+    rejectionReason: data.status === "REJECTED" ? data.reason : "",
+  });
+  await audit(userId, "DOCUMENT", raw.id, data.status);
+  return { ok: true };
+}
+
+export async function assignManagers(userId: string, data: { ids: string[]; managerId: string }) {
+  await requireStaff(userId);
+  for (const id of data.ids) {
+    const app = (await loadApps()).find((item) => item.id === id);
+    if (!app) continue;
+    await updateSheetRowById("Applications", id, { ...app.row, assignedManagerId: data.managerId, updatedAt: nowIso() });
+  }
+  await audit(userId, "ASSIGN", data.managerId, data.ids.join(","));
+  return { ok: true };
+}
+
+export async function exportOpenCases(userId: string) {
+  await requireStaff(userId);
+  const apps = (await loadApps()).filter((app) => app.status === "OPEN");
+  await clearSheetBody("OpenCases");
+  const stamp = nowIso();
+  for (const app of apps) {
+    await appendSheetRow("OpenCases", {
+      id: newId("EXP"),
+      snapshotAt: stamp,
+      applicationId: app.id,
+      email: app.clientEmail,
+      country: app.country,
+      stage: String(app.stage),
+      status: app.status,
+      deadline: app.docDeadlineAt || app.cancelDeadlineAt || "",
+    });
+  }
+  await audit(userId, "EXPORT", "OpenCases", String(apps.length));
+  return { count: apps.length };
+}
+
+export async function updateMyContact(userId: string, data: { email: string; phone: string }) {
+  const rows = await readSheetRows("Users");
+  const row = rows.find((item) => item.id === userId);
+  if (!row) throw new Error("Not found");
+  const auditRows = await readSheetRows("AuditLog");
+  if (auditRows.some((item) => item.actorUserId === userId && item.action === "PROFILE_EDIT")) throw new Error("Locked");
+  const email = data.email.trim().toLowerCase();
+  const phone = data.phone.trim();
+  if (!email.includes("@") || phone.replace(/\D/g, "").length < 7) throw new Error("Contact");
+  if (rows.some((item) => item.id !== userId && item.email.toLowerCase() === email)) throw new Error("User with this email already exists.");
+  await updateSheetRowById("Users", userId, { ...row, email, phone });
+  await audit(userId, "PROFILE_EDIT", userId, email);
+  return { ok: true };
 }
 

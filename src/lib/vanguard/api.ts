@@ -19,6 +19,7 @@ import {
   type VisaProduct,
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { canCancel, citizenshipBlocked } from "./ops";
 
 type Profile = {
   userId: string;
@@ -77,9 +78,14 @@ async function ensureSeed(sql: Sql) {
 }
 
 async function expireUnpaid(sql: Sql) {
-  await sql`update applications set status = 'CANCELLED', updated_at = now()
+  const late = await sql<{ id: string; vacancyId: string }>`select id, vacancy_id as "vacancyId" from applications
     where status = 'OPEN' and stage = 2 and cancel_deadline_at is not null and cancel_deadline_at < now()
     and not exists (select 1 from documents d where d.application_id = applications.id and d.category = 'PAYMENT_PROOF')`;
+  for (const row of late) {
+    await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${row.id}`;
+    await sql`update vacancies set quota = quota + 1 where id = ${row.vacancyId}`;
+    await audit(sql, "system", "AUTO_CANCEL", row.id, "");
+  }
 }
 
 async function ctxProfile(sql: Sql, userId: string): Promise<Profile> {
@@ -157,9 +163,10 @@ async function loadProducts(sql: Sql): Promise<VisaProduct[]> {
 
 async function loadVacancies(sql: Sql): Promise<Vacancy[]> {
   const rows = await sql<Vacancy>`select id, title, country, visa_product_id as "visaProductId", employer, salary_net as "salaryNet",
-    accommodation, working_hours as "workingHours", description, requirements, quota, active
+    accommodation, working_hours as "workingHours", description, requirements, quota, active,
+    coalesce(blocked_citizenships, '') as "blockedCitizenships"
     from vacancies order by country, title`;
-  return rows.map((v) => ({ ...v, quota: Number(v.quota), active: Boolean(v.active) }));
+  return rows.map((v) => ({ ...v, quota: Number(v.quota), active: Boolean(v.active), blockedCitizenships: v.blockedCitizenships || "" }));
 }
 
 export type AppRow = {
@@ -189,6 +196,7 @@ export type AppRow = {
   updatedAt: string;
   vacancyTitle: string;
   employer: string;
+  assignedManagerId: string;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -198,7 +206,8 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     a.profile_complete as "profileComplete", a.rejection_reason as "rejectionReason", a.dispatch_note as "dispatchNote",
     a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
     a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
-    coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer"
+    coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
+    coalesce(a.assigned_manager_id, '') as "assignedManagerId"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -218,10 +227,12 @@ type DocMeta = {
   mime: string;
   status: string;
   createdAt: string;
+  rejectionReason: string;
 };
 
 async function docsFor(sql: Sql, applicationId: string): Promise<DocMeta[]> {
-  return sql<DocMeta>`select id, category, file_name as "fileName", mime, status, created_at::text as "createdAt"
+  return sql<DocMeta>`select id, category, file_name as "fileName", mime, status, created_at::text as "createdAt",
+    coalesce(rejection_reason, '') as "rejectionReason"
     from documents where application_id = ${applicationId} order by created_at`;
 }
 
@@ -302,7 +313,8 @@ export const listMyApplications = createServerFn({ method: "GET" })
       a.profile_complete as "profileComplete", a.rejection_reason as "rejectionReason", a.dispatch_note as "dispatchNote",
       a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
       a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
-      coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer"
+      coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
+      coalesce(a.assigned_manager_id, '') as "assignedManagerId"
       from applications a left join vacancies v on v.id = a.vacancy_id
       where a.user_id = ${context.userId} order by a.created_at desc`;
     return rows.map((r) => ({
@@ -358,6 +370,7 @@ export const createApplication = createServerFn({ method: "POST" })
     if (!product) throw new Error("Permit unavailable");
     if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
     if (!data.citizenship || sameCountry(data.citizenship, product.country)) throw new Error("Citizenship");
+    if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
     if (dup[0]) return { id: dup[0].id };
     const id = newId("VG");
@@ -482,7 +495,7 @@ export const adminOverview = createServerFn({ method: "GET" })
     const proofs = await sql<{ c: number }>`select count(*)::int as c from applications a where a.status = 'OPEN' and a.stage = 2
       and exists (select 1 from documents d where d.application_id = a.id and d.category = 'PAYMENT_PROOF' and d.status = 'UPLOADED')`;
     const live = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
-    const users = await sql<{ userId: string; email: string; fullName: string; role: string }>`select user_id as "userId", email, full_name as "fullName", role from profiles order by email`;
+    const users = await sql<{ userId: string; email: string; fullName: string; phone: string; role: string }>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles order by email`;
     return {
       role: profile.role,
       waiting: Number(waiting[0]?.c ?? 0),
@@ -510,7 +523,8 @@ export const adminListApplications = createServerFn({ method: "POST" })
       a.profile_complete as "profileComplete", a.rejection_reason as "rejectionReason", a.dispatch_note as "dispatchNote",
       a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
       a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
-      coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer"
+      coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
+      coalesce(a.assigned_manager_id, '') as "assignedManagerId"
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
@@ -559,8 +573,10 @@ export const adminSetStage = createServerFn({ method: "POST" })
       if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
       await sql`update applications set stage = 2, stage2_at = now(), cancel_deadline_at = now() + interval '5 days', updated_at = now() where id = ${app.id}`;
     } else if (data.action === "reject") {
+      if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
       await sql`update applications set status = 'REJECTED', rejection_reason = ${data.reason}, updated_at = now() where id = ${app.id}`;
     } else if (data.action === "cancel") {
+      if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
       await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${app.id}`;
     } else if (data.action === "confirm-payment") {
       if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
@@ -663,6 +679,7 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     const product = products.find((p) => p.id === vacancy?.visaProductId);
     if (!vacancy || !product) throw new Error("Opening");
     if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
+    if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
     const user = await sql<{ id: string }>`select id from "user" where lower(email) = ${data.email} limit 1`;
     const id = newId("VG");
     const total = priceFor(product.basePrice, data.processing);
@@ -691,12 +708,13 @@ export const adminSaveVacancy = createServerFn({ method: "POST" })
       await sql`update vacancies set title = ${title}, country = ${clean(data.country, 80)}, visa_product_id = ${clean(data.visaProductId, 40)},
         employer = ${clean(data.employer, 160)}, salary_net = ${clean(data.salaryNet, 160)}, accommodation = ${clean(data.accommodation, 300)},
         working_hours = ${clean(data.workingHours, 200)}, description = ${clean(data.description, 2000)}, requirements = ${clean(data.requirements, 2000)},
-        quota = ${Math.max(0, Number(data.quota) || 0)}, active = ${Boolean(data.active)} where id = ${id}`;
+        quota = ${Math.max(0, Number(data.quota) || 0)}, active = ${Boolean(data.active)},
+        blocked_citizenships = ${clean(data.blockedCitizenships || "", 300)} where id = ${id}`;
     } else {
-      await sql`insert into vacancies (id, title, country, visa_product_id, employer, salary_net, accommodation, working_hours, description, requirements, quota, active)
+      await sql`insert into vacancies (id, title, country, visa_product_id, employer, salary_net, accommodation, working_hours, description, requirements, quota, active, blocked_citizenships)
         values (${id}, ${title}, ${clean(data.country, 80)}, ${clean(data.visaProductId, 40)}, ${clean(data.employer, 160)}, ${clean(data.salaryNet, 160)},
         ${clean(data.accommodation, 300)}, ${clean(data.workingHours, 200)}, ${clean(data.description, 2000)}, ${clean(data.requirements, 2000)},
-        ${Math.max(0, Number(data.quota) || 0)}, ${Boolean(data.active)})`;
+        ${Math.max(0, Number(data.quota) || 0)}, ${Boolean(data.active)}, ${clean(data.blockedCitizenships || "", 300)})`;
     }
     await audit(sql, context.userId, "VACANCY", id, title);
     return { id };
@@ -732,11 +750,16 @@ export const adminSaveTeam = createServerFn({ method: "POST" })
     const id = clean(data.id, 40) || newId("TM");
     const name = clean(data.fullName, 120);
     if (!name) throw new Error("Name");
-    const photo = data.photoData && data.photoData.length < MAX_DATA ? data.photoData : "";
+    const photo = data.photoData?.startsWith("data:") && data.photoData.length < MAX_DATA ? data.photoData : "";
     const existing = await sql<{ id: string }>`select id from team_members where id = ${id}`;
     if (existing[0]) {
-      await sql`update team_members set full_name = ${name}, position = ${clean(data.position, 120)}, phone = ${clean(data.phone, 40)},
-        photo_data = ${photo}, active = ${Boolean(data.active)} where id = ${id}`;
+      if (photo) {
+        await sql`update team_members set full_name = ${name}, position = ${clean(data.position, 120)}, phone = ${clean(data.phone, 40)},
+          photo_data = ${photo}, active = ${Boolean(data.active)} where id = ${id}`;
+      } else {
+        await sql`update team_members set full_name = ${name}, position = ${clean(data.position, 120)}, phone = ${clean(data.phone, 40)},
+          active = ${Boolean(data.active)} where id = ${id}`;
+      }
     } else {
       await sql`insert into team_members (id, full_name, position, phone, photo_data, sort_order, active)
         values (${id}, ${name}, ${clean(data.position, 120)}, ${clean(data.phone, 40)}, ${photo}, 9, ${data.active !== false})`;
@@ -918,3 +941,125 @@ export const adminAllTeam = createServerFn({ method: "GET" })
       active: boolean;
     }>`select id, full_name as "fullName", position, phone, photo_data as "photoData", active from team_members order by sort_order, full_name`;
   });
+
+function sheetsOn() {
+  return Boolean(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim());
+}
+
+export const cancelMyApplication = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).cancelMine(context.userId, id);
+    const sql = await getSql();
+    await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    const docs = await docsFor(sql, id);
+    if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF"))) {
+      throw new Error("Locked");
+    }
+    await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${id}`;
+    await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
+    await audit(sql, context.userId, "CLIENT_CANCEL", id, "");
+    return { ok: true };
+  });
+
+export const resubmitApplication = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).resubmit(context.userId, id);
+    const sql = await getSql();
+    const person = await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app || app.userId !== context.userId || app.status !== "REJECTED") throw new Error("Locked");
+    const citizenship = app.citizenship || parseQuestionnaire(app.questionnaire).citizenship;
+    if (!citizenship) throw new Error("Citizenship");
+    const vacancies = await loadVacancies(sql);
+    const products = await loadProducts(sql);
+    const vacancy = vacancies.find((item) => item.id === app.vacancyId && item.active);
+    const product = products.find((item) => item.id === vacancy?.visaProductId && item.active);
+    if (!vacancy || vacancy.quota < 1 || !product) throw new Error("Opening unavailable");
+    if (citizenshipBlocked(vacancy.blockedCitizenships, citizenship)) throw new Error("Citizenship");
+    const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
+    if (dup[0]) return { id: dup[0].id };
+    const next = newId("VG");
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire)
+      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })})`;
+    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
+    await audit(sql, context.userId, "RESUBMIT", next, id);
+    return { id: next };
+  });
+
+export const reviewDocument = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; status: string; reason?: string }) => ({
+    id: clean(input?.id, 40),
+    status: clean(input?.status, 20),
+    reason: clean(input?.reason, 500),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).reviewDocument(context.userId, data);
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    if (data.status !== "APPROVED" && data.status !== "REJECTED") throw new Error("Status");
+    const found = await sql<{ id: string }>`select id from documents where id = ${data.id}`;
+    if (!found[0]) throw new Error("Not found");
+    await sql`update documents set status = ${data.status}, rejection_reason = ${data.status === "REJECTED" ? data.reason : ""} where id = ${data.id}`;
+    await audit(sql, context.userId, "DOCUMENT", data.id, data.status);
+    return { ok: true };
+  });
+
+export const assignManagers = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { ids: string[]; managerId: string }) => ({
+    ids: Array.isArray(input?.ids) ? input.ids.map((id) => clean(id, 40)).filter(Boolean) : [],
+    managerId: clean(input?.managerId, 80),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).assignManagers(context.userId, data);
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    for (const id of data.ids) {
+      await sql`update applications set assigned_manager_id = ${data.managerId}, updated_at = now() where id = ${id}`;
+    }
+    await audit(sql, context.userId, "ASSIGN", data.managerId, data.ids.join(","));
+    return { ok: true };
+  });
+
+export const exportOpenCases = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).exportOpenCases(context.userId);
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const rows = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
+    const count = Number(rows[0]?.c ?? 0);
+    await audit(sql, context.userId, "EXPORT", "OpenCases", String(count));
+    return { count };
+  });
+
+export const updateMyContact = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { email: string; phone: string }) => ({
+    email: clean(input?.email, 180),
+    phone: clean(input?.phone, 40),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).updateMyContact(context.userId, data);
+    const sql = await getSql();
+    await ctxProfile(sql, context.userId);
+    const prior = await sql<{ id: string }>`select id from audit_log where actor_id = ${context.userId} and action = 'PROFILE_EDIT' limit 1`;
+    if (prior[0]) throw new Error("Locked");
+    const email = data.email.trim().toLowerCase();
+    const phone = data.phone.trim();
+    if (!email.includes("@") || phone.replace(/\D/g, "").length < 7) throw new Error("Contact");
+    const taken = await sql<{ id: string }>`select id from profiles where user_id <> ${context.userId} and lower(email) = ${email} limit 1`;
+    if (taken[0]) throw new Error("User with this email already exists.");
+    await sql`update profiles set email = ${email}, phone = ${phone} where user_id = ${context.userId}`;
+    await sql`update "user" set email = ${email}, "updatedAt" = now() where id = ${context.userId}`;
+    await audit(sql, context.userId, "PROFILE_EDIT", context.userId, email);
+    return { ok: true };
+  });
+

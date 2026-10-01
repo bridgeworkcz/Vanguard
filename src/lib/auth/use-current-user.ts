@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { authClient, authEnabled } from "./client";
-import { accountSession } from "@/lib/vanguard/account.server";
+import { accountSession } from "@/lib/vanguard/account";
 
 /** Normalized user shape used across the app, auth on or off. */
 export type AppUser = {

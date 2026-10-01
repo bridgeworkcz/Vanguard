@@ -7,9 +7,9 @@ type Schema = readonly string[];
 export const SHEET_SCHEMAS: Record<string, Schema> = {
   Users: ['id','email','phone','fullName','roles','passwordHash','createdAt','lastLoginAt','isActive'],
   Dossiers: ['id','userId','fullName','passportNumber','citizenship','targetCountry','vacancyId','vacancyTitle','processStatus','paymentStatus','currency','totalCost','paidAmount','remainingAmount','assignedManagerId','createdAt','updatedAt'],
-  DossierDocuments: ['id','dossierId','category','fileName','driveFileId','status','uploadedAt','reviewedAt','reviewedBy','rejectionReason'],
+  DossierDocuments: ['id','dossierId','category','fileName','driveFileId','status','uploadedAt','reviewedAt','reviewedBy','rejectionReason','mime'],
   PaymentTransactions: ['id','dossierId','userId','amount','currency','network','txHash','tranchePercent','trancheKey','status','submittedAt','verifiedAt','verifiedBy','proofFileId','proofFileName'],
-  Vacancies: ['id','title','category','country','salaryNet','salaryGross','accommodation','workingHours','description','quotaRemaining','isActive','visaProductId','visaDuration','processingOptions','employerLabel','requirements','createdAt','updatedAt'],
+  Vacancies: ['id','title','category','country','salaryNet','salaryGross','accommodation','workingHours','description','quotaRemaining','isActive','visaProductId','visaDuration','processingOptions','employerLabel','requirements','createdAt','updatedAt','blockedCitizenships'],
   Team: ['id','fullName','position','photoUrl','contactPhone','languages','bio','order','isActive'],
   AuditLog: ['id','actorUserId','action','targetEntity','targetEntityId','details','timestamp'],
   Applications: ['id','userId','vacancyId','applicantData','status','stage','visaProductId','country','processingOption','totalCost','currency','processStage','paymentDeadlineAt','documentDeadlineAt','assignedManagerId','createdAt','updatedAt','approvedAt','rejectedReason'],
@@ -18,6 +18,7 @@ export const SHEET_SCHEMAS: Record<string, Schema> = {
   Gallery: ['id','title','imageUrl','caption','order','isActive'],
   SupportTickets: ['id','userId','dossierId','subject','message','status','assignedManagerId','createdAt','updatedAt'],
   Backups: ['id','createdBy','driveFileId','fileName','createdAt'],
+  OpenCases: ['id','snapshotAt','applicationId','email','country','stage','status','deadline'],
 };
 
 function parsePrivateKey(raw: string | undefined): string {
@@ -122,6 +123,11 @@ export async function updateSheetRowById(name:string,id:string,patch:SheetRow):P
   const current=values[rowNumber-1]||[];
   const merged=schema.map((h,i)=>patch[h]!==undefined?String(patch[h]):String(current[i]??''));
   await sheetsFetch(`/values/${enc(name)}!A${rowNumber}:${col(schema.length)}${rowNumber}?valueInputOption=RAW`,{method:'PUT',body:JSON.stringify({range:`${name}!A${rowNumber}:${col(schema.length)}${rowNumber}`,majorDimension:'ROWS',values:[merged]})});
+}
+
+export async function clearSheetBody(name: string): Promise<void> {
+  const schema = await ensureSchema(name);
+  await sheetsFetch(`/values/${enc(name)}!A2:${col(schema.length)}:clear`, { method: "POST" });
 }
 
 export type SheetPrep = { name: string; action: "created" | "extended" | "ready" | "conflict"; detail?: string };

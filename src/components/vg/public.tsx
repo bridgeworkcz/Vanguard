@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Shell, storyKey, useSite } from "./chrome";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { createApplication } from "@/lib/vanguard/api";
@@ -10,6 +10,7 @@ import {
   sameCountry,
   type Processing,
 } from "@/lib/vanguard/domain";
+import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n } from "@/lib/vanguard/i18n";
 
 function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS" | "weeks" | "week") => string, p: Processing, min: number, max: number) {
@@ -26,6 +27,19 @@ export function HomePage() {
   const [productId, setProductId] = useState("");
   const [speed, setSpeed] = useState<Processing | "">("");
   const [msg, setMsg] = useState("");
+  useEffect(() => {
+    const raw = window.localStorage.getItem("vg-last-calc");
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" };
+      setCitizenship(saved.citizenship || "");
+      setCountry(saved.country || "");
+      setProductId(saved.productId || "");
+      setSpeed(saved.speed || "");
+    } catch {
+      /* ignore a broken local note */
+    }
+  }, []);
   const products = data?.products.filter((p) => p.active && p.country === country) ?? [];
   const product = products.find((p) => p.id === productId);
   const countries = useMemo(() => Array.from(new Set(data?.products.filter((p) => p.active).map((p) => p.country) ?? [])), [data]);
@@ -46,6 +60,7 @@ export function HomePage() {
       setMsg(t("calc_speed_unavailable"));
       return;
     }
+    window.localStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId: product.id, speed }));
     void navigate({
       to: "/search",
       search: { citizenship, country, product: product.id, speed },
@@ -70,7 +85,7 @@ export function HomePage() {
           >
             <p className="kicker">{t("calc_kicker")}</p>
             <h2 className="display mt-3 text-3xl">{t("calc_title")}</h2>
-            <div className="mt-6 grid gap-4">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_citizenship")}
                 <select className="field" value={citizenship} onChange={(e) => setCitizenship(e.target.value)}>
@@ -128,10 +143,8 @@ export function HomePage() {
                 </select>
               </label>
               {product && speed ? (
-                <p className="text-sm text-mist">{t(`speed_hint_${speed}`)}</p>
-              ) : (
-                <p className="text-sm text-mist">{t("speed_hint_STANDARD")}</p>
-              )}
+                <p className="display text-5xl sm:col-span-2 xl:col-span-4">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
+              ) : null}
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}
               <button className="btn-solid" type="submit" disabled={!data}>
@@ -177,7 +190,7 @@ export function SearchPage({
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
   const weeks = visa && pace ? productionWeeks(visa.productionMinWeeks, visa.productionMaxWeeks, pace) : 0;
   const fee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
-  const jobs = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota > 0) ?? [];
+  const jobs = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   return (
     <Shell>
       <div className="mx-auto max-w-6xl px-4 py-12">

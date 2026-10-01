@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
-import { accountAuth } from "@/lib/vanguard/account.server";
+import { accountAuth } from "@/lib/vanguard/account";
 import { useI18n } from "@/lib/vanguard/i18n";
 import { Shell } from "@/components/vg/chrome";
 
