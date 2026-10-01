@@ -21,6 +21,7 @@ import {
   adminSaveTeam,
   adminSaveVacancy,
   adminSetProcess,
+  adminSetReferrer,
   adminSetRole,
   adminSetStage,
   adminUploadFinal,
@@ -36,6 +37,7 @@ import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { downloadStamped } from "@/lib/vanguard/pdf";
 import { Shell, storyKey, useSite } from "./chrome";
+import { Pager } from "./pages";
 
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
 
@@ -97,6 +99,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [managerId, setManagerId] = useState("");
   const [exportNote, setExportNote] = useState("");
   const [docReason, setDocReason] = useState("");
+  const [caseQuery, setCaseQuery] = useState("");
+  const [casePage, setCasePage] = useState(1);
 
   function go(next: Tab, nextId = "") {
     void navigate({ to: "/admin", search: { tab: next, id: nextId } });
@@ -135,6 +139,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         setDispatch(d.app.dispatchNote);
       })
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+    void adminAudit().then(setAudit).catch(() => undefined);
   }, [id, role]);
 
   if (isPending) {
@@ -229,6 +234,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                         onChange={(e) => void adminSetRole({ data: { userId: u.userId, role: e.target.value } }).then(() => adminOverview().then(setOverview))}
                       >
                         <option>CLIENT</option>
+                        <option>SUBAGENT</option>
                         <option>MANAGER</option>
                         <option>ADMIN</option>
                       </select>
@@ -285,6 +291,16 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 {t("admin_export")}
               </button>
               {exportNote ? <span className="text-sm text-mist">{exportNote}</span> : null}
+              <input
+                className="field max-w-xs"
+                placeholder={t("admin_id_search")}
+                value={caseQuery}
+                onChange={(e) => {
+                  setCaseQuery(e.target.value);
+                  setCasePage(1);
+                }}
+              />
+              {role === "MANAGER" ? <p className="text-sm text-mist">{t("admin_only_mine")}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <select className="field max-w-xs" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
@@ -330,33 +346,75 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               </select>
               <button className="btn-solid" type="submit">{t("admin_create")}</button>
             </form>
-            <ul className="grid gap-2">
-              {apps
+            {(() => {
+              const filtered = apps
+                .filter((a) => role !== "MANAGER" || a.assignedManagerId === user?.id)
                 .filter((a) => !qCountry || a.country === qCountry)
                 .filter((a) => !qStage || String(a.stage) === qStage)
                 .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
                 .filter((a) => !unassignedOnly || !a.assignedManagerId)
-                .map((a) => (
-                <li key={a.id} className="flex items-start gap-3">
-                  <input
-                    className="mt-4"
-                    type="checkbox"
-                    checked={picked.includes(a.id)}
-                    onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, a.id] : cur.filter((id) => id !== a.id)))}
-                  />
-                  <button type="button" className="glass grid w-full gap-1 p-3 text-start sm:grid-cols-4" onClick={() => go("applications", a.id)}>
-                    <span>{a.clientEmail || a.id}</span>
-                    <span>{a.country}</span>
-                    <span>{a.vacancyTitle}</span>
-                    <span className="text-metal">
-                      {a.status} · <span className="ember">{a.stage}</span>
-                      {a.assignedManagerId ? "" : ` · ${t("admin_unassigned")}`}
-                      {!a.profileComplete && a.stage === 1 ? ` · ${t("admin_incomplete")}` : ""}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                .filter((a) => !caseQuery.trim() || a.id.toLowerCase().includes(caseQuery.trim().toLowerCase()));
+              const pages = Math.max(1, Math.ceil(filtered.length / 15));
+              const currentPage = Math.min(casePage, pages);
+              const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
+              return (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[880px] text-left text-sm">
+                      <thead className="text-mist">
+                        <tr>
+                          <th className="py-2" />
+                          <th className="py-2 font-medium">{t("filings_id")}</th>
+                          <th className="py-2 font-medium">{t("filings_date")}</th>
+                          <th className="py-2 font-medium">{t("name")}</th>
+                          <th className="py-2 font-medium">{t("admin_country")}</th>
+                          <th className="py-2 font-medium">{t("seat")}</th>
+                          <th className="py-2 font-medium">{t("admin_stage")}</th>
+                          <th className="py-2 font-medium">{t("portal_paid")}</th>
+                          <th className="py-2 font-medium">{t("admin_assign")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {slice.map((a) => (
+                          <tr key={a.id} className="border-t border-white/10">
+                            <td className="py-3">
+                              <input
+                                type="checkbox"
+                                checked={picked.includes(a.id)}
+                                onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, a.id] : cur.filter((id) => id !== a.id)))}
+                              />
+                            </td>
+                            <td>
+                              <button type="button" className="underline-offset-4 hover:underline" onClick={() => go("applications", a.id)}>
+                                {a.id}
+                              </button>
+                            </td>
+                            <td>{a.createdAt?.slice(0, 10)}</td>
+                            <td>{a.clientEmail || "—"}</td>
+                            <td>{a.country}</td>
+                            <td>
+                              {a.vacancyTitle}
+                              {a.employer ? <span className="block text-mist">{a.employer}</span> : null}
+                            </td>
+                            <td className="ember">
+                              {a.stage}
+                              {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) ? <span className="mt-1 block text-xs">{t("admin_overdue")}</span> : null}
+                              {!a.assignedManagerId ? <span className="mt-1 block text-xs text-mist">{t("admin_unassigned")}</span> : null}
+                              {a.stage >= 3 && a.status === "OPEN" ? <span className="mt-1 block text-xs text-mist">{t("admin_waiting_doc")}</span> : null}
+                            </td>
+                            <td>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
+                            <td>{a.assignedManagerId || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {filtered.length === 0 ? <p className="text-mist">{t("admin_empty_cases")}</p> : null}
+                  <p className="text-xs text-mist">{slice.length} / {filtered.length}</p>
+                  <Pager page={currentPage} pages={pages} onPage={setCasePage} />
+                </>
+              );
+            })()}
             {detail && id ? (
               <article className="glass p-5">
                 <p className="kicker">{detail.app.id}</p>
@@ -364,13 +422,55 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <p className="text-mist">
                   {detail.app.clientEmail} · {detail.app.totalCost} EUR · {detail.app.processing}
                 </p>
+                <p className="mt-3 ember">
+                  {detail.app.status !== "OPEN"
+                    ? t("portal_next_closed")
+                    : detail.app.stage === 1 && !detail.app.profileComplete
+                      ? t("admin_block_q")
+                      : detail.app.stage === 2 && !detail.documents.some((d) => d.category === "PAYMENT_PROOF" && d.status === "APPROVED")
+                        ? t("admin_block_pay")
+                        : detail.documents.some((d) => d.status === "REJECTED")
+                          ? t("admin_block_doc")
+                          : t("admin_block_ok")}
+                </p>
+                <label className="mt-4 grid max-w-sm gap-1 text-sm">
+                  {t("admin_referrer")}
+                  <select
+                    className="field"
+                    value={detail.app.referrerUserId || ""}
+                    onChange={(e) =>
+                      void adminSetReferrer({ data: { id: detail.app.id, referrerUserId: e.target.value } }).then(() =>
+                        adminGetApplication({ data: detail.app.id }).then(setDetail),
+                      )
+                    }
+                  >
+                    <option value="">{t("admin_referrer_none")}</option>
+                    {overview?.users
+                      .filter((u) => u.role === "SUBAGENT")
+                      .map((u) => (
+                        <option key={u.userId} value={u.userId}>
+                          {u.email || u.fullName}
+                        </option>
+                      ))}
+                  </select>
+                </label>
                 <pre className="mt-3 whitespace-pre-wrap text-sm text-paper/80">{detail.app.questionnaire}</pre>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" className="btn" onClick={() => void act("accept")}>{t("admin_accept")}</button>
-                  <button type="button" className="btn" onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
-                  <button type="button" className="btn" onClick={() => void act("stage4")}>{t("admin_to4")}</button>
-                  <button type="button" className="btn" onClick={() => void act("reject")}>{t("admin_reject")}</button>
-                  <button type="button" className="btn" onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
+                  {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
+                    <button type="button" className="btn" onClick={() => void act("accept")}>{t("admin_accept")}</button>
+                  ) : null}
+                  {detail.app.status === "OPEN" && detail.app.stage === 2 ? (
+                    <button type="button" className="btn" onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
+                  ) : null}
+                  {detail.app.status === "OPEN" && detail.app.stage === 3 ? (
+                    <button type="button" className="btn" onClick={() => void act("stage4")}>{t("admin_to4")}</button>
+                  ) : null}
+                  {detail.app.status === "OPEN" ? (
+                    <button type="button" className="btn" onClick={() => void act("reject")}>{t("admin_reject")}</button>
+                  ) : null}
+                  {detail.app.status === "OPEN" ? (
+                    <button type="button" className="btn" onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
+                  ) : null}
                 </div>
                 <input className="field mt-3" placeholder={t("admin_reason")} value={reason} onChange={(e) => setReason(e.target.value)} />
                 {detail.app.stage >= 3 ? (
@@ -479,6 +579,16 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {m.authorRole}: {m.body}
                     </li>
                   ))}
+                </ul>
+                <h3 className="mt-6 text-sm text-mist">{t("admin_history")}</h3>
+                <ul className="mt-2 text-sm">
+                  {audit
+                    .filter((row) => row.target === detail.app.id)
+                    .map((row) => (
+                      <li key={row.id}>
+                        {row.createdAt?.slice(0, 19)} · {row.action} · {row.details}
+                      </li>
+                    ))}
                 </ul>
               </article>
             ) : null}
@@ -825,6 +935,7 @@ function ContentEditor({
     { key: "regulator", label: "admin_field_regulator" },
     { key: "telegram_owner_chat", label: "admin_field_tg_owner" },
     { key: "telegram_staff_chat", label: "admin_field_tg_staff" },
+    { key: "subagent_rate", label: "admin_field_rate" },
   ];
   const story = storyKey(lang, "about_story");
   const lead = storyKey(lang, "about_lead");
@@ -967,7 +1078,7 @@ function ContentEditor({
 function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOnly: boolean; onSaved: () => void }) {
   const { t } = useI18n();
   const [p, setP] = useState(product);
-  useEffect(() => setP(product), [product.id, product.basePrice]);
+  useEffect(() => setP(product), [product.id, product.basePrice, product.active]);
   const toggle = (lane: Processing) => {
     if (readOnly) return;
     const has = p.allowedProcessing.includes(lane);
@@ -983,6 +1094,10 @@ function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOn
         </p>
       </div>
       <input className="field" type="number" disabled={readOnly} value={p.basePrice} onChange={(e) => setP({ ...p, basePrice: Number(e.target.value) })} />
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" disabled={readOnly} checked={p.active} onChange={(e) => setP({ ...p, active: e.target.checked })} />
+        {t("admin_offered")}
+      </label>
       <div className="flex flex-wrap gap-2 text-xs">
         {(["STANDARD", "PRIORITY", "EXPRESS"] as Processing[]).map((lane) => (
           <label key={lane} className="flex items-center gap-1">

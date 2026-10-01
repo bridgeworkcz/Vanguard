@@ -19,7 +19,7 @@ import {
   type VisaProduct,
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
-import { canCancel, citizenshipBlocked } from "./ops";
+import { canCancel, citizenshipBlocked, kyivMonth, monthCommission } from "./ops";
 
 type Profile = {
   userId: string;
@@ -209,6 +209,8 @@ export type AppRow = {
   vacancyTitle: string;
   employer: string;
   assignedManagerId: string;
+  referrerUserId: string;
+  stage4At: string | null;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -219,7 +221,9 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
     a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
     coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
-    coalesce(a.assigned_manager_id, '') as "assignedManagerId"
+    coalesce(a.assigned_manager_id, '') as "assignedManagerId",
+    coalesce(a.referrer_user_id, '') as "referrerUserId",
+    a.stage4_at::text as "stage4At"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -300,6 +304,102 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
   };
 });
 
+export const listPublicFilings = createServerFn({ method: "GET" }).handler(async () => {
+  if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    const mod = await import("./sheet-backend");
+    return mod.listPublicFilings();
+  }
+  const sql = await getSql();
+  await ensureSeed(sql);
+  const rows = await sql<{ id: string; citizenship: string; country: string; status: string; stage: number; createdAt: string }>`
+    select id, citizenship, country, status, stage, created_at::text as "createdAt" from applications order by created_at desc`;
+  return rows.map((row) => ({
+    id: row.id,
+    citizenship: row.citizenship || "",
+    country: row.country || "",
+    createdAt: row.createdAt || "",
+    status: row.status || "OPEN",
+    stage: Number(row.stage) || 1,
+  }));
+});
+
+export const takeInvoiceNumber = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.takeInvoiceNumber(context.userId);
+    }
+    const sql = await getSql();
+    const rows = await sql<{ value: string }>`select value from settings where key = 'invoice_seq'`;
+    const next = (Number(rows[0]?.value) || 1000) + 1;
+    await sql`insert into settings (key, value) values ('invoice_seq', ${String(next)}) on conflict (key) do update set value = ${String(next)}`;
+    return { number: `INV-${next}` };
+  });
+
+export const joinWaitlist = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { vacancyId: string; citizenship: string }) => ({
+    vacancyId: clean(input?.vacancyId, 40),
+    citizenship: clean(input?.citizenship, 80),
+  }))
+  .handler(async ({ context, data }) => {
+    if (!data.vacancyId) throw new Error("Opening");
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.joinWaitlist(context.userId, data);
+    }
+    const sql = await getSql();
+    await audit(sql, context.userId, "WAITLIST", data.vacancyId, data.citizenship);
+    return { ok: true };
+  });
+
+export const listAgentBook = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).agentBook(context.userId);
+    const sql = await getSql();
+    const person = await ctxProfile(sql, context.userId);
+    if (person.role !== "SUBAGENT") throw new Error("Forbidden");
+    const rateRow = await sql<{ value: string }>`select value from settings where key = 'subagent_rate'`;
+    const rate = Number(rateRow[0]?.value) || 10;
+    const rows = await sql<AppRow>`select a.id, a.user_id as "userId", a.client_email as "clientEmail", a.vacancy_id as "vacancyId",
+      a.visa_product_id as "visaProductId", a.country, a.citizenship, a.processing, a.total_cost as "totalCost", a.currency,
+      a.production_weeks as "productionWeeks", a.stage, a.status, a.process_stage as "processStage", a.questionnaire,
+      a.profile_complete as "profileComplete", a.rejection_reason as "rejectionReason", a.dispatch_note as "dispatchNote",
+      a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
+      a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
+      coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
+      coalesce(a.assigned_manager_id, '') as "assignedManagerId",
+      coalesce(a.referrer_user_id, '') as "referrerUserId",
+      a.stage4_at::text as "stage4At"
+      from applications a left join vacancies v on v.id = a.vacancy_id
+      where a.referrer_user_id = ${context.userId} order by a.created_at desc`;
+    const cases = rows.map((row) => ({
+      ...row,
+      totalCost: Number(row.totalCost),
+      stage: Number(row.stage),
+      productionWeeks: Number(row.productionWeeks),
+      profileComplete: Boolean(row.profileComplete),
+    }));
+    return {
+      code: person.userId,
+      email: person.email,
+      rate,
+      month: kyivMonth(),
+      commission: monthCommission(cases, rate),
+      cases: cases.map((app) => ({
+        id: app.id,
+        name: clientName(parseQuestionnaire(app.questionnaire)) || "—",
+        country: app.country,
+        citizenship: app.citizenship,
+        status: app.status,
+        stage: app.stage,
+        createdAt: app.createdAt,
+      })),
+    };
+  });
+
 export const getSessionProfile = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -327,7 +427,9 @@ export const listMyApplications = createServerFn({ method: "GET" })
       a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
       a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
       coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
-      coalesce(a.assigned_manager_id, '') as "assignedManagerId"
+      coalesce(a.assigned_manager_id, '') as "assignedManagerId",
+      coalesce(a.referrer_user_id, '') as "referrerUserId",
+      a.stage4_at::text as "stage4At"
       from applications a left join vacancies v on v.id = a.vacancy_id
       where a.user_id = ${context.userId} order by a.created_at desc`;
     return rows.map((r) => ({
@@ -356,7 +458,16 @@ export const getMyApplication = createServerFn({ method: "POST" })
     return { app, documents, messages };
   });
 
-type CreateInput = { vacancyId: string; citizenship: string; processing: Processing };
+type CreateInput = { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string };
+
+async function resolveReferrer(sql: Sql, code: string): Promise<string> {
+  const trimmed = code.trim();
+  if (!trimmed) return "";
+  const rows = await sql<{ userId: string; role: string }>`select user_id as "userId", role from profiles
+    where user_id = ${trimmed} or lower(email) = ${trimmed.toLowerCase()} limit 1`;
+  if (!rows[0] || rows[0].role !== "SUBAGENT") return "";
+  return rows[0].userId;
+}
 
 export const createApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -364,6 +475,7 @@ export const createApplication = createServerFn({ method: "POST" })
     vacancyId: clean(input?.vacancyId, 40),
     citizenship: clean(input?.citizenship, 80),
     processing: input?.processing,
+    agentCode: clean(input?.agentCode, 120),
   }))
   .handler(async ({ context, data }) => {
     if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
@@ -385,13 +497,23 @@ export const createApplication = createServerFn({ method: "POST" })
     if (!data.citizenship || sameCountry(data.citizenship, product.country)) throw new Error("Citizenship");
     if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
-    if (dup[0]) return { id: dup[0].id };
+    if (dup[0]) {
+      if (data.agentCode) {
+        const linked = await resolveReferrer(sql, data.agentCode);
+        if (linked) {
+          await sql`update applications set referrer_user_id = ${linked}, updated_at = now()
+            where id = ${dup[0].id} and (referrer_user_id is null or referrer_user_id = '')`;
+        }
+      }
+      return { id: dup[0].id };
+    }
+    const referrerUserId = await resolveReferrer(sql, data.agentCode || "");
     const id = newId("VG");
     const total = priceFor(product.basePrice, data.processing);
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
     const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: data.citizenship };
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire)
-      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id)
+      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId})`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "APPLICATION_OPENED", id, vacancy.title);
     return { id };
@@ -537,7 +659,9 @@ export const adminListApplications = createServerFn({ method: "POST" })
       a.stage2_at::text as "stage2At", a.stage3_at::text as "stage3At", a.cancel_deadline_at::text as "cancelDeadlineAt",
       a.doc_deadline_at::text as "docDeadlineAt", a.created_at::text as "createdAt", a.updated_at::text as "updatedAt",
       coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
-      coalesce(a.assigned_manager_id, '') as "assignedManagerId"
+      coalesce(a.assigned_manager_id, '') as "assignedManagerId",
+      coalesce(a.referrer_user_id, '') as "referrerUserId",
+      a.stage4_at::text as "stage4At"
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
@@ -602,7 +726,7 @@ export const adminSetStage = createServerFn({ method: "POST" })
       if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
       const finals = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'FINAL' limit 1`;
       if (!finals[0]) throw new Error("No finals");
-      await sql`update applications set stage = 4, updated_at = now() where id = ${app.id}`;
+      await sql`update applications set stage = 4, stage4_at = now(), updated_at = now() where id = ${app.id}`;
     } else {
       throw new Error("Action");
     }
@@ -691,14 +815,20 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     const vacancy = vacancies.find((v) => v.id === data.vacancyId);
     const product = products.find((p) => p.id === vacancy?.visaProductId);
     if (!vacancy || !product) throw new Error("Opening");
+    if (vacancy.quota < 1) throw new Error("Opening unavailable");
     if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
     if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
     const user = await sql<{ id: string }>`select id from "user" where lower(email) = ${data.email} limit 1`;
+    if (user[0]?.id) {
+      const dup = await sql<{ id: string }>`select id from applications where user_id = ${user[0].id} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
+      if (dup[0]) return { id: dup[0].id };
+    }
     const id = newId("VG");
     const total = priceFor(product.basePrice, data.processing);
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
     await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire)
       values (${id}, ${user[0]?.id ?? null}, ${data.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire("{}"), citizenship: data.citizenship })})`;
+    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "APPLICATION_CREATED", id, data.email);
     return { id };
   });
@@ -921,7 +1051,7 @@ export const adminSetRole = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
-    if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT") throw new Error("Role");
+    if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT" && data.role !== "SUBAGENT") throw new Error("Role");
     if (data.role !== "ADMIN") {
       const admins = await sql<{ c: number }>`select count(*)::int as c from profiles where role = 'ADMIN' and user_id <> ${data.userId}`;
       const target = await sql<{ role: string }>`select role from profiles where user_id = ${data.userId}`;
@@ -929,6 +1059,25 @@ export const adminSetRole = createServerFn({ method: "POST" })
     }
     await sql`update profiles set role = ${data.role} where user_id = ${data.userId}`;
     await audit(sql, context.userId, "ROLE", data.userId, data.role);
+  });
+
+export const adminSetReferrer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; referrerUserId: string }) => ({
+    id: clean(input?.id, 40),
+    referrerUserId: clean(input?.referrerUserId, 80),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).adminSetReferrer(context.userId, data);
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    if (!app) throw new Error("Not found");
+    const referrerUserId = data.referrerUserId ? await resolveReferrer(sql, data.referrerUserId) : "";
+    if (data.referrerUserId && !referrerUserId) throw new Error("Role");
+    await sql`update applications set referrer_user_id = ${referrerUserId}, updated_at = now() where id = ${app.id}`;
+    await audit(sql, context.userId, "REFERRER", app.id, referrerUserId);
+    return { ok: true };
   });
 
 export const adminAudit = createServerFn({ method: "GET" })
@@ -1005,8 +1154,8 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
     if (dup[0]) return { id: dup[0].id };
     const next = newId("VG");
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire)
-      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id)
+      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })}, ${app.referrerUserId || ""})`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "RESUBMIT", next, id);
     return { id: next };

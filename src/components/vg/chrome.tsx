@@ -52,7 +52,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
       .then((p) => setRole(p.role))
       .catch(() => setRole(null));
   }, [user?.id]);
-  const item = (to: "/" | "/about" | "/contact" | "/portal" | "/admin", label: string) => (
+  const item = (to: "/" | "/about" | "/contact" | "/filings" | "/process" | "/papers" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
     <Link
       to={to}
       className={`min-h-11 inline-flex items-center text-sm ${path === to ? "text-paper" : "text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink" : ""}`}
@@ -74,6 +74,11 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <nav className="flex flex-wrap items-center gap-x-4">
             {item("/", t("nav_home"))}
             {item("/about", t("nav_about"))}
+            {item("/filings", t("nav_filings"))}
+            {item("/process", t("nav_process"))}
+            {item("/papers", t("nav_papers"))}
+            {item("/questions", t("nav_questions"))}
+            {item("/agents", t("nav_agents"))}
             {item("/contact", t("nav_contact"))}
             {user ? item("/portal", t("nav_portal")) : null}
             {role === "ADMIN" || role === "MANAGER" ? item("/admin", t("nav_console")) : null}

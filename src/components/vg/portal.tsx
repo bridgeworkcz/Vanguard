@@ -8,10 +8,12 @@ import {
   downloadDocument,
   getMyApplication,
   getSessionProfile,
+  listAgentBook,
   listMyApplications,
   postMessage,
   resubmitApplication,
   saveQuestionnaire,
+  takeInvoiceNumber,
   updateMyContact,
   uploadMyDocument,
   type AppRow,
@@ -28,7 +30,7 @@ import {
 } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { canCancel } from "@/lib/vanguard/ops";
-import { buildContract, buildInvoice, downloadStamped } from "@/lib/vanguard/pdf";
+import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { Shell, useSite } from "./chrome";
 
 function remain(iso: string | null, now: number) {
@@ -68,6 +70,23 @@ function statusLabel(app: AppRow, t: (k: CopyKey) => string) {
   return t(`stage_${app.stage}` as CopyKey);
 }
 
+function nextAction(app: AppRow, hasProof: boolean, rejected: boolean, t: (k: CopyKey) => string) {
+  if (app.status !== "OPEN") return t("portal_next_closed");
+  if (app.stage === 1 && !app.profileComplete) return t("portal_next_q");
+  if (app.stage === 1) return t("portal_next_wait");
+  if (app.stage === 2 && !hasProof) return t("portal_next_pay");
+  if (rejected) return t("portal_next_docs");
+  if (app.stage >= 4) return t("portal_next_final");
+  return t("portal_next_docs");
+}
+
+function soon(iso: string | null, now: number) {
+  if (!iso) return false;
+  const ms = new Date(iso).getTime() - now;
+  if (Number.isNaN(ms) || ms <= 0) return false;
+  return ms <= 3 * 86400000;
+}
+
 export function PortalPage({ id }: { id: string }) {
   const { t, lang } = useI18n();
   const { user, isPending } = useCurrentUserState();
@@ -82,6 +101,8 @@ export function PortalPage({ id }: { id: string }) {
   const [err, setErr] = useState("");
   const [contact, setContact] = useState({ email: "", phone: "" });
   const [contactMsg, setContactMsg] = useState("");
+  const [role, setRole] = useState("");
+  const [book, setBook] = useState<Awaited<ReturnType<typeof listAgentBook>> | null>(null);
 
   async function refreshList() {
     const list = await listMyApplications();
@@ -90,7 +111,17 @@ export function PortalPage({ id }: { id: string }) {
   async function refreshDetail(appId: string) {
     const d = await getMyApplication({ data: appId });
     setDetail(d);
-    setQ(parseQuestionnaire(d.app.questionnaire));
+    const parsed = parseQuestionnaire(d.app.questionnaire);
+    if (!parsed.firstName && !parsed.lastName) {
+      try {
+        const raw = localStorage.getItem(`vg-draft-${appId}`);
+        setQ(raw ? { ...parsed, ...JSON.parse(raw) } : parsed);
+      } catch {
+        setQ(parsed);
+      }
+    } else {
+      setQ(parsed);
+    }
   }
 
   useEffect(() => {
@@ -101,7 +132,12 @@ export function PortalPage({ id }: { id: string }) {
   useEffect(() => {
     if (!user) return;
     getSessionProfile()
-      .then((p) => setContact({ email: p.email, phone: p.phone }))
+      .then((p) => {
+        setContact({ email: p.email, phone: p.phone });
+        setRole(p.role);
+        if (p.role === "SUBAGENT") return listAgentBook().then(setBook);
+        return undefined;
+      })
       .catch(() => undefined);
   }, [user?.id]);
 
@@ -113,7 +149,7 @@ export function PortalPage({ id }: { id: string }) {
       return;
     }
     sessionStorage.removeItem("vg-intent");
-    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS" };
+    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string };
     createApplication({ data: intent })
       .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
@@ -126,6 +162,12 @@ export function PortalPage({ id }: { id: string }) {
     }
     void refreshDetail(id).catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
   }, [user?.id, id]);
+
+  useEffect(() => {
+    const current = detail?.app;
+    if (!current || current.profileComplete || current.stage !== 1) return;
+    localStorage.setItem(`vg-draft-${current.id}`, JSON.stringify(q));
+  }, [q, detail]);
 
   if (isPending) {
     return (
@@ -164,6 +206,7 @@ export function PortalPage({ id }: { id: string }) {
 
   async function invoice(tranche: 1 | 2 | 3) {
     if (!app || !site || !visa) return;
+    const numbered = await takeInvoiceNumber().catch(() => ({ number: app.id }));
     await buildInvoice({
       lang,
       tranche,
@@ -175,6 +218,26 @@ export function PortalPage({ id }: { id: string }) {
       duration: visa.duration,
       employer: app.employer,
       total: app.totalCost,
+      date: new Date().toISOString().slice(0, 10),
+      number: numbered.number,
+    });
+  }
+
+  async function offer() {
+    if (!app || !site) return;
+    const job = site.vacancies.find((item) => item.id === app.vacancyId);
+    const person = parseQuestionnaire(app.questionnaire);
+    await buildOffer({
+      lang,
+      settings: site.settings,
+      fileId: app.id,
+      client: clientName(person),
+      country: app.country,
+      title: app.vacancyTitle,
+      employer: app.employer,
+      salary: job?.salaryNet || "",
+      hours: job?.workingHours || "",
+      housing: job?.accommodation || "",
       date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -202,6 +265,58 @@ export function PortalPage({ id }: { id: string }) {
         <p className="kicker ember">{t("portal_kicker")}</p>
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
+        {!id && role === "SUBAGENT" && book ? (
+          <section className="mt-8 grid gap-4">
+            <p className="kicker ember">{t("desk_kicker")}</p>
+            <h2 className="display text-4xl">{t("desk_title")}</h2>
+            <p className="max-w-2xl text-sm text-mist">{t("desk_only")}</p>
+            <div className="glass grid gap-4 p-5 sm:grid-cols-3">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-mist">{t("desk_code")}</p>
+                <p className="mt-1 text-lg">{book.code}</p>
+                <p className="text-sm text-mist">{book.email}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest text-mist">{t("desk_month")}</p>
+                <p className="mt-1">{book.month}</p>
+                <p className="text-sm text-mist">{t("desk_rate")} {book.rate}%</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest text-mist">{t("desk_commission")}</p>
+                <p className="display ember text-4xl">{book.commission}</p>
+                <p className="text-mist">EUR</p>
+              </div>
+            </div>
+            <p className="text-sm text-mist">{t("desk_code_help")}</p>
+            {book.cases.length === 0 ? <p className="text-mist">{t("desk_empty")}</p> : null}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead className="text-mist">
+                  <tr>
+                    <th className="py-2 font-medium">{t("filings_id")}</th>
+                    <th className="py-2 font-medium">{t("name")}</th>
+                    <th className="py-2 font-medium">{t("filings_from")}</th>
+                    <th className="py-2 font-medium">{t("filings_to")}</th>
+                    <th className="py-2 font-medium">{t("filings_date")}</th>
+                    <th className="py-2 font-medium">{t("filings_status")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {book.cases.map((row) => (
+                    <tr key={row.id} className="border-t border-white/10">
+                      <td className="py-3">{row.id}</td>
+                      <td>{row.name}</td>
+                      <td>{row.citizenship || "—"}</td>
+                      <td>{row.country}</td>
+                      <td>{row.createdAt?.slice(0, 10)}</td>
+                      <td className="ember">{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
         {!id ? (
           <div className="mt-8 grid gap-6">
             <form
@@ -242,13 +357,26 @@ export function PortalPage({ id }: { id: string }) {
             <Link to="/portal" search={{ id: "" }} className="text-sm text-mist">
               {t("portal_back")}
             </Link>
+            {rows && rows.length > 1 ? (
+              <div className="flex flex-wrap gap-2">
+                <span className="self-center text-xs uppercase tracking-widest text-mist">{t("portal_switch")}</span>
+                {rows.map((row) => (
+                  <Link key={row.id} to="/portal" search={{ id: row.id }} className={row.id === app.id ? "btn-solid" : "btn"}>
+                    {row.country}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
             <div className="glass p-5">
               <p className="kicker">{app.id}</p>
               <h2 className="display mt-2 text-4xl">{app.vacancyTitle}</h2>
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
-              <p className="mt-4 ember">{statusLabel(app, t)}</p>
+              <p className="mt-4 text-lg">{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
+              {(soon(app.cancelDeadlineAt, now) || soon(app.docDeadlineAt, now)) && app.status === "OPEN" ? (
+                <p className="mt-2 text-sm ember">{t("portal_remind")}</p>
+              ) : null}
               <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => (
                   <li key={label} className={app.stage >= index + 1 ? "border-t-2 border-[#ff6a1a] pt-2 text-sm" : "border-t border-white/20 pt-2 text-sm text-mist"}>
@@ -271,7 +399,9 @@ export function PortalPage({ id }: { id: string }) {
               ) : null}
               {parts ? (
                 <p className="mt-3 text-sm text-mist">
-                  30% {parts.first} · 40% {parts.second} · 30% {parts.final} EUR
+                  30% {parts.first} EUR · {app.stage >= 2 ? t("portal_paid") : t("portal_due")}
+                  {" · "}40% {parts.second} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
+                  {" · "}30% {parts.final} EUR · {app.stage >= 4 ? t("portal_paid") : t("portal_due")}
                 </p>
               ) : null}
             </div>
@@ -361,7 +491,9 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "OPEN" && app.stage >= 2 ? (
               <div className="flex flex-wrap gap-3">
+                <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
                 <button type="button" className="btn" onClick={() => void invoice(1)}>{t("invoice_1")}</button>
+                <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
                 <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
                 {app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
                   <button type="button" className="btn" onClick={() => void invoice(2)}>{t("invoice_2")}</button>

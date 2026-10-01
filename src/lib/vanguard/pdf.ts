@@ -96,6 +96,7 @@ export async function buildInvoice(opts: {
   employer: string;
   total: number;
   date: string;
+  number?: string;
 }) {
   const cs = opts.lang === "cs";
   const parts = tranches(opts.total);
@@ -111,7 +112,7 @@ export async function buildInvoice(opts: {
     font: bold,
     color: rgb(0.05, 0.05, 0.05),
   });
-  page.drawText(opts.fileId, { x: 40, y: 730, size: 10, font, color: rgb(0.35, 0.35, 0.35) });
+  page.drawText(opts.number || opts.fileId, { x: 40, y: 730, size: 10, font, color: rgb(0.35, 0.35, 0.35) });
   page.drawText(opts.date, { x: 430, y: 730, size: 10, font, color: rgb(0.35, 0.35, 0.35) });
   const meta: [string, string][] = [
     [cs ? "Klient" : "Client", opts.client || "—"],
@@ -271,6 +272,53 @@ export async function buildContract(opts: {
   page.drawText(opts.date, { x: 40, y: 54, size: 9, font, color: rgb(0.35, 0.35, 0.35) });
   void opts.q;
   save(await pdf.save(), `${opts.fileId}-agreement.pdf`);
+}
+
+export async function buildOffer(opts: {
+  lang: "en" | "cs" | "ur";
+  settings: Settings;
+  fileId: string;
+  client: string;
+  country: string;
+  title: string;
+  employer: string;
+  salary: string;
+  hours: string;
+  housing: string;
+  date: string;
+}) {
+  const cs = opts.lang === "cs";
+  const { pdf, font, bold } = await docBase();
+  const page = pdf.addPage([595.28, 841.89]);
+  const entity = opts.settings.legal_entity || "Vanguard Global Mobility s.r.o.";
+  header(page, bold, font, entity);
+  page.drawText(cs ? "Nabídka místa" : "Job offer", { x: 40, y: 750, size: 22, font: bold, color: rgb(0.05, 0.05, 0.05) });
+  page.drawText(`${opts.fileId} · ${opts.date}`, { x: 40, y: 728, size: 10, font, color: rgb(0.35, 0.35, 0.35) });
+  const lines: [string, string][] = [
+    [cs ? "Klient" : "Client", opts.client || "—"],
+    [cs ? "Země" : "Country", opts.country],
+    [cs ? "Místo" : "Opening", opts.title || "—"],
+    [cs ? "Zaměstnavatel" : "Employer", opts.employer || "—"],
+    [cs ? "Čistá mzda" : "Net pay", opts.salary || "—"],
+    [cs ? "Úvazek" : "Hours", opts.hours || "—"],
+    [cs ? "Ubytování" : "Housing", opts.housing || "—"],
+  ];
+  let y = 690;
+  for (const [k, v] of lines) {
+    page.drawText(k, { x: 40, y, size: 9, font, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(v.slice(0, 78), { x: 170, y, size: 11, font: bold, color: rgb(0.08, 0.08, 0.08) });
+    y -= 22;
+  }
+  const body = cs
+    ? "Tento list potvrzuje místo, které je ve spise. Není pracovní smlouvou a nenahrazuje smlouvu s Vanguard Global Mobility s.r.o. Klient podepisuje s námi. Zaměstnavatel potvrzuje místo zvlášť, až bude spis na řadě."
+    : "This letter names the opening on the file. It is not an employment contract, and it does not replace the agreement with Vanguard Global Mobility s.r.o. The client signs with us. The employer confirms the seat separately, when the file reaches that step.";
+  y -= 8;
+  for (const line of wrap(body, font, 11, 510)) {
+    page.drawText(line, { x: 40, y, size: 11, font, color: rgb(0.12, 0.12, 0.12) });
+    y -= 16;
+  }
+  stamp(page, font, bold);
+  save(await pdf.save(), `${opts.fileId}-offer.pdf`);
 }
 
 function dataUrlToBytes(dataUrl: string): Uint8Array {

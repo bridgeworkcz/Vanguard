@@ -213,6 +213,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   usdt_network: "TRC-20 (TRON)",
   telegram_owner_chat: "",
   telegram_staff_chat: "",
+  subagent_rate: "10",
   hero_title_en: "The permit, prepared properly.",
   hero_title_cs: "Povolení, připravené pořádně.",
   hero_title_ur: "اجازت نامہ، درست طریقے سے تیار۔",

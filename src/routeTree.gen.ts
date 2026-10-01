@@ -12,9 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ContactRouteImport } from './routes/contact'
+import { Route as FilingsRouteImport } from './routes/filings'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PapersRouteImport } from './routes/papers'
 import { Route as PortalRouteImport } from './routes/portal'
+import { Route as ProcessRouteImport } from './routes/process'
+import { Route as QuestionsRouteImport } from './routes/questions'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -35,9 +40,19 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ContactRoute = ContactRouteImport.update({
   id: '/contact',
   path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FilingsRoute = FilingsRouteImport.update({
+  id: '/filings',
+  path: '/filings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -45,9 +60,24 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PapersRoute = PapersRouteImport.update({
+  id: '/papers',
+  path: '/papers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/portal',
   path: '/portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProcessRoute = ProcessRouteImport.update({
+  id: '/process',
+  path: '/process',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuestionsRoute = QuestionsRouteImport.update({
+  id: '/questions',
+  path: '/questions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SearchRoute = SearchRouteImport.update({
@@ -75,9 +105,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/admin': typeof AdminRoute
+  '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
+  '/filings': typeof FilingsRoute
   '/login': typeof LoginRoute
+  '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/process': typeof ProcessRoute
+  '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -87,9 +122,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/admin': typeof AdminRoute
+  '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
+  '/filings': typeof FilingsRoute
   '/login': typeof LoginRoute
+  '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/process': typeof ProcessRoute
+  '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -100,9 +140,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/admin': typeof AdminRoute
+  '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
+  '/filings': typeof FilingsRoute
   '/login': typeof LoginRoute
+  '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/process': typeof ProcessRoute
+  '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/vacancies_/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -114,9 +159,14 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/admin'
+    | '/agents'
     | '/contact'
+    | '/filings'
     | '/login'
+    | '/papers'
     | '/portal'
+    | '/process'
+    | '/questions'
     | '/search'
     | '/vacancies/$id'
     | '/api/auth/$'
@@ -126,9 +176,14 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/admin'
+    | '/agents'
     | '/contact'
+    | '/filings'
     | '/login'
+    | '/papers'
     | '/portal'
+    | '/process'
+    | '/questions'
     | '/search'
     | '/vacancies/$id'
     | '/api/auth/$'
@@ -138,9 +193,14 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/admin'
+    | '/agents'
     | '/contact'
+    | '/filings'
     | '/login'
+    | '/papers'
     | '/portal'
+    | '/process'
+    | '/questions'
     | '/search'
     | '/vacancies_/$id'
     | '/api/auth/$'
@@ -151,9 +211,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   AdminRoute: typeof AdminRoute
+  AgentsRoute: typeof AgentsRoute
   ContactRoute: typeof ContactRoute
+  FilingsRoute: typeof FilingsRoute
   LoginRoute: typeof LoginRoute
+  PapersRoute: typeof PapersRoute
   PortalRoute: typeof PortalRoute
+  ProcessRoute: typeof ProcessRoute
+  QuestionsRoute: typeof QuestionsRoute
   SearchRoute: typeof SearchRoute
   VacanciesIdRoute: typeof VacanciesIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -183,11 +248,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/contact': {
       id: '/contact'
       path: '/contact'
       fullPath: '/contact'
       preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/filings': {
+      id: '/filings'
+      path: '/filings'
+      fullPath: '/filings'
+      preLoaderRoute: typeof FilingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -197,11 +276,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/papers': {
+      id: '/papers'
+      path: '/papers'
+      fullPath: '/papers'
+      preLoaderRoute: typeof PapersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/portal': {
       id: '/portal'
       path: '/portal'
       fullPath: '/portal'
       preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/process': {
+      id: '/process'
+      path: '/process'
+      fullPath: '/process'
+      preLoaderRoute: typeof ProcessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/questions': {
+      id: '/questions'
+      path: '/questions'
+      fullPath: '/questions'
+      preLoaderRoute: typeof QuestionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/search': {
@@ -239,9 +339,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   AdminRoute: AdminRoute,
+  AgentsRoute: AgentsRoute,
   ContactRoute: ContactRoute,
+  FilingsRoute: FilingsRoute,
   LoginRoute: LoginRoute,
+  PapersRoute: PapersRoute,
   PortalRoute: PortalRoute,
+  ProcessRoute: ProcessRoute,
+  QuestionsRoute: QuestionsRoute,
   SearchRoute: SearchRoute,
   VacanciesIdRoute: VacanciesIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

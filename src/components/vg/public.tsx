@@ -1,8 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, storyKey, useSite } from "./chrome";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { createApplication } from "@/lib/vanguard/api";
+import { createApplication, joinWaitlist } from "@/lib/vanguard/api";
 import {
   CITIZENSHIPS,
   priceFor,
@@ -202,13 +202,16 @@ export function SearchPage({
   speed: string;
 }) {
   const { t } = useI18n();
+  const { user } = useCurrentUserState();
   const { data } = useSite();
+  const [waitNote, setWaitNote] = useState("");
   const visa = data?.products.find((p) => p.id === product);
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : null;
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
   const weeks = visa && pace ? productionWeeks(visa.productionMinWeeks, visa.productionMaxWeeks, pace) : 0;
   const fee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
   const jobs = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
+  const full = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   return (
     <Shell>
       <div className="mx-auto max-w-6xl px-4 py-12">
@@ -241,6 +244,34 @@ export function SearchPage({
             </div>
             <div className="mt-8 grid gap-4">
               {jobs.length === 0 ? <p className="text-mist">{t("search_empty")}</p> : null}
+              {full.map((job) => (
+                <div key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
+                  <div className="md:col-span-2">
+                    <h2 className="display text-3xl">{job.title}</h2>
+                    <p className="mt-1 text-sm text-mist">{job.employer}</p>
+                    <p className="mt-2 text-sm text-mist">{t("search_wait")}</p>
+                  </div>
+                  <p className="text-sm ember">{job.salaryNet}</p>
+                  <div>
+                    {user ? (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() =>
+                          void joinWaitlist({ data: { vacancyId: job.id, citizenship } })
+                            .then(() => setWaitNote(t("search_wait_done")))
+                            .catch(() => setWaitNote(t("search_wait_in")))
+                        }
+                      >
+                        {t("search_wait_btn")}
+                      </button>
+                    ) : (
+                      <Link to="/login" className="btn">{t("search_wait_in")}</Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {waitNote ? <p className="text-sm text-metal">{waitNote}</p> : null}
               {jobs.map((job) => (
                 <Link
                   key={job.id}
@@ -284,20 +315,25 @@ export function VacancyPage({
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [agentCode, setAgentCode] = useState("");
+  useEffect(() => {
+    setAgentCode(sessionStorage.getItem("vg-agent") || "");
+  }, []);
   const job = data?.vacancies.find((v) => v.id === id);
   const visa = data?.products.find((p) => p.id === (product || job?.visaProductId));
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : "STANDARD";
   async function apply() {
     if (!job) return;
     if (!user) {
-      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship, processing: pace }));
+      sessionStorage.setItem("vg-agent", agentCode.trim());
+      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() }));
       void navigate({ to: "/login" });
       return;
     }
     setBusy(true);
     setErr("");
     try {
-      const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace } });
+      const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() } });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Error");
@@ -337,6 +373,17 @@ export function VacancyPage({
           ))}
         </dl>
         {err ? <p className="mt-4 text-sm text-metal">{err}</p> : null}
+        <label className="mt-6 grid max-w-sm gap-1 text-sm text-mist">
+          {t("agent_code")}
+          <input
+            className="field"
+            value={agentCode}
+            onChange={(e) => {
+              setAgentCode(e.target.value);
+              sessionStorage.setItem("vg-agent", e.target.value.trim());
+            }}
+          />
+        </label>
         {!user ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
         <button type="button" className="btn-solid mt-6" disabled={busy || !citizenship} onClick={() => void apply()}>
           {busy ? t("applying") : t("search_apply")}

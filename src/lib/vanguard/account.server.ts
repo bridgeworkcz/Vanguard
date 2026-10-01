@@ -43,7 +43,7 @@ function publicUser(row: Record<string, string>) {
     phone: row.phone,
     fullName: row.fullName,
     roles,
-    role: roles.includes("ADMIN") ? "ADMIN" : roles.includes("MANAGER") ? "MANAGER" : "CLIENT",
+    role: roles.includes("ADMIN") ? "ADMIN" : roles.includes("MANAGER") ? "MANAGER" : roles.includes("SUBAGENT") ? "SUBAGENT" : "CLIENT",
   };
 }
 

@@ -20,7 +20,7 @@ import {
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
-import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, trancheSplit } from "./ops";
+import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, kyivMonth, monthCommission, trancheSplit } from "./ops";
 
 const MAX_DATA = 900_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -34,9 +34,11 @@ type Extra = {
   questionnaire: Questionnaire;
   stage2At: string | null;
   stage3At: string | null;
+  stage4At: string | null;
   cancelDeadlineAt: string | null;
   paymentReminded: boolean;
   docReminded: boolean;
+  referrerUserId: string;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -67,6 +69,7 @@ function rolesOf(raw: string): string[] {
 function roleOf(roles: string[]) {
   if (roles.includes("ADMIN")) return "ADMIN";
   if (roles.includes("MANAGER")) return "MANAGER";
+  if (roles.includes("SUBAGENT")) return "SUBAGENT";
   return "CLIENT";
 }
 
@@ -201,9 +204,11 @@ function emptyExtra(): Extra {
     questionnaire: parseQuestionnaire("{}"),
     stage2At: null,
     stage3At: null,
+    stage4At: null,
     cancelDeadlineAt: null,
     paymentReminded: false,
     docReminded: false,
+    referrerUserId: "",
   };
 }
 
@@ -243,6 +248,7 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     dispatchNote: extra.dispatchNote,
     stage2At: extra.stage2At,
     stage3At: extra.stage3At,
+    stage4At: extra.stage4At,
     cancelDeadlineAt: extra.cancelDeadlineAt || row.paymentDeadlineAt || null,
     docDeadlineAt: row.documentDeadlineAt || null,
     createdAt: row.createdAt,
@@ -250,6 +256,7 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     vacancyTitle: vacancy?.title ?? "",
     employer: vacancy?.employer ?? "",
     assignedManagerId: row.assignedManagerId || "",
+    referrerUserId: extra.referrerUserId || "",
     extra,
     row,
   };
@@ -615,6 +622,34 @@ export async function publicSite() {
   return { settings, products, vacancies, team, media, partners };
 }
 
+export async function listPublicFilings() {
+  const apps = await loadApps();
+  return apps
+    .map((app) => ({
+      id: app.id,
+      citizenship: app.citizenship || "",
+      country: app.country || "",
+      createdAt: app.createdAt || "",
+      status: app.status || "OPEN",
+      stage: app.stage || 1,
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function takeInvoiceNumber(userId: string) {
+  await profile(userId);
+  const map = await settingMap();
+  const next = (Number(map.invoice_seq) || 1000) + 1;
+  await putSetting("invoice_seq", String(next), userId);
+  return { number: `INV-${next}` };
+}
+
+export async function joinWaitlist(userId: string, data: { vacancyId: string; citizenship: string }) {
+  await profile(userId);
+  await audit(userId, "WAITLIST", data.vacancyId, data.citizenship);
+  return { ok: true };
+}
+
 export async function sessionProfile(userId: string) {
   return profile(userId);
 }
@@ -634,7 +669,15 @@ export async function getMine(userId: string, id: string) {
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
 }
 
-export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing }) {
+async function resolveReferrer(code: string): Promise<string> {
+  const trimmed = code.trim();
+  if (!trimmed) return "";
+  const row = (await readSheetRows("Users")).find((item) => item.id === trimmed || item.email.toLowerCase() === trimmed.toLowerCase());
+  if (!row || roleOf(rolesOf(row.roles)) !== "SUBAGENT") return "";
+  return row.id;
+}
+
+export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string }) {
   const person = await profile(userId);
   if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
   const vacancies = await loadVacancies();
@@ -647,10 +690,17 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   if (!data.citizenship || sameCountry(data.citizenship, product.country)) throw new Error("Citizenship");
   if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
   const existing = (await loadApps()).find((app) => app.userId === userId && app.vacancyId === vacancy.id && app.status === "OPEN");
-  if (existing) return { id: existing.id };
+  if (existing) {
+    if (!existing.referrerUserId && (data.agentCode || data.referrerUserId)) {
+      const referrerUserId = await resolveReferrer(data.referrerUserId || data.agentCode || "");
+      if (referrerUserId) await saveApp(existing, { ...existing.extra, referrerUserId });
+    }
+    return { id: existing.id };
+  }
+  const referrerUserId = await resolveReferrer(data.referrerUserId || data.agentCode || "");
   const id = newId("VG");
   const stamp = nowIso();
-  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship } };
+  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
   await appendSheetRow("Applications", {
     id,
     userId,
@@ -856,7 +906,7 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
     const docs = await docsFor(app.id);
     if (!docs.some((doc) => doc.category === "FINAL")) throw new Error("No finals");
-    await saveApp(app, app.extra, { stage: "4" });
+    await saveApp(app, { ...app.extra, stage4At: nowIso() }, { stage: "4" });
     await markTrancheDue(app.id, "T3");
   } else throw new Error("Action");
   await audit(person.userId, data.action, app.id, data.reason);
@@ -899,8 +949,13 @@ export async function adminCreateApplication(userId: string, data: { email: stri
   const vacancy = vacancies.find((item) => item.id === data.vacancyId);
   const product = products.find((item) => item.id === vacancy?.visaProductId);
   if (!vacancy || !product) throw new Error("Opening");
+  if (vacancy.quota < 1) throw new Error("Opening unavailable");
   if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
   const user = (await readSheetRows("Users")).find((row) => row.email.toLowerCase() === data.email);
+  if (user?.id) {
+    const existing = (await loadApps()).find((app) => app.userId === user.id && app.vacancyId === vacancy.id && app.status === "OPEN");
+    if (existing) return { id: existing.id };
+  }
   const id = newId("VG");
   const stamp = nowIso();
   const extra: Extra = { ...emptyExtra(), clientEmail: data.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship } };
@@ -925,6 +980,8 @@ export async function adminCreateApplication(userId: string, data: { email: stri
     approvedAt: "",
     rejectedReason: "",
   });
+  const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancy.id);
+  if (raw) await updateSheetRowById("Vacancies", vacancy.id, vacancyTo({ ...vacancy, quota: Math.max(0, vacancy.quota - 1) }, raw));
   await audit(userId, "APPLICATION_CREATED", id, data.email);
   return { id };
 }
@@ -1074,15 +1131,52 @@ export async function adminDeletePartner(userId: string, id: string) {
 
 export async function adminSetRole(userId: string, data: { userId: string; role: string }) {
   await requireAdmin(userId);
-  if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT") throw new Error("Role");
+  if (data.role !== "ADMIN" && data.role !== "MANAGER" && data.role !== "CLIENT" && data.role !== "SUBAGENT") throw new Error("Role");
   const rows = await readSheetRows("Users");
   const target = rows.find((row) => row.id === data.userId);
   if (!target) throw new Error("Not found");
   const admins = rows.filter((row) => row.id !== data.userId && roleOf(rolesOf(row.roles)) === "ADMIN");
   if (data.role !== "ADMIN" && roleOf(rolesOf(target.roles)) === "ADMIN" && admins.length < 1) throw new Error("Last admin");
-  const roles = data.role === "ADMIN" ? ["ADMIN"] : data.role === "MANAGER" ? ["MANAGER"] : ["CLIENT"];
+  const roles = data.role === "ADMIN" ? ["ADMIN"] : data.role === "MANAGER" ? ["MANAGER"] : data.role === "SUBAGENT" ? ["SUBAGENT"] : ["CLIENT"];
   await updateSheetRowById("Users", target.id, { ...target, roles: JSON.stringify(roles) });
   await audit(userId, "ROLE", data.userId, data.role);
+}
+
+export async function adminSetReferrer(userId: string, data: { id: string; referrerUserId: string }) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app) throw new Error("Not found");
+  const referrerUserId = data.referrerUserId ? await resolveReferrer(data.referrerUserId) : "";
+  if (data.referrerUserId && !referrerUserId) throw new Error("Role");
+  await saveApp(app, { ...app.extra, referrerUserId });
+  await audit(userId, "REFERRER", app.id, referrerUserId);
+  return { ok: true };
+}
+
+export async function agentBook(userId: string) {
+  const person = await profile(userId);
+  if (person.role !== "SUBAGENT") throw new Error("Forbidden");
+  const map = await settingMap();
+  const rate = Number(map.subagent_rate) || 10;
+  const cases = (await loadApps()).filter((app) => app.referrerUserId === userId);
+  return {
+    code: person.userId,
+    email: person.email,
+    rate,
+    month: kyivMonth(),
+    commission: monthCommission(cases, rate),
+    cases: cases
+      .map((app) => ({
+        id: app.id,
+        name: clientName(parseQuestionnaire(app.questionnaire)) || "—",
+        country: app.country,
+        citizenship: app.citizenship,
+        status: app.status,
+        stage: app.stage,
+        createdAt: app.createdAt,
+      }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  };
 }
 
 export async function adminAudit(userId: string) {
@@ -1125,7 +1219,7 @@ export async function resubmit(userId: string, id: string) {
   if (!app || app.userId !== userId || app.status !== "REJECTED") throw new Error("Locked");
   const citizenship = app.citizenship || app.extra.questionnaire.citizenship;
   if (!citizenship) throw new Error("Citizenship");
-  return createApp(userId, { vacancyId: app.vacancyId, citizenship, processing: app.processing });
+  return createApp(userId, { vacancyId: app.vacancyId, citizenship, processing: app.processing, referrerUserId: app.referrerUserId });
 }
 
 export async function reviewDocument(userId: string, data: { id: string; status: string; reason: string }) {
