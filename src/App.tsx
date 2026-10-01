@@ -1,6 +1,228 @@
-import React,{useEffect,useState} from 'react';import {AuthProvider,useAuth} from './context/AuthContext';import {Navbar,AppRoute} from './components/Navbar';import {HomeCalculator,VacanciesPage,AboutPage} from './components/PublicPages';
-import {ManagerDashboard} from './components/ManagerDashboard';
-import {LanguageProvider,useLanguage} from './i18n/LanguageContext';import {ClientPortal} from './components/ClientPortal';import {AdminPanel} from './components/AdminPanel';import {contentApi} from './services/api';import {ArrowRight,ShieldCheck,LockKeyhole,Globe2,ChevronRight} from 'lucide-react';
-const Home:React.FC<{go:(r:AppRoute)=>void}>=({go})=>{const [content,setContent]=useState<{settings:Record<string,string>;gallery:any[]}>({settings:{},gallery:[]});const {t}=useLanguage();useEffect(()=>{contentApi.get().then(setContent).catch(()=>{})},[]);const s=content.settings;return <div><section className="hero"><div className="hero-glow"/><div className="page-wrap hero-inner"><div className="hero-copy"><p className="eyebrow">{s.hero_eyebrow||t('heroEyebrow')}</p><h1>{s.hero_title||t('heroTitle')}</h1><p className="hero-sub">{s.hero_subtitle||t('heroSub')}</p><div className="hero-actions"><button className="primary-btn" onClick={()=>go('vacancies')}>{t('explore')} <ArrowRight size={16}/></button><button className="secondary-btn" onClick={()=>go('portal')}>{t('portal')}</button></div><div className="trust-row"><span><ShieldCheck/> Structured workflow</span><span><LockKeyhole/> Server-side access</span><span><Globe2/> Multi-country operations</span></div></div><div className="hero-card glass"><div className="hero-card-top"><span>OPERATIONS</span><span className="live-dot">LIVE</span></div><div className="hero-card-line"><b>Applications</b><span>→ review → approval → dossier</span></div><div className="hero-card-line"><b>Documents</b><span>→ upload → review → final vault</span></div><div className="hero-card-line"><b>Payments</b><span>→ submit → staff review</span></div><div className="hero-card-footer">Google Sheets · Drive Vault · Telegram</div></div></div></section><section className="page-wrap"><HomeCalculator onResults={()=>{}}/></section><section className="page-wrap feature-section"><div className="section-hero compact"><p className="eyebrow">ONE WORKSPACE</p><h2>Everything connected to the dossier.</h2><p>Client actions and staff operations are separated by server-side permissions.</p></div><div className="feature-grid"><div className="feature-card"><div className="feature-icon"><ChevronRight/></div><h3>Client portal</h3><p>Applications, documents, payment submissions and case status.</p></div><div className="feature-card"><div className="feature-icon"><ChevronRight/></div><h3>Operations CRM</h3><p>Dossiers, workflow stages, document and payment review.</p></div><div className="feature-card"><div className="feature-icon"><ChevronRight/></div><h3>Vacancy catalogue</h3><p>Country-specific vacancies with editable quotas and service products.</p></div><div className="feature-card"><div className="feature-icon"><ChevronRight/></div><h3>Executive console</h3><p>Content, users, roles, team, pricing, audit and backups.</p></div></div></section>{content.gallery.length>0&&<section className="page-wrap"><div className="section-hero compact"><p className="eyebrow">FIELD GALLERY</p><h2>Vanguard in focus</h2></div><div className="gallery-grid">{content.gallery.map((g:any)=><article className="team-card" key={g.id}><img src={g.imageUrl} alt=""/><h2>{g.title}</h2><p>{g.caption}</p></article>)}</div></section>}</div>};
-const Main:React.FC=()=>{const [route,setRoute]=useState<AppRoute>(()=>{const p=window.location.pathname.replace(/^\//,'');return (['home','vacancies','about','portal','admin'] as string[]).includes(p)?p as AppRoute:'home'});const {user,loading}=useAuth();useEffect(()=>{const onPop=()=>{const p=window.location.pathname.replace(/^\//,'');setRoute((['home','vacancies','about','portal','admin'] as string[]).includes(p)?p as AppRoute:'home')};window.addEventListener('popstate',onPop);return()=>window.removeEventListener('popstate',onPop)},[]);const navigate=(r:AppRoute)=>{setRoute(r);const path=r==='home'?'/':`/${r}`;if(window.location.pathname!==path)window.history.pushState({route:r},'',path);window.scrollTo({top:0,behavior:'smooth'})};if(loading)return <div className="app-loading">Loading Vanguard…</div>;const isStaff=!!user?.roles.some(r=>r==='ADMIN'||r==='MANAGER');const isAdmin=!!user?.roles.includes('ADMIN');return <div className="app-shell"><Navbar route={route} setRoute={navigate}/><main>{route==='home'&&<Home go={navigate}/>} {route==='vacancies'&&<VacanciesPage onApply={()=>navigate(user?'portal':'home')}/>} {route==='about'&&<AboutPage/>} {route==='portal'&&(user?(isStaff?<ManagerDashboard/>:<ClientPortal/>):<Home go={navigate}/>)} {route==='admin'&&(isAdmin?<AdminPanel/>:<Home go={navigate}/>)}</main><footer className="footer"><div><b>VANGUARD GLOBAL MOBILITY</b><span>Secure client and operations workspace</span></div><span>© 2026 Vanguard</span></footer></div>};
-export const App=()=> <LanguageProvider><AuthProvider><Main/></AuthProvider></LanguageProvider>;export default App;
+import React, { useEffect, useState } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { Navbar, AppRoute } from './components/Navbar';
+import { HomeCalculator, VacanciesPage, AboutPage } from './components/PublicPages';
+import { LanguageProvider, useLanguage } from './i18n/LanguageContext';
+import { ClientPortal } from './components/ClientPortal';
+import { AdminConsole } from './components/AdminConsole';
+import { contentApi } from './services/api';
+import { ArrowRight, ShieldCheck, LockKeyhole, Globe2, Eye, LayoutDashboard } from 'lucide-react';
+
+const PublicHome: React.FC<{ go: (r: AppRoute) => void }> = ({ go }) => {
+  const [content, setContent] = useState<{ settings: Record<string, string>; gallery: any[] }>({
+    settings: {},
+    gallery: []
+  });
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    contentApi.get().then(setContent).catch(() => {});
+  }, []);
+
+  const s = content.settings;
+
+  return (
+    <div>
+      <section className="hero">
+        <div className="hero-glow" />
+        <div className="page-wrap hero-inner">
+          <div className="hero-copy">
+            <p className="eyebrow">{s.hero_eyebrow || t('heroEyebrow')}</p>
+            <h1>{s.hero_title || t('heroTitle')}</h1>
+            <p className="hero-sub">{s.hero_subtitle || t('heroSub')}</p>
+            <div className="hero-actions">
+              <button className="primary-btn" onClick={() => go('vacancies')}>
+                {t('explore')} <ArrowRight size={16} />
+              </button>
+              <button className="secondary-btn" onClick={() => go('about')}>
+                {t('about')}
+              </button>
+            </div>
+            <div className="trust-row">
+              <span><ShieldCheck /> Ліцензований супровід</span>
+              <span><LockKeyhole /> Безпечні контракти</span>
+              <span><Globe2 /> 14 країн світу</span>
+            </div>
+          </div>
+
+          <div className="hero-card glass">
+            <div className="hero-card-top">
+              <span>ПРОЦЕС ВИГОТОВЛЕННЯ</span>
+              <span className="live-dot">LIVE</span>
+            </div>
+            <div className="hero-card-line">
+              <b>Статус 1</b>
+              <span>Анкета → Перевірка</span>
+            </div>
+            <div className="hero-card-line">
+              <b>Статус 2</b>
+              <span>Скани документів + 5 днів на оплату 30%</span>
+            </div>
+            <div className="hero-card-line">
+              <b>Статус 3</b>
+              <span>8 етапів обробки + Інвойс 40% + Водяні знаки</span>
+            </div>
+            <div className="hero-card-line">
+              <b>Статус 4</b>
+              <span>Фінал 30% + Доставка DHL по всьому світу</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="page-wrap">
+        <HomeCalculator onResults={() => {}} />
+      </section>
+    </div>
+  );
+};
+
+const MainRouter: React.FC = () => {
+  const { user, loading, logout } = useAuth();
+  const [publicRoute, setPublicRoute] = useState<AppRoute>(() => {
+    const p = window.location.pathname.replace(/^\//, '');
+    return (['home', 'vacancies', 'about'] as string[]).includes(p) ? (p as AppRoute) : 'home';
+  });
+
+  const [previewPublicSite, setPreviewPublicSite] = useState(false);
+
+  useEffect(() => {
+    const onPop = () => {
+      const p = window.location.pathname.replace(/^\//, '');
+      if (['home', 'vacancies', 'about'].includes(p)) {
+        setPublicRoute(p as AppRoute);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const navigatePublic = (r: AppRoute) => {
+    setPublicRoute(r);
+    const path = r === 'home' ? '/' : `/${r}`;
+    if (window.location.pathname !== path) {
+      window.history.pushState({ route: r }, '', path);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (loading) {
+    return <div className="app-loading">Завантаження Vanguard…</div>;
+  }
+
+  const isAdmin = !!user?.roles.includes('ADMIN');
+  const isManager = !!user?.roles.includes('MANAGER');
+  const isStaff = isAdmin || isManager;
+
+  // 1. АДМІНІСТРАТОР ТА МЕНЕДЖЕР -> Операційна консоль
+  if (isStaff && !previewPublicSite) {
+    return (
+      <div className="staff-workspace">
+        <div className="staff-top-strip">
+          <span>
+            {isAdmin ? '🛡️ РЕЖИМ АДМІНІСТРАТОРА (EXECUTIVE CONSOLE)' : '💼 РЕЖИМ МЕНЕДЖЕРА (OPERATIONAL CONSOLE)'}
+          </span>
+          <div className="strip-actions">
+            <button className="preview-btn" onClick={() => setPreviewPublicSite(true)}>
+              <Eye size={14} /> Переглянути публічний сайт
+            </button>
+            <span className="user-email">{user?.email}</span>
+            <button className="logout-btn" onClick={logout}>Вийти</button>
+          </div>
+        </div>
+        <AdminConsole limited={!isAdmin} />
+      </div>
+    );
+  }
+
+  if (isStaff && previewPublicSite) {
+    return (
+      <div className="app-shell">
+        <div className="preview-floating-bar">
+          <span>👁️ Ви переглядаєте публічний сайт у режимі персоналу</span>
+          <button className="primary-btn compact-btn" onClick={() => setPreviewPublicSite(false)}>
+            <LayoutDashboard size={14} /> Повернутися до Консолі керування
+          </button>
+        </div>
+        <Navbar route={publicRoute} setRoute={navigatePublic} />
+        <main>
+          {publicRoute === 'home' && <PublicHome go={navigatePublic} />}
+          {publicRoute === 'vacancies' && <VacanciesPage onApply={() => {}} />}
+          {publicRoute === 'about' && <AboutPage />}
+        </main>
+      </div>
+    );
+  }
+
+  // 2. КЛІЄНТ -> Client Portal
+  if (user) {
+    return (
+      <div className="app-shell">
+        <header className="client-top-bar glass">
+          <div className="brand">
+            <span className="brand-mark">V</span>
+            <div>
+              <b>VANGUARD</b>
+              <small>CLIENT WORKSPACE</small>
+            </div>
+          </div>
+          <div className="client-nav-actions">
+            <button
+              className={publicRoute === 'vacancies' ? 'active text-btn' : 'text-btn'}
+              onClick={() => navigatePublic(publicRoute === 'vacancies' ? 'home' : 'vacancies')}
+            >
+              {publicRoute === 'vacancies' ? '← Мій кабінет' : 'Каталог вакансій'}
+            </button>
+            <span className="user-badge">{user.fullName}</span>
+            <button className="icon-btn" onClick={logout} title="Вийти">Вийти</button>
+          </div>
+        </header>
+
+        <main>
+          {publicRoute === 'vacancies' ? (
+            <VacanciesPage onApply={() => navigatePublic('home')} />
+          ) : (
+            <ClientPortal />
+          )}
+        </main>
+
+        <footer className="footer">
+          <div>
+            <b>VANGUARD GLOBAL MOBILITY</b>
+            <span>Official Client Portal</span>
+          </div>
+          <span>© 2026 Vanguard. All rights reserved.</span>
+        </footer>
+      </div>
+    );
+  }
+
+  // 3. ГІСТЬ -> Тільки публічний сайт
+  return (
+    <div className="app-shell">
+      <Navbar route={publicRoute} setRoute={navigatePublic} />
+      <main>
+        {publicRoute === 'home' && <PublicHome go={navigatePublic} />}
+        {publicRoute === 'vacancies' && <VacanciesPage onApply={() => {}} />}
+        {publicRoute === 'about' && <AboutPage />}
+      </main>
+      <footer className="footer">
+        <div>
+          <b>VANGUARD GLOBAL MOBILITY</b>
+          <span>Official European Corporate Mobility Platform</span>
+        </div>
+        <span>© 2026 Vanguard</span>
+      </footer>
+    </div>
+  );
+};
+
+export const App = () => (
+  <LanguageProvider>
+    <AuthProvider>
+      <MainRouter />
+    </AuthProvider>
+  </LanguageProvider>
+);
+
+export default App;

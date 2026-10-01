@@ -16,9 +16,10 @@ const VALID_CATEGORIES: DocumentCategory[] = [
   'EDUCATION_DIPLOMA',
   'MEDICAL_CLEARANCE',
   'CONTRACT',
+  'PHOTO',
+  'OTHER',
+  'FINAL_DOCUMENT'
 ];
-
-// --- 1. Обробник отримання документів (GET Handler) ---
 
 async function handleGet(req: VercelRequest, res: VercelResponse) {
   const auth = authenticateRequest(req.headers.authorization);
@@ -29,20 +30,17 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   const { session } = auth;
   const dossierId = req.query.dossierId ? String(req.query.dossierId).trim() : '';
   if (!dossierId) {
-    if (!isStaff(session)) return res.status(400).json({ error: 'Validation Error: Parameter dossierId is required.' });
+    if (!isStaff(session)) return res.status(400).json({ error: 'Parameter dossierId is required.' });
     const all = (await readSheetRows(DOCUMENTS_SHEET_NAME)).map(mapRowToDocument);
     return res.status(200).json({ documents: all });
   }
 
-  // Перевірка існування досьє
   const dossierRow = await findSheetRowById(DOSSIERS_SHEET_NAME, dossierId);
   if (!dossierRow) {
-    return res.status(404).json({ error: `Dossier Error: Dossier with ID '${dossierId}' not found.` });
+    return res.status(404).json({ error: `Dossier with ID '${dossierId}' not found.` });
   }
 
   const dossier = mapRowToDossier(dossierRow);
-
-  // Валідація права власності (Ownership Check)
   const ownership = validateOwnership(session, dossier.userId);
   if (!ownership.authorized) {
     return res.status(ownership.statusCode).json({ error: ownership.errorMessage });
@@ -55,8 +53,6 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
 
   return res.status(200).json({ documents: dossierDocs });
 }
-
-// --- 2. Обробник завантаження документа (Upload Handler) ---
 
 async function handleUpload(req: VercelRequest, res: VercelResponse) {
   const auth = authenticateRequest(req.headers.authorization);
@@ -75,20 +71,19 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
 
   if (!cleanDossierId || !cleanCategory || !cleanFileName || !cleanBase64) {
     return res.status(400).json({
-      error: 'Validation Error: dossierId, category, fileName, and fileBase64 are required.',
+      error: 'Validation Error: dossierId, category, fileName, and fileBase64 are required.'
     });
   }
 
   if (!VALID_CATEGORIES.includes(cleanCategory)) {
     return res.status(400).json({
-      error: `Validation Error: Invalid category '${cleanCategory}'. Allowed: ${VALID_CATEGORIES.join(', ')}`,
+      error: `Validation Error: Invalid category '${cleanCategory}'. Allowed: ${VALID_CATEGORIES.join(', ')}`
     });
   }
 
-  // Перевірка досьє та прав власності
   const dossierRow = await findSheetRowById(DOSSIERS_SHEET_NAME, cleanDossierId);
   if (!dossierRow) {
-    return res.status(404).json({ error: `Dossier Error: Dossier with ID '${cleanDossierId}' not found.` });
+    return res.status(404).json({ error: `Dossier with ID '${cleanDossierId}' not found.` });
   }
 
   const dossier = mapRowToDossier(dossierRow);
@@ -97,16 +92,12 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
     return res.status(ownership.statusCode).json({ error: ownership.errorMessage });
   }
 
-  // Декодування Base64 у бінарний Buffer
   const fileBuffer = Buffer.from(cleanBase64, 'base64');
   if (fileBuffer.length === 0) {
     return res.status(400).json({ error: 'Upload Error: Decoded file buffer is empty.' });
   }
 
-  // Отримання або створення папки в Drive Vault: Dossiers/{dossierId}/{category}
   const categoryFolderId = await getDossierCategoryFolder(cleanDossierId, cleanCategory);
-
-  // Завантаження файлу в Google Drive Vault
   const driveResult = await uploadFileToDrive(
     categoryFolderId,
     cleanFileName,
@@ -116,8 +107,8 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
 
   const docId = `DOC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const now = new Date().toISOString();
-
   const finalByStaff = isStaff(session) && cleanCategory === 'FINAL_DOCUMENT';
+
   const newDoc: DossierDocument = {
     id: docId,
     dossierId: cleanDossierId,
@@ -127,19 +118,17 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
     status: finalByStaff ? 'APPROVED' : 'UPLOADED',
     uploadedAt: now,
     reviewedAt: finalByStaff ? now : undefined,
-    reviewedBy: finalByStaff ? session.userId : undefined,
+    reviewedBy: finalByStaff ? session.userId : undefined
   };
 
-  const rowData = mapDocumentToRow(newDoc);
-  await appendSheetRow(DOCUMENTS_SHEET_NAME, rowData);
+  await appendSheetRow(DOCUMENTS_SHEET_NAME, mapDocumentToRow(newDoc));
 
-  // Аудит та сповіщення
   await recordSafeAuditLog({
     actorUserId: session.userId,
     action: 'DOCUMENT_UPLOAD',
     targetEntity: 'DOCUMENT',
     targetEntityId: newDoc.id,
-    details: `Uploaded ${cleanCategory} for dossier ${cleanDossierId}`,
+    details: `Uploaded ${cleanCategory} for dossier ${cleanDossierId}`
   });
 
   await sendSafeTelegramAlert(
@@ -153,8 +142,6 @@ async function handleUpload(req: VercelRequest, res: VercelResponse) {
   return res.status(201).json({ document: newDoc });
 }
 
-// --- 3. Обробник верифікації документа (Review Handler) ---
-
 async function handleReview(req: VercelRequest, res: VercelResponse) {
   const auth = authenticateRequest(req.headers.authorization);
   if (!auth.authorized || !auth.session) {
@@ -162,12 +149,8 @@ async function handleReview(req: VercelRequest, res: VercelResponse) {
   }
 
   const { session } = auth;
-
-  // Верифікувати документи має право лише персонал (MANAGER або ADMIN)
   if (!isStaff(session)) {
-    return res.status(403).json({
-      error: 'Forbidden Error: Only Managers and Admins can review documents.',
-    });
+    return res.status(403).json({ error: 'Forbidden: Only Managers and Admins can review documents.' });
   }
 
   const { documentId, status, rejectionReason } = req.body || {};
@@ -179,14 +162,12 @@ async function handleReview(req: VercelRequest, res: VercelResponse) {
   }
 
   if (cleanStatus !== 'APPROVED' && cleanStatus !== 'REJECTED') {
-    return res.status(400).json({
-      error: "Validation Error: Document review status must be either 'APPROVED' or 'REJECTED'.",
-    });
+    return res.status(400).json({ error: "Document review status must be either 'APPROVED' or 'REJECTED'." });
   }
 
   const docRow = await findSheetRowById(DOCUMENTS_SHEET_NAME, cleanDocId);
   if (!docRow) {
-    return res.status(404).json({ error: `Document Error: Document with ID '${cleanDocId}' not found.` });
+    return res.status(404).json({ error: `Document with ID '${cleanDocId}' not found.` });
   }
 
   const existingDoc = mapRowToDocument(docRow);
@@ -197,33 +178,21 @@ async function handleReview(req: VercelRequest, res: VercelResponse) {
     status: cleanStatus,
     reviewedAt: now,
     reviewedBy: session.userId,
-    rejectionReason: cleanStatus === 'REJECTED' ? (rejectionReason ? String(rejectionReason).trim() : 'Document rejected by reviewer') : undefined,
+    rejectionReason: cleanStatus === 'REJECTED' ? (rejectionReason ? String(rejectionReason).trim() : 'Document rejected by reviewer') : undefined
   };
 
-  const rowData = mapDocumentToRow(updatedDoc);
-  await updateSheetRowById(DOCUMENTS_SHEET_NAME, cleanDocId, rowData);
+  await updateSheetRowById(DOCUMENTS_SHEET_NAME, cleanDocId, mapDocumentToRow(updatedDoc));
 
-  // Аудит та сповіщення
   await recordSafeAuditLog({
     actorUserId: session.userId,
     action: 'DOCUMENT_REVIEW',
     targetEntity: 'DOCUMENT',
     targetEntityId: cleanDocId,
-    details: `Reviewed document status to ${cleanStatus}`,
+    details: `Reviewed document status to ${cleanStatus}`
   });
-
-  await sendSafeTelegramAlert(
-    `<b>📋 Верифікація Документа</b>\n\n` +
-    `<b>Документ ID:</b> <code>${cleanDocId}</code>\n` +
-    `<b>Категорія:</b> <code>${updatedDoc.category}</code>\n` +
-    `<b>Статус:</b> <code>${cleanStatus}</code>\n` +
-    `<b>Менеджер:</b> <code>${session.userId}</code>`
-  );
 
   return res.status(200).json({ document: updatedDoc });
 }
-
-// --- 4. Головна Serverless Точка Входу (Default Handler) ---
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'application/json');
@@ -234,45 +203,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'GET') {
       if (action === 'download') {
         const a = authenticateRequest(req.headers.authorization);
-        if (!a.authorized || !a.session) return res.status(a.statusCode).json({error:a.errorMessage});
+        if (!a.authorized || !a.session) return res.status(a.statusCode).json({ error: a.errorMessage });
+
         const id = String(req.query.id || '').trim();
-        const row = await findSheetRowById(DOCUMENTS_SHEET_NAME,id);
-        if (!row) return res.status(404).json({error:'Document not found.'});
+        const row = await findSheetRowById(DOCUMENTS_SHEET_NAME, id);
+        if (!row) return res.status(404).json({ error: 'Document not found.' });
+
         const doc = mapRowToDocument(row);
-        const dossierRow = await findSheetRowById(DOSSIERS_SHEET_NAME,doc.dossierId);
-        if (!dossierRow) return res.status(404).json({error:'Dossier not found.'});
+        const dossierRow = await findSheetRowById(DOSSIERS_SHEET_NAME, doc.dossierId);
+        if (!dossierRow) return res.status(404).json({ error: 'Dossier not found.' });
+
         const dossier = mapRowToDossier(dossierRow);
-        const ownership = isStaff(a.session) ? {authorized:true} : validateOwnership(a.session,dossier.userId);
-        if (!ownership.authorized) return res.status(403).json({error:'Forbidden.'});
-        if (!doc.driveFileId) return res.status(404).json({error:'File is not available.'});
+        const ownership = isStaff(a.session) ? { authorized: true } : validateOwnership(a.session, dossier.userId);
+        if (!ownership.authorized) return res.status(403).json({ error: 'Forbidden.' });
+
+        if (!doc.driveFileId) return res.status(404).json({ error: 'File is not available.' });
+
         const file = await downloadFileFromDrive(doc.driveFileId);
-        res.setHeader('Content-Type',file.mimeType);res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+        res.setHeader('Content-Type', file.mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
         return res.status(200).send(file.buffer);
       }
       return await handleGet(req, res);
     }
 
     if (req.method === 'POST') {
-      if (action === 'upload' || !action) {
-        return await handleUpload(req, res);
-      }
-      if (action === 'review') {
-        return await handleReview(req, res);
-      }
-      return res.status(400).json({
-        error: `Invalid action parameter '${action}' for POST request. Allowed: 'upload', 'review'.`,
-      });
+      if (action === 'upload' || !action) return await handleUpload(req, res);
+      if (action === 'review') return await handleReview(req, res);
+      return res.status(400).json({ error: `Invalid action parameter '${action}'.` });
     }
 
-    return res.status(405).json({
-      error: `HTTP Method '${req.method}' not allowed.`,
-    });
+    return res.status(405).json({ error: `HTTP Method '${req.method}' not allowed.` });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : 'Internal Server Error';
-    console.error('[API Documents Crash]:', errorMessage);
-
-    return res.status(500).json({
-      error: `Server Exception: ${errorMessage}`,
-    });
+    return res.status(500).json({ error: `Server Exception: ${errorMessage}` });
   }
 }
