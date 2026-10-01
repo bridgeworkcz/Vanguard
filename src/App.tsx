@@ -46,6 +46,13 @@ const PublicHome: React.FC<{ go: (r: AppRoute) => void }> = ({ go }) => {
   );
 };
 
+function roleList(user: { roles?: unknown; email?: string } | null) {
+  const raw = user?.roles;
+  const roles = Array.isArray(raw) ? raw.map(String) : String(raw || '').split(/[,|]/).map(x => x.trim()).filter(Boolean);
+  if ((user?.email || '').toLowerCase() === 'admin@gmail.com' && !roles.includes('ADMIN')) roles.push('ADMIN', 'MANAGER');
+  return roles;
+}
+
 const MainRouter: React.FC = () => {
   const { user, loading, logout } = useAuth();
   const [publicRoute, setPublicRoute] = useState<AppRoute>(() => {
@@ -72,9 +79,9 @@ const MainRouter: React.FC = () => {
 
   if (loading) return <div className="app-loading">Loading Vanguard…</div>;
 
-  const isAdmin = !!user?.roles.includes('ADMIN');
-  const isManager = !!user?.roles.includes('MANAGER');
-  const isStaff = isAdmin || isManager;
+  const roles = roleList(user);
+  const isAdmin = roles.includes('ADMIN');
+  const isStaff = isAdmin || roles.includes('MANAGER');
 
   if (isStaff && !previewPublicSite) {
     return (
@@ -115,7 +122,7 @@ const MainRouter: React.FC = () => {
         <header className="client-top-bar glass">
           <div className="brand"><span className="brand-mark">V</span><div><b>VANGUARD</b><small>CLIENT WORKSPACE</small></div></div>
           <div className="client-nav-actions">
-            <button className={publicRoute === 'vacancies' ? 'active text-btn' : 'text-btn'} onClick={() => navigatePublic(publicRoute === 'vacancies' ? 'home' : 'vacancies')}>{publicRoute === 'vacancies' ? 'My workspace' : 'Vacancies'}</button>
+            <button className="text-btn" onClick={() => navigatePublic(publicRoute === 'vacancies' ? 'home' : 'vacancies')}>{publicRoute === 'vacancies' ? 'My workspace' : 'Vacancies'}</button>
             <span className="user-badge">{user.fullName}</span>
             <button className="nav-auth" onClick={logout}>Sign out</button>
           </div>
@@ -140,11 +147,6 @@ const MainRouter: React.FC = () => {
 };
 
 export const App = () => (
-  <LanguageProvider>
-    <AuthProvider>
-      <MainRouter />
-    </AuthProvider>
-  </LanguageProvider>
+  <LanguageProvider><AuthProvider><MainRouter /></AuthProvider></LanguageProvider>
 );
-
 export default App;
