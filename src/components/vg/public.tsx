@@ -489,6 +489,15 @@ export function ContactPage() {
               <a href={`mailto:${s?.support_email ?? ""}`}>{s?.support_email}</a>
             </dd>
           </div>
+          {s?.usdt_wallet ? (
+            <div>
+              <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_wallet")}</dt>
+              <dd className="mt-2 break-all">
+                {s.usdt_wallet}
+                {s.usdt_network ? <span className="mt-1 block text-sm text-mist">{s.usdt_network}</span> : null}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </div>
       <section className="banner banner-blue">

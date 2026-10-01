@@ -847,8 +847,15 @@ export const adminSaveMedia = createServerFn({ method: "POST" })
     const kind = data.kind === "license" ? "license" : "office";
     if (!data.imageData?.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
     const id = clean(data.id, 40) || newId("MED");
-    await sql`insert into media_items (id, kind, title, caption, image_data, sort_order, active)
-      values (${id}, ${kind}, ${clean(data.title, 120)}, ${clean(data.caption, 300)}, ${data.imageData}, 5, true)`;
+    const title = clean(data.title, 120);
+    const caption = clean(data.caption, 300);
+    const existing = await sql<{ id: string }>`select id from media_items where id = ${id}`;
+    if (existing[0]) {
+      await sql`update media_items set kind = ${kind}, title = ${title}, caption = ${caption}, image_data = ${data.imageData}, active = true where id = ${id}`;
+    } else {
+      await sql`insert into media_items (id, kind, title, caption, image_data, sort_order, active)
+        values (${id}, ${kind}, ${title}, ${caption}, ${data.imageData}, 5, true)`;
+    }
     await audit(sql, context.userId, "MEDIA", id, kind);
     return { id };
   });

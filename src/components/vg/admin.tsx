@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import {
@@ -49,6 +49,23 @@ async function asData(file: File) {
     r.readAsDataURL(file);
   });
   return { data, mime: file.type, fileName: file.name };
+}
+
+async function photoDataUrl(file: File) {
+  if (!file.type.startsWith("image/")) throw new Error("File");
+  const bitmap = await createImageBitmap(file);
+  const max = 1600;
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("File");
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const data = canvas.toDataURL("image/jpeg", 0.85);
+  if (data.length > 900_000) throw new Error("File");
+  return data;
 }
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
@@ -533,7 +550,14 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         ) : null}
 
         {current === "team" && staff ? (
-          <TeamEditor readOnly={!isAdmin} team={team} onChange={() => void adminAllTeam().then(setTeam)} />
+          <TeamEditor
+            readOnly={!isAdmin}
+            team={team}
+            onChange={() => {
+              void adminAllTeam().then(setTeam);
+              reload();
+            }}
+          />
         ) : null}
 
         {current === "content" && staff && data ? (
@@ -657,35 +681,61 @@ function TeamEditor({
   const [position, setPosition] = useState("");
   const [phone, setPhone] = useState("");
   const [photoData, setPhoto] = useState("");
+  const [preview, setPreview] = useState("");
+  const [err, setErr] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  function pickPhoto(file: File | undefined) {
+    if (!file) return;
+    setErr("");
+    void photoDataUrl(file)
+      .then((data) => {
+        setPhoto(data);
+        setPreview(data);
+      })
+      .catch(() => setErr(t("admin_file_big")));
+  }
   return (
     <div className="mt-8 grid gap-4">
       <p className="text-sm text-mist">{t("admin_live_note")}</p>
+      {err ? <p className="text-sm text-metal">{err}</p> : null}
       {readOnly ? null : (
       <form
         className="glass grid gap-2 p-4 md:grid-cols-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void adminSaveTeam({ data: { id: editId, fullName, position, phone, photoData, active: true } }).then(() => {
-            setEditId("");
-            setName("");
-            setPosition("");
-            setPhone("");
-            setPhoto("");
-            onChange();
-          });
+          setErr("");
+          const active = editId ? (team.find((m) => m.id === editId)?.active ?? true) : true;
+          void adminSaveTeam({ data: { id: editId, fullName, position, phone, photoData, active } })
+            .then(() => {
+              setEditId("");
+              setName("");
+              setPosition("");
+              setPhone("");
+              setPhoto("");
+              setPreview("");
+              onChange();
+            })
+            .catch(() => setErr(t("admin_file_big")));
         }}
       >
         <input className="field" placeholder={t("name")} value={fullName} onChange={(e) => setName(e.target.value)} />
         <input className="field" placeholder={t("position")} value={position} onChange={(e) => setPosition(e.target.value)} />
         <input className="field" placeholder={t("phone")} value={phone} onChange={(e) => setPhone(e.target.value)} />
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void asData(file).then((x) => setPhoto(x.data));
-          }}
-        />
+        <div>
+          <button type="button" className="btn" onClick={() => fileRef.current?.click()}>{t("photo")}</button>
+          <input
+            ref={fileRef}
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(e) => {
+              pickPhoto(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        {preview ? <img src={preview} alt="" className="size-16 object-cover" /> : null}
+        {photoData ? <p className="text-sm text-mist md:col-span-2">{t("admin_photo_ready")}</p> : null}
         <button className="btn-solid w-fit" type="submit">{editId ? t("save") : t("add")}</button>
       </form>
       )}
@@ -707,11 +757,31 @@ function TeamEditor({
                 setName(m.fullName);
                 setPosition(m.position);
                 setPhone(m.phone);
-                setPhoto(m.photoData);
+                setPhoto("");
+                setPreview(m.photoData);
+                setErr("");
               }}
             >
               {t("edit")}
             </button>
+            <label className="btn cursor-pointer">
+              {t("admin_replace_photo")}
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setErr("");
+                  void photoDataUrl(file)
+                    .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
+                    .then(onChange)
+                    .catch(() => setErr(t("admin_file_big")));
+                }}
+              />
+            </label>
             <button type="button" className="btn" onClick={() => void adminDeleteTeam({ data: m.id }).then(onChange)}>{t("remove")}</button>
               </>
             )}
@@ -733,7 +803,7 @@ function ContentEditor({
   onSaved,
 }: {
   settings: Record<string, string>;
-  media: { id: string; kind: string; title: string; imageData: string }[];
+  media: { id: string; kind: string; title: string; caption?: string; imageData: string }[];
   partners: { id: string; country: string; name: string }[];
   countries: string[];
   lang: "en" | "cs" | "ur";
@@ -742,30 +812,63 @@ function ContentEditor({
   onSaved: () => void;
 }) {
   const { t } = useI18n();
-  const keys = ["legal_entity", "registration_number", "vat_number", "legal_address", "court_record", "regulator", "support_email", "support_phone", "usdt_wallet", "usdt_network", "telegram_owner_chat", "telegram_staff_chat"] as const;
+  const fields: { key: string; label: CopyKey }[] = [
+    { key: "support_phone", label: "admin_field_phone" },
+    { key: "support_email", label: "admin_field_email" },
+    { key: "legal_address", label: "admin_field_address" },
+    { key: "usdt_wallet", label: "admin_field_wallet" },
+    { key: "usdt_network", label: "admin_field_network" },
+    { key: "legal_entity", label: "admin_field_entity" },
+    { key: "registration_number", label: "admin_field_id" },
+    { key: "vat_number", label: "admin_field_vat" },
+    { key: "court_record", label: "admin_field_court" },
+    { key: "regulator", label: "admin_field_regulator" },
+    { key: "telegram_owner_chat", label: "admin_field_tg_owner" },
+    { key: "telegram_staff_chat", label: "admin_field_tg_staff" },
+  ];
   const story = storyKey(lang, "about_story");
   const lead = storyKey(lang, "about_lead");
   const title = storyKey(lang, "hero_title");
   const body = storyKey(lang, "hero_body");
   const [partner, setPartner] = useState({ country: countries[0] ?? "", name: "" });
+  const [mediaErr, setMediaErr] = useState("");
+  function publishPhoto(file: File | undefined, kind: string, id?: string, itemTitle?: string, caption?: string) {
+    if (!file) return;
+    setMediaErr("");
+    void photoDataUrl(file)
+      .then((imageData) =>
+        adminSaveMedia({
+          data: {
+            id,
+            kind,
+            title: itemTitle || (kind === "license" ? "Licence" : "Office"),
+            caption: caption || "",
+            imageData,
+          },
+        }),
+      )
+      .then(onSaved)
+      .catch(() => setMediaErr(t("admin_file_big")));
+  }
   return (
     <div className="mt-8 grid gap-4">
       <p className="text-sm text-mist">{t("admin_live_note")}</p>
+      {mediaErr ? <p className="text-sm text-metal">{mediaErr}</p> : null}
       <form
-        className="grid gap-2"
+        className="glass grid gap-3 p-5"
         onSubmit={(e) => {
           e.preventDefault();
           if (readOnly) return;
           void adminSaveSettings({ data: settings }).then(onSaved);
         }}
       >
-        {keys.map((key) => (
-          <label key={key} className="grid gap-1 text-xs uppercase tracking-widest text-mist">
-            {key}
-            <input className="field" disabled={readOnly} value={settings[key] ?? ""} onChange={(e) => onSettings({ ...settings, [key]: e.target.value })} />
+        {fields.map((field) => (
+          <label key={field.key} className="grid gap-1 text-sm text-mist">
+            {t(field.label)}
+            <input className="field" disabled={readOnly} value={settings[field.key] ?? ""} onChange={(e) => onSettings({ ...settings, [field.key]: e.target.value })} />
           </label>
         ))}
-        <label className="grid gap-1 text-xs uppercase tracking-widest text-mist">
+        <label className="grid gap-1 text-sm text-mist">
           {t("admin_story")}
           <textarea className="field" disabled={readOnly} value={settings[story] ?? ""} onChange={(e) => onSettings({ ...settings, [story]: e.target.value })} />
         </label>
@@ -776,27 +879,27 @@ function ContentEditor({
       </form>
       {readOnly ? null : (
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="grid gap-2 text-sm">
+        <label className="btn w-fit cursor-pointer">
           {t("admin_license")}
           <input
+            className="sr-only"
             type="file"
             accept="image/jpeg,image/png,image/webp"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              void asData(file).then((x) => adminSaveMedia({ data: { kind: "license", title: "Licence", caption: "", imageData: x.data } }).then(onSaved));
+              publishPhoto(e.target.files?.[0], "license");
+              e.target.value = "";
             }}
           />
         </label>
-        <label className="grid gap-2 text-sm">
+        <label className="btn w-fit cursor-pointer">
           {t("admin_office")}
           <input
+            className="sr-only"
             type="file"
             accept="image/jpeg,image/png,image/webp"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              void asData(file).then((x) => adminSaveMedia({ data: { kind: "office", title: "Office", caption: "", imageData: x.data } }).then(onSaved));
+              publishPhoto(e.target.files?.[0], "office");
+              e.target.value = "";
             }}
           />
         </label>
@@ -804,10 +907,26 @@ function ContentEditor({
       )}
       <ul className="grid gap-2">
         {media.map((m) => (
-          <li key={m.id} className="flex items-center gap-3 text-sm">
+          <li key={m.id} className="flex flex-wrap items-center gap-3 text-sm">
             <img src={m.imageData} alt="" className="h-12 w-16 object-cover" />
-            {m.kind}
-            {readOnly ? null : <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(onSaved)}>{t("remove")}</button>}
+            <span>{m.kind === "license" ? t("admin_license") : t("admin_office")}</span>
+            {readOnly ? null : (
+              <>
+                <label className="btn cursor-pointer">
+                  {t("admin_replace_photo")}
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => {
+                      publishPhoto(e.target.files?.[0], m.kind, m.id, m.title, m.caption);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(onSaved)}>{t("remove")}</button>
+              </>
+            )}
           </li>
         ))}
       </ul>

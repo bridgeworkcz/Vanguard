@@ -1002,7 +1002,19 @@ export async function adminSaveMedia(userId: string, data: { id?: string; kind: 
   const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
   const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
   const imageUrl = doc?.driveFileId ? `file:${doc.driveFileId}` : "";
-  await appendSheetRow("Gallery", { id, title: data.title, imageUrl, caption: `${kind}|${data.caption}`, order: "5", isActive: "true" });
+  if (!imageUrl) throw new Error("File");
+  const raw = (await readSheetRows("Gallery")).find((row) => row.id === id);
+  const row = {
+    ...(raw ?? {}),
+    id,
+    title: data.title || raw?.title || (kind === "license" ? "Licence" : "Office"),
+    imageUrl,
+    caption: `${kind}|${data.caption || ""}`,
+    order: raw?.order || "5",
+    isActive: "true",
+  };
+  if (raw) await updateSheetRowById("Gallery", id, row);
+  else await appendSheetRow("Gallery", row);
   await audit(userId, "MEDIA", id, kind);
   return { id };
 }
