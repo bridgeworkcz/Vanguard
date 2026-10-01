@@ -57,18 +57,59 @@ export function PapersPage() {
 
 export function QuestionsPage() {
   const { t } = useI18n();
-  const items = [
-    [t("faq_q1"), t("faq_a1")],
-    [t("faq_q2"), t("faq_a2")],
-    [t("faq_q3"), t("faq_a3")],
-    [t("faq_q4"), t("faq_a4")],
+  const groups: { title: string; items: [string, string][] }[] = [
+    {
+      title: t("faq_g_pages"),
+      items: [
+        [t("faq_q5"), t("faq_a5")],
+        [t("faq_q6"), t("faq_a6")],
+        [t("faq_q7"), t("faq_a7")],
+        [t("faq_q8"), t("faq_a8")],
+        [t("faq_q9"), t("faq_a9")],
+        [t("faq_q10"), t("faq_a10")],
+        [t("faq_q11"), t("faq_a11")],
+        [t("faq_q12"), t("faq_a12")],
+      ],
+    },
+    {
+      title: t("faq_g_order"),
+      items: [
+        [t("faq_q13"), t("faq_a13")],
+        [t("faq_q14"), t("faq_a14")],
+        [t("faq_q15"), t("faq_a15")],
+        [t("faq_q4"), t("faq_a4")],
+      ],
+    },
+    {
+      title: t("faq_g_money"),
+      items: [
+        [t("faq_q1"), t("faq_a1")],
+        [t("faq_q2"), t("faq_a2")],
+        [t("faq_q16"), t("faq_a16")],
+        [t("faq_q17"), t("faq_a17")],
+        [t("faq_q3"), t("faq_a3")],
+      ],
+    },
+    {
+      title: t("faq_g_cabinet"),
+      items: [
+        [t("faq_q18"), t("faq_a18")],
+        [t("faq_q19"), t("faq_a19")],
+      ],
+    },
   ];
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
-      {items.map(([q, a]) => (
-        <section key={q}>
-          <h2 className="display text-2xl">{q}</h2>
-          <p className="mt-2 text-mist">{a}</p>
+      <p className="text-mist">{t("faq_intro")}</p>
+      {groups.map((group) => (
+        <section key={group.title} className="grid gap-5 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{group.title}</h2>
+          {group.items.map(([q, a]) => (
+            <div key={q}>
+              <h3 className="display text-2xl">{q}</h3>
+              <p className="mt-2 whitespace-pre-line text-mist">{a}</p>
+            </div>
+          ))}
         </section>
       ))}
     </Article>

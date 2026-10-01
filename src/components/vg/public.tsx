@@ -469,7 +469,13 @@ export function AboutPage() {
               )}
               <p className="mt-3">{m.fullName}</p>
               <p className="text-sm text-mist">{m.position}</p>
-              <p className="text-sm">{m.phone}</p>
+              <p className="text-sm">
+                {m.phone ? (
+                  <a href={whatsApp(m.phone)} target="_blank" rel="noopener noreferrer" className="ember">
+                    {m.phone}
+                  </a>
+                ) : null}
+              </p>
             </li>
           ))}
         </ul>
@@ -512,6 +518,11 @@ export function AboutPage() {
   );
 }
 
+function whatsApp(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : "";
+}
+
 export function ContactPage() {
   const { t } = useI18n();
   const { data } = useSite();
@@ -531,7 +542,12 @@ export function ContactPage() {
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>
             <dd className="mt-2 ember">
-              <a href={`tel:${s?.support_phone ?? ""}`}>{s?.support_phone}</a>
+              {s?.support_phone ? (
+                <a href={whatsApp(s.support_phone)} target="_blank" rel="noopener noreferrer">
+                  {s.support_phone}
+                </a>
+              ) : null}
+              <span className="mt-1 block text-sm text-mist">{t("contact_whatsapp")}</span>
             </dd>
           </div>
           <div>
