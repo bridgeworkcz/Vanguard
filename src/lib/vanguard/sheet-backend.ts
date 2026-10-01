@@ -1,4 +1,4 @@
-import { getDossierCategoryFolder, downloadFileFromDrive, makeFilePublic, uploadFileToDrive } from "@/lib/google/drive";
+import { getDossierCategoryFolder, downloadFileFromDrive, uploadFileToDrive } from "@/lib/google/drive";
 import { appendSheetRow, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
@@ -19,6 +19,7 @@ import {
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
 import { readSheetSessionUser } from "./account.server";
+import { siteFileUrl } from "./files";
 
 const MAX_DATA = 900_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -375,7 +376,7 @@ export async function publicSite() {
       fullName: row.fullName,
       position: row.position,
       phone: row.contactPhone,
-      photoData: row.photoUrl,
+      photoData: siteFileUrl("team", row.id, row.photoUrl),
       sortOrder: Number(row.order) || 0,
       active: true,
     }));
@@ -388,7 +389,7 @@ export async function publicSite() {
         kind: kind === "license" ? "license" : "office",
         title: row.title,
         caption: rest.join("|"),
-        imageData: row.imageUrl,
+        imageData: siteFileUrl("gallery", row.id, row.imageUrl),
         sortOrder: Number(row.order) || 0,
       };
     });
@@ -481,8 +482,13 @@ async function storeFile(applicationId: string, userId: string, category: string
   const encoded = data.split(",")[1] ?? "";
   const buffer = Buffer.from(encoded, "base64");
   const folder = await getDossierCategoryFolder(applicationId, category);
-  const uploaded = await uploadFileToDrive(folder, fileName || "file", mime, buffer);
-  await makeFilePublic(uploaded.fileId).catch(() => undefined);
+  let uploaded: { fileId: string };
+  try {
+    uploaded = await uploadFileToDrive(folder, fileName || "file", mime, buffer);
+  } catch (err) {
+    console.error("[file]", err);
+    throw new Error("File could not be stored.");
+  }
   const id = newId("DOC");
   await appendSheetRow("DossierDocuments", {
     id,
@@ -540,15 +546,20 @@ export async function downloadDoc(userId: string, id: string) {
   if (!app) throw new Error("Not found");
   const staff = person.role === "ADMIN" || person.role === "MANAGER";
   if (!staff && app.userId !== userId) throw new Error("Forbidden");
-  if (!doc.driveFileId) throw new Error("File missing");
-  const file = await downloadFileFromDrive(doc.driveFileId);
-  return {
-    applicationId: app.id,
-    fileName: doc.fileName || file.name,
-    mime: file.mimeType,
-    data: `data:${file.mimeType};base64,${file.buffer.toString("base64")}`,
-    category: doc.category,
-  };
+  if (!doc.driveFileId) throw new Error("File could not be opened.");
+  try {
+    const file = await downloadFileFromDrive(doc.driveFileId);
+    return {
+      applicationId: app.id,
+      fileName: doc.fileName || file.name,
+      mime: file.mimeType,
+      data: `data:${file.mimeType};base64,${file.buffer.toString("base64")}`,
+      category: doc.category,
+    };
+  } catch (err) {
+    console.error("[file]", err);
+    throw new Error("File could not be opened.");
+  }
 }
 
 export async function adminOverview(userId: string) {
@@ -702,14 +713,14 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   await requireAdmin(userId);
   const id = data.id || newId("TM");
   if (!data.fullName) throw new Error("Name");
-  let photoUrl = data.photoData && data.photoData.length < 400 ? data.photoData : "";
+  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
+  let photoUrl = raw?.photoUrl || "";
   if (data.photoData?.startsWith("data:") && data.photoData.length < MAX_DATA) {
     const mime = data.photoData.slice(5, data.photoData.indexOf(";"));
     const saved = await storeFile("team", userId, "PHOTO", `${id}.jpg`, mime, data.photoData, "APPROVED");
     const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
-    photoUrl = doc?.driveFileId ? `https://drive.google.com/thumbnail?id=${doc.driveFileId}&sz=w800` : "";
+    if (doc?.driveFileId) photoUrl = `file:${doc.driveFileId}`;
   }
-  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
   const row = {
     id,
     fullName: data.fullName,
@@ -766,7 +777,7 @@ export async function adminSaveMedia(userId: string, data: { id?: string; kind: 
   const mime = data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg";
   const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
   const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
-  const imageUrl = doc?.driveFileId ? `https://drive.google.com/thumbnail?id=${doc.driveFileId}&sz=w1200` : "";
+  const imageUrl = doc?.driveFileId ? `file:${doc.driveFileId}` : "";
   await appendSheetRow("Gallery", { id, title: data.title, imageUrl, caption: `${kind}|${data.caption}`, order: "5", isActive: "true" });
   await audit(userId, "MEDIA", id, kind);
   return { id };
@@ -824,7 +835,7 @@ export async function adminAllTeam(userId: string) {
     fullName: row.fullName,
     position: row.position,
     phone: row.contactPhone,
-    photoData: row.photoUrl,
+    photoData: siteFileUrl("team", row.id, row.photoUrl),
     active: bool(row.isActive) || row.isActive === "",
   }));
 }

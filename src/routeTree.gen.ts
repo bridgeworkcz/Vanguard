@@ -18,6 +18,7 @@ import { Route as PortalRouteImport } from './routes/portal'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as FilesKindIdRouteImport } from './routes/files.$kind.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +65,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesKindIdRoute = FilesKindIdRouteImport.update({
+  id: '/files/$kind/$id',
+  path: '/files/$kind/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/files/$kind/$id': typeof FilesKindIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/files/$kind/$id': typeof FilesKindIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/vacancies_/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/files/$kind/$id': typeof FilesKindIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +120,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/vacancies/$id'
     | '/api/auth/$'
+    | '/files/$kind/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/vacancies/$id'
     | '/api/auth/$'
+    | '/files/$kind/$id'
   id:
     | '__root__'
     | '/'
@@ -133,6 +144,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/vacancies_/$id'
     | '/api/auth/$'
+    | '/files/$kind/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -145,6 +157,7 @@ export interface RootRouteChildren {
   SearchRoute: typeof SearchRoute
   VacanciesIdRoute: typeof VacanciesIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  FilesKindIdRoute: typeof FilesKindIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -212,6 +225,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/files/$kind/$id': {
+      id: '/files/$kind/$id'
+      path: '/files/$kind/$id'
+      fullPath: '/files/$kind/$id'
+      preLoaderRoute: typeof FilesKindIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,6 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   SearchRoute: SearchRoute,
   VacanciesIdRoute: VacanciesIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  FilesKindIdRoute: FilesKindIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
