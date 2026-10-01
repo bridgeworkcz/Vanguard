@@ -105,7 +105,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         .then(setApps)
         .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
     }
-    if (current === "team" && role === "ADMIN") void adminAllTeam().then(setTeam);
+    if (current === "team" && (role === "ADMIN" || role === "MANAGER")) void adminAllTeam().then(setTeam);
     if (current === "audit") void adminAudit().then(setAudit);
     if (current === "content" && data) setSettingsDraft(data.settings);
   }, [current, role, showAll, data]);
@@ -165,7 +165,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         <aside className="hidden w-44 shrink-0 md:block">
           <p className="kicker ember">{t("admin_kicker")}</p>
           <nav className="mt-4 grid gap-1">
-            {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
+            {TABS.map((name) => (
               <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
                 {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
               </button>
@@ -175,7 +175,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         <div className="min-w-0 flex-1">
         <p className="kicker ember md:hidden">{t("admin_kicker")}</p>
         <div className="mt-4 flex flex-wrap gap-2 md:hidden">
-          {TABS.filter((name) => isAdmin || (name !== "team" && name !== "content" && name !== "pricing")).map((name) => (
+          {TABS.map((name) => (
             <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
               {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
             </button>
@@ -532,12 +532,13 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           </div>
         ) : null}
 
-        {current === "team" && isAdmin ? (
-          <TeamEditor team={team} onChange={() => void adminAllTeam().then(setTeam)} />
+        {current === "team" && staff ? (
+          <TeamEditor readOnly={!isAdmin} team={team} onChange={() => void adminAllTeam().then(setTeam)} />
         ) : null}
 
-        {current === "content" && isAdmin && data ? (
+        {current === "content" && staff && data ? (
           <ContentEditor
+            readOnly={!isAdmin}
             settings={settingsDraft}
             media={data.media}
             partners={data.partners}
@@ -548,10 +549,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           />
         ) : null}
 
-        {current === "pricing" && isAdmin && data ? (
+        {current === "pricing" && staff && data ? (
           <ul className="mt-8 grid gap-4">
+            <p className="text-sm text-mist">{t("admin_live_note")}</p>
             {data.products.map((p) => (
-              <PriceRow key={p.id} product={p} onSaved={reload} />
+              <PriceRow key={p.id} product={p} readOnly={!isAdmin} onSaved={reload} />
             ))}
           </ul>
         ) : null}
@@ -642,9 +644,11 @@ function VacancyForm({
 
 function TeamEditor({
   team,
+  readOnly,
   onChange,
 }: {
   team: { id: string; fullName: string; position: string; phone: string; photoData: string; active: boolean }[];
+  readOnly: boolean;
   onChange: () => void;
 }) {
   const { t } = useI18n();
@@ -655,6 +659,8 @@ function TeamEditor({
   const [photoData, setPhoto] = useState("");
   return (
     <div className="mt-8 grid gap-4">
+      <p className="text-sm text-mist">{t("admin_live_note")}</p>
+      {readOnly ? null : (
       <form
         className="glass grid gap-2 p-4 md:grid-cols-2"
         onSubmit={(e) => {
@@ -682,6 +688,7 @@ function TeamEditor({
         />
         <button className="btn-solid w-fit" type="submit">{editId ? t("save") : t("add")}</button>
       </form>
+      )}
       <ul className="grid gap-3">
         {team.map((m) => (
           <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-white/10 py-3">
@@ -690,6 +697,8 @@ function TeamEditor({
               {m.fullName}
               <span className="block text-sm text-mist">{m.position} · {m.phone}</span>
             </span>
+            {readOnly ? null : (
+              <>
             <button
               type="button"
               className="btn"
@@ -704,6 +713,8 @@ function TeamEditor({
               {t("edit")}
             </button>
             <button type="button" className="btn" onClick={() => void adminDeleteTeam({ data: m.id }).then(onChange)}>{t("remove")}</button>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -717,6 +728,7 @@ function ContentEditor({
   partners,
   countries,
   lang,
+  readOnly,
   onSettings,
   onSaved,
 }: {
@@ -725,6 +737,7 @@ function ContentEditor({
   partners: { id: string; country: string; name: string }[];
   countries: string[];
   lang: "en" | "cs" | "ur";
+  readOnly: boolean;
   onSettings: (s: Record<string, string>) => void;
   onSaved: () => void;
 }) {
@@ -737,28 +750,31 @@ function ContentEditor({
   const [partner, setPartner] = useState({ country: countries[0] ?? "", name: "" });
   return (
     <div className="mt-8 grid gap-4">
+      <p className="text-sm text-mist">{t("admin_live_note")}</p>
       <form
         className="grid gap-2"
         onSubmit={(e) => {
           e.preventDefault();
+          if (readOnly) return;
           void adminSaveSettings({ data: settings }).then(onSaved);
         }}
       >
         {keys.map((key) => (
           <label key={key} className="grid gap-1 text-xs uppercase tracking-widest text-mist">
             {key}
-            <input className="field" value={settings[key] ?? ""} onChange={(e) => onSettings({ ...settings, [key]: e.target.value })} />
+            <input className="field" disabled={readOnly} value={settings[key] ?? ""} onChange={(e) => onSettings({ ...settings, [key]: e.target.value })} />
           </label>
         ))}
         <label className="grid gap-1 text-xs uppercase tracking-widest text-mist">
           {t("admin_story")}
-          <textarea className="field" value={settings[story] ?? ""} onChange={(e) => onSettings({ ...settings, [story]: e.target.value })} />
+          <textarea className="field" disabled={readOnly} value={settings[story] ?? ""} onChange={(e) => onSettings({ ...settings, [story]: e.target.value })} />
         </label>
-        <textarea className="field" value={settings[lead] ?? ""} onChange={(e) => onSettings({ ...settings, [lead]: e.target.value })} />
-        <input className="field" value={settings[title] ?? ""} onChange={(e) => onSettings({ ...settings, [title]: e.target.value })} />
-        <textarea className="field" value={settings[body] ?? ""} onChange={(e) => onSettings({ ...settings, [body]: e.target.value })} />
-        <button className="btn-solid w-fit" type="submit">{t("save")}</button>
+        <textarea className="field" disabled={readOnly} value={settings[lead] ?? ""} onChange={(e) => onSettings({ ...settings, [lead]: e.target.value })} />
+        <input className="field" disabled={readOnly} value={settings[title] ?? ""} onChange={(e) => onSettings({ ...settings, [title]: e.target.value })} />
+        <textarea className="field" disabled={readOnly} value={settings[body] ?? ""} onChange={(e) => onSettings({ ...settings, [body]: e.target.value })} />
+        {readOnly ? null : <button className="btn-solid w-fit" type="submit">{t("save")}</button>}
       </form>
+      {readOnly ? null : (
       <div className="grid gap-3 md:grid-cols-2">
         <label className="grid gap-2 text-sm">
           {t("admin_license")}
@@ -785,15 +801,17 @@ function ContentEditor({
           />
         </label>
       </div>
+      )}
       <ul className="grid gap-2">
         {media.map((m) => (
           <li key={m.id} className="flex items-center gap-3 text-sm">
             <img src={m.imageData} alt="" className="h-12 w-16 object-cover" />
             {m.kind}
-            <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(onSaved)}>{t("remove")}</button>
+            {readOnly ? null : <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(onSaved)}>{t("remove")}</button>}
           </li>
         ))}
       </ul>
+      {readOnly ? null : (
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
@@ -812,13 +830,14 @@ function ContentEditor({
         <input className="field max-w-xs" placeholder={t("admin_partner")} value={partner.name} onChange={(e) => setPartner({ ...partner, name: e.target.value })} />
         <button className="btn" type="submit">{t("add")}</button>
       </form>
+      )}
       <ul className="text-sm">
         {partners.map((p) => (
           <li key={p.id} className="flex justify-between gap-2 border-t border-white/10 py-2">
             <span>
               {p.country} · {p.name}
             </span>
-            <button type="button" onClick={() => void adminDeletePartner({ data: p.id }).then(onSaved)}>{t("remove")}</button>
+            {readOnly ? null : <button type="button" onClick={() => void adminDeletePartner({ data: p.id }).then(onSaved)}>{t("remove")}</button>}
           </li>
         ))}
       </ul>
@@ -826,11 +845,12 @@ function ContentEditor({
   );
 }
 
-function PriceRow({ product, onSaved }: { product: VisaProduct; onSaved: () => void }) {
+function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOnly: boolean; onSaved: () => void }) {
   const { t } = useI18n();
   const [p, setP] = useState(product);
   useEffect(() => setP(product), [product.id, product.basePrice]);
   const toggle = (lane: Processing) => {
+    if (readOnly) return;
     const has = p.allowedProcessing.includes(lane);
     const allowedProcessing = has ? p.allowedProcessing.filter((x) => x !== lane) : [...p.allowedProcessing, lane];
     setP({ ...p, allowedProcessing });
@@ -843,18 +863,20 @@ function PriceRow({ product, onSaved }: { product: VisaProduct; onSaved: () => v
           {p.name} · {p.duration}
         </p>
       </div>
-      <input className="field" type="number" value={p.basePrice} onChange={(e) => setP({ ...p, basePrice: Number(e.target.value) })} />
+      <input className="field" type="number" disabled={readOnly} value={p.basePrice} onChange={(e) => setP({ ...p, basePrice: Number(e.target.value) })} />
       <div className="flex flex-wrap gap-2 text-xs">
         {(["STANDARD", "PRIORITY", "EXPRESS"] as Processing[]).map((lane) => (
           <label key={lane} className="flex items-center gap-1">
-            <input type="checkbox" checked={p.allowedProcessing.includes(lane)} onChange={() => toggle(lane)} />
+            <input type="checkbox" disabled={readOnly} checked={p.allowedProcessing.includes(lane)} onChange={() => toggle(lane)} />
             {lane}
           </label>
         ))}
       </div>
-      <button type="button" className="btn w-fit" onClick={() => void adminSaveProduct({ data: p }).then(onSaved)}>
-        {t("save")}
-      </button>
+      {readOnly ? null : (
+        <button type="button" className="btn w-fit" onClick={() => void adminSaveProduct({ data: p }).then(onSaved)}>
+          {t("save")}
+        </button>
+      )}
     </li>
   );
 }

@@ -1053,7 +1053,7 @@ export async function adminAudit(userId: string) {
 }
 
 export async function adminAllTeam(userId: string) {
-  await requireAdmin(userId);
+  await requireStaff(userId);
   return (await readSheetRows("Team")).map((row) => ({
     id: row.id,
     fullName: row.fullName,

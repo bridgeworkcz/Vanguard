@@ -944,7 +944,7 @@ export const adminAllTeam = createServerFn({ method: "GET" })
       return mod.adminAllTeam(context.userId);
     }
     const sql = await getSql();
-    await requireAdmin(sql, context.userId);
+    await requireStaff(sql, context.userId);
     return sql<{
       id: string;
       fullName: string;
