@@ -1,0 +1,17 @@
+.premium-calc { border: 1px solid rgba(255,255,255,.14); background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03)); backdrop-filter: blur(22px); border-radius: 28px; padding: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+.premium-calc h2 { letter-spacing: -.03em; }
+.calc-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.calc-grid-4 label, .result-head { display: flex; flex-direction: column; gap: 8px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.62); }
+.calc-grid-4 select, .calc-grid-4 input { background: rgba(0,0,0,.35); color: white; border: 1px solid rgba(255,255,255,.16); border-radius: 14px; padding: 14px; font-size: 15px; }
+.price-plate { margin-top: 18px; display: flex; justify-content: space-between; gap: 16px; align-items: end; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.12); }
+.price-plate strong { font-size: 40px; letter-spacing: -.04em; }
+.vacancy-results { display: grid; gap: 12px; margin-top: 18px; }
+.vacancy-row { display: grid; grid-template-columns: 1.4fr .8fr auto; gap: 12px; align-items: center; padding: 16px; border-radius: 18px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+.partner-mark { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: white; color: black; font-weight: 700; }
+.office-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.office-grid img, .license-image { width: 100%; border-radius: 16px; object-fit: cover; }
+@media (max-width: 900px) {
+  .calc-grid-4, .vacancy-row, .office-grid { grid-template-columns: 1fr; }
+  .price-plate { align-items: start; flex-direction: column; }
+  .price-plate strong { font-size: 32px; }
+}
