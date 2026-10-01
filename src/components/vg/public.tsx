@@ -3,13 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, storyKey, useSite } from "./chrome";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { createApplication, joinWaitlist } from "@/lib/vanguard/api";
-import {
-  CITIZENSHIPS,
-  priceFor,
-  productionWeeks,
-  sameCountry,
-  type Processing,
-} from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n } from "@/lib/vanguard/i18n";
@@ -28,7 +22,10 @@ export function HomePage() {
   const [productId, setProductId] = useState("");
   const [speed, setSpeed] = useState<Processing | "">("");
   const [msg, setMsg] = useState("");
+  const [restored, setRestored] = useState(false);
+  const [agentNote, setAgentNote] = useState(false);
   useEffect(() => {
+    setAgentNote(Boolean(sessionStorage.getItem("vg-agent")));
     const raw = window.localStorage.getItem("vg-last-calc");
     if (!raw) return;
     try {
@@ -37,6 +34,7 @@ export function HomePage() {
       setCountry(saved.country || "");
       setProductId(saved.productId || "");
       setSpeed(saved.speed || "");
+      if (saved.citizenship && saved.country && saved.productId && saved.speed) setRestored(true);
     } catch {
       /* ignore a broken local note */
     }
@@ -79,6 +77,12 @@ export function HomePage() {
             <p className="kicker ember">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-4xl sm:text-6xl">{title}</h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">{body}</p>
+            {restored && product && speed ? (
+              <button type="button" className="btn-solid mt-6" onClick={() => search()}>
+                {t("calc_continue")}
+              </button>
+            ) : null}
+            {agentNote ? <p className="mt-3 text-sm text-mist">{t("agent_kept")}</p> : null}
           </div>
           <form
             className="glass lg:col-span-6 p-5 sm:p-7"
@@ -115,6 +119,11 @@ export function HomePage() {
                     <option key={c}>{c}</option>
                   ))}
                 </select>
+                {country ? (
+                  <Link to="/country/$code" params={{ code: countrySlug(country) }} className="text-xs text-mist underline-offset-4 hover:underline">
+                    {t("country_openings")}
+                  </Link>
+                ) : null}
               </label>
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_visa")}
@@ -205,6 +214,7 @@ export function SearchPage({
   const { user } = useCurrentUserState();
   const { data } = useSite();
   const [waitNote, setWaitNote] = useState("");
+  const [pick, setPick] = useState<string[]>([]);
   const visa = data?.products.find((p) => p.id === product);
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : null;
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
@@ -212,6 +222,10 @@ export function SearchPage({
   const fee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
   const jobs = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const full = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
+  const compared = jobs.filter((job) => pick.includes(job.id));
+  function toggleCompare(id: string) {
+    setPick((cur) => (cur.includes(id) ? cur.filter((item) => item !== id) : cur.length >= 2 ? [cur[1]!, id] : [...cur, id]));
+  }
   return (
     <Shell>
       <div className="mx-auto max-w-6xl px-4 py-12">
@@ -240,8 +254,29 @@ export function SearchPage({
                   <span className="block text-mist">{visa.duration}</span>
                 </p>
                 <p className="mt-2 text-sm text-metal">{t(`speed_${pace}`)}</p>
+                <Link to="/country/$code" params={{ code: countrySlug(visa.country) }} className="mt-3 inline-block text-sm text-mist underline-offset-4 hover:underline">
+                  {t("country_openings")}
+                </Link>
               </div>
             </div>
+            {compared.length === 2 ? (
+              <div className="mt-8">
+                <h2 className="display text-3xl">{t("compare_title")}</h2>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {compared.map((job) => (
+                    <article key={job.id} className="glass p-5">
+                      <h3 className="display text-2xl">{job.title}</h3>
+                      <p className="mt-1 text-sm text-mist">{job.employer}</p>
+                      <dl className="mt-4 grid gap-2 text-sm">
+                        <div><dt className="text-mist">{t("field_salary")}</dt><dd className="ember">{job.salaryNet}</dd></div>
+                        <div><dt className="text-mist">{t("field_hours")}</dt><dd>{job.workingHours}</dd></div>
+                        <div><dt className="text-mist">{t("field_housing")}</dt><dd>{job.accommodation}</dd></div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-8 grid gap-4">
               {jobs.length === 0 ? <p className="text-mist">{t("search_empty")}</p> : null}
               {full.map((job) => (
@@ -273,22 +308,22 @@ export function SearchPage({
               ))}
               {waitNote ? <p className="text-sm text-metal">{waitNote}</p> : null}
               {jobs.map((job) => (
-                <Link
-                  key={job.id}
-                  to="/vacancies/$id"
-                  params={{ id: job.id }}
-                  search={{ citizenship, product, speed: pace }}
-                  className="glass grid gap-3 p-5 transition hover:bg-white/10 md:grid-cols-4"
-                >
+                <article key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
-                    <h2 className="display text-3xl">{job.title}</h2>
+                    <label className="mb-2 flex items-center gap-2 text-sm text-mist">
+                      <input type="checkbox" checked={pick.includes(job.id)} onChange={() => toggleCompare(job.id)} />
+                      {t("compare_add")}
+                    </label>
+                    <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product, speed: pace }} className="display text-3xl">
+                      {job.title}
+                    </Link>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
                   <p className="text-sm text-metal">
                     {job.quota} {t("search_quota")}
                   </p>
-                </Link>
+                </article>
               ))}
             </div>
           </>
@@ -471,7 +506,7 @@ export function AboutPage() {
               <p className="text-sm text-mist">{m.position}</p>
               <p className="text-sm">
                 {m.phone ? (
-                  <a href={whatsApp(m.phone)} target="_blank" rel="noopener noreferrer" className="ember">
+                  <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="ember">
                     {m.phone}
                   </a>
                 ) : null}
@@ -518,11 +553,6 @@ export function AboutPage() {
   );
 }
 
-function whatsApp(phone: string) {
-  const digits = phone.replace(/\D/g, "");
-  return digits ? `https://wa.me/${digits}` : "";
-}
-
 export function ContactPage() {
   const { t } = useI18n();
   const { data } = useSite();
@@ -543,7 +573,7 @@ export function ContactPage() {
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>
             <dd className="mt-2 ember">
               {s?.support_phone ? (
-                <a href={whatsApp(s.support_phone)} target="_blank" rel="noopener noreferrer">
+                <a href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
                   {s.support_phone}
                 </a>
               ) : null}
@@ -571,6 +601,72 @@ export function ContactPage() {
         <span>03</span>
         <b>{t("banner_ministry")}</b>
       </section>
+    </Shell>
+  );
+}
+
+export function CountryPage({ code }: { code: string }) {
+  const { t } = useI18n();
+  const { data } = useSite();
+  const products = (data?.products ?? VISA_PRODUCTS).filter((item) => item.active && countrySlug(item.country) === code);
+  const country = products[0]?.country ?? "";
+  const ids = new Set(products.map((item) => item.id));
+  const jobs = (data?.vacancies ?? []).filter((item) => item.active && ids.has(item.visaProductId));
+  return (
+    <Shell>
+      <article className="mx-auto max-w-5xl px-4 py-14">
+        <p className="kicker ember">{t("country_kicker")}</p>
+        <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
+        {products.length === 0 ? <p className="mt-6 text-mist">{t("country_empty")}</p> : null}
+        <div className="mt-8 grid gap-4">
+          {products.map((item) => (
+            <section key={item.id} className="glass p-5">
+              <h2 className="display text-3xl">{item.name}</h2>
+              <p className="mt-2 text-mist">{item.duration}</p>
+              <p className="display ember mt-3 text-4xl">{item.basePrice} <span className="text-xl text-mist">EUR</span></p>
+              <p className="mt-3 text-sm text-mist">{t("country_pace")}</p>
+              <ul className="mt-2 grid gap-1 text-sm">
+                {item.allowedProcessing.map((pace) => (
+                  <li key={pace}>
+                    {t(`speed_${pace}`)} · {productionWeeks(item.productionMinWeeks, item.productionMaxWeeks, pace)} {t("weeks")} · {priceFor(item.basePrice, pace)} EUR
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+        <h2 className="display mt-10 text-3xl">{t("country_openings")}</h2>
+        {jobs.length === 0 ? <p className="mt-3 text-mist">{t("search_empty")}</p> : null}
+        <ul className="mt-4 grid gap-3">
+          {jobs.map((job) => (
+            <li key={job.id} className="border-t border-white/10 py-3">
+              <p className="display text-2xl">{job.title}</p>
+              <p className="text-sm text-mist">{job.employer}</p>
+              <p className="mt-2 text-sm ember">{job.salaryNet}</p>
+              <p className="text-sm">{job.workingHours}</p>
+              <p className="text-sm text-mist">{job.accommodation}</p>
+              <p className="mt-1 text-sm text-mist">{job.quota > 0 ? `${job.quota} ${t("search_quota")}` : t("search_wait")}</p>
+            </li>
+          ))}
+        </ul>
+        <Link
+          to="/"
+          className="btn-solid mt-8 inline-flex items-center"
+          onClick={() => {
+            if (!country) return;
+            const raw = window.localStorage.getItem("vg-last-calc");
+            let prev: Record<string, string> = {};
+            try {
+              prev = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            } catch {
+              prev = {};
+            }
+            window.localStorage.setItem("vg-last-calc", JSON.stringify({ ...prev, country, productId: "", speed: "" }));
+          }}
+        >
+          {t("country_file")}
+        </Link>
+      </article>
     </Shell>
   );
 }

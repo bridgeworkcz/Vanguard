@@ -514,13 +514,17 @@ async function remindDeadlines() {
   for (const app of apps) {
     if (app.status !== "OPEN") continue;
     let extra = app.extra;
-    if (!extra.paymentReminded && dueWithinHours(app.cancelDeadlineAt, 24)) {
-      await notify(`Payment due within 24h\n${app.id}`);
+    if (!extra.paymentReminded && dueWithinHours(app.cancelDeadlineAt, 72)) {
+      const phone = app.extra.questionnaire.phone?.replace(/\D/g, "") || "";
+      const wa = phone ? `\nWhatsApp: https://wa.me/${phone}` : "";
+      await notify(`Payment due within 3 days\n${app.id}${wa}`);
       extra = { ...extra, paymentReminded: true };
       await saveApp(app, extra);
     }
-    if (!extra.docReminded && dueWithinHours(app.docDeadlineAt, 24)) {
-      await notify(`Documents due within 24h\n${app.id}`, "staff");
+    if (!extra.docReminded && dueWithinHours(app.docDeadlineAt, 72)) {
+      const phone = extra.questionnaire.phone?.replace(/\D/g, "") || "";
+      const wa = phone ? `\nWhatsApp: https://wa.me/${phone}` : "";
+      await notify(`Documents due within 3 days\n${app.id}${wa}`, "staff");
       extra = { ...extra, docReminded: true };
       await saveApp(app, extra);
     }

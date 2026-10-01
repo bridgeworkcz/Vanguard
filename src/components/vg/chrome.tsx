@@ -5,6 +5,7 @@ import { accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
+import { whatsAppHref } from "@/lib/vanguard/domain";
 import { useI18n, type Lang } from "@/lib/vanguard/i18n";
 
 export function Mark({ className = "size-9" }: { className?: string }) {
@@ -38,6 +39,7 @@ export function useSite() {
 
 export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?: "dark" | "light" }) {
   const { t, lang, setLang } = useI18n();
+  const { data: site } = useSite();
   const { user, isPending } = useCurrentUserState();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [role, setRole] = useState<string | null>(null);
@@ -91,6 +93,16 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 {code.toUpperCase()}
               </button>
             ))}
+            {site?.settings.support_phone ? (
+              <a
+                href={whatsAppHref(site.settings.support_phone)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="wa-fab inline-flex min-h-8 items-center rounded-full bg-[#ff6a1a] px-2.5 text-[11px] font-bold text-[#1a0b04] sm:hidden"
+              >
+                {t("wa_label")}
+              </a>
+            ) : null}
             {!isPending && !user ? (
               <Link to="/login" className="sign-pill">
                 {t("nav_sign_in")}
@@ -130,7 +142,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
         </nav>
       </header>
       <div className="vg-page">{children}</div>
-      <footer className={`border-t px-4 py-8 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
+      <footer className={`border-t px-4 pb-8 pt-8 sm:pb-24 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4">
           <div>
             <p className="latin text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
@@ -139,6 +151,16 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© {new Date().getFullYear()} Vanguard Global Mobility s.r.o.</p>
         </div>
       </footer>
+      {site?.settings.support_phone ? (
+        <a
+          href={whatsAppHref(site.settings.support_phone)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 hidden min-h-12 items-center rounded-full bg-[#ff6a1a] px-4 text-sm font-bold text-[#1a0b04] shadow-lg sm:inline-flex"
+        >
+          {t("wa_label")}
+        </a>
+      ) : null}
     </div>
   );
 }

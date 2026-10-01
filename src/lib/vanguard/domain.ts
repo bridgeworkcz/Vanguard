@@ -188,6 +188,22 @@ export function sameCountry(citizenship: string, destination: string): boolean {
   return citizenship.trim().toLowerCase() === destination.trim().toLowerCase();
 }
 
+export function countrySlug(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+export function whatsAppHref(phone: string, text?: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return "";
+  const base = `https://wa.me/${digits}`;
+  return text ? `${base}?text=${encodeURIComponent(text.slice(0, 400))}` : base;
+}
+
 export function newId(prefix: string): string {
   const n = Math.random().toString(36).slice(2, 8).toUpperCase();
   return `${prefix}-${n}`;

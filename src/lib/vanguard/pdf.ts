@@ -36,14 +36,16 @@ function wrap(text: string, font: PDFFont, size: number, max: number): string[] 
   return lines;
 }
 
-function save(bytes: Uint8Array, name: string) {
+function save(bytes: Uint8Array, name: string, hold = false): string {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
+  if (hold) return url;
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+  return "";
 }
 
 async function docBase() {
@@ -97,6 +99,7 @@ export async function buildInvoice(opts: {
   total: number;
   date: string;
   number?: string;
+  hold?: boolean;
 }) {
   const cs = opts.lang === "cs";
   const parts = tranches(opts.total);
@@ -178,7 +181,7 @@ export async function buildInvoice(opts: {
   stamp(page, font, bold);
   page.drawText(cs ? "K úhradě nyní" : "Due now", { x: 40, y: 48, size: 9, font, color: rgb(0.4, 0.4, 0.4) });
   page.drawText(`${amount} EUR`, { x: 40, y: 28, size: 16, font: bold, color: rgb(0.05, 0.05, 0.05) });
-  save(await pdf.save(), `${opts.fileId}-invoice-${opts.tranche}.pdf`);
+  return save(await pdf.save(), `${opts.fileId}-invoice-${opts.tranche}.pdf`, Boolean(opts.hold));
 }
 
 const CONTRACT_EN: [string, string][] = [
@@ -222,6 +225,7 @@ export async function buildContract(opts: {
   duration: string;
   total: number;
   date: string;
+  hold?: boolean;
 }) {
   const sections = opts.lang === "cs" ? CONTRACT_CS : CONTRACT_EN;
   const { pdf, font, bold } = await docBase();
@@ -271,7 +275,7 @@ export async function buildContract(opts: {
   page.drawText(opts.client || "Client", { x: 40, y: 70, size: 11, font: bold, color: rgb(0.1, 0.1, 0.1) });
   page.drawText(opts.date, { x: 40, y: 54, size: 9, font, color: rgb(0.35, 0.35, 0.35) });
   void opts.q;
-  save(await pdf.save(), `${opts.fileId}-agreement.pdf`);
+  return save(await pdf.save(), `${opts.fileId}-agreement.pdf`, Boolean(opts.hold));
 }
 
 export async function buildOffer(opts: {
@@ -286,6 +290,7 @@ export async function buildOffer(opts: {
   hours: string;
   housing: string;
   date: string;
+  hold?: boolean;
 }) {
   const cs = opts.lang === "cs";
   const { pdf, font, bold } = await docBase();
@@ -318,7 +323,7 @@ export async function buildOffer(opts: {
     y -= 16;
   }
   stamp(page, font, bold);
-  save(await pdf.save(), `${opts.fileId}-offer.pdf`);
+  return save(await pdf.save(), `${opts.fileId}-offer.pdf`, Boolean(opts.hold));
 }
 
 function dataUrlToBytes(dataUrl: string): Uint8Array {

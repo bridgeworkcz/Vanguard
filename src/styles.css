@@ -423,3 +423,7 @@ html.lang-ur .banner b {
 html.lang-ur header nav a {
   line-height: 2;
 }
+html.lang-ur .wa-fab {
+  font-family: "Noto Nastaliq Urdu", var(--font-sans);
+  letter-spacing: 0;
+}

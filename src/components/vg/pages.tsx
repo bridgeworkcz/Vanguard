@@ -57,6 +57,8 @@ export function PapersPage() {
 
 export function QuestionsPage() {
   const { t } = useI18n();
+  const [find, setFind] = useState("");
+  const needle = find.trim().toLowerCase();
   const groups: { title: string; items: [string, string][] }[] = [
     {
       title: t("faq_g_pages"),
@@ -97,10 +99,17 @@ export function QuestionsPage() {
         [t("faq_q19"), t("faq_a19")],
       ],
     },
-  ];
+  ]
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item): item is [string, string] => !needle || `${item[0]} ${item[1]}`.toLowerCase().includes(needle)),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
+      <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => setFind(e.target.value)} />
+      {groups.length === 0 ? <p className="text-mist">{t("faq_none")}</p> : null}
       {groups.map((group) => (
         <section key={group.title} className="grid gap-5 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{group.title}</h2>
@@ -154,6 +163,12 @@ export function FilingsPage() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const current = Math.min(page, pages);
   const slice = filtered.slice((current - 1) * PAGE, current * PAGE);
+  function hint(row: (typeof rows)[number]) {
+    if (row.status === "CANCELLED") return t("status_help_cancelled");
+    if (row.status === "REJECTED") return t("status_help_rejected");
+    const stage = row.stage >= 1 && row.stage <= 4 ? row.stage : 1;
+    return t(`stage_help_${stage}` as "stage_help_1");
+  }
   function status(row: (typeof rows)[number]) {
     if (row.status === "CANCELLED") return t("status_cancelled");
     if (row.status === "REJECTED") return t("status_rejected");
@@ -193,7 +208,12 @@ export function FilingsPage() {
                   <td data-label={t("filings_from")}>{row.citizenship || "—"}</td>
                   <td data-label={t("filings_to")}>{row.country || "—"}</td>
                   <td className="latin" data-label={t("filings_date")}>{row.createdAt?.slice(0, 10) || "—"}</td>
-                  <td className="ember" data-label={t("filings_status")}>{status(row)}</td>
+                  <td data-label={t("filings_status")}>
+                    <span>
+                      <span className="ember block">{status(row)}</span>
+                      <span className="mt-1 block text-xs text-mist">{hint(row)}</span>
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

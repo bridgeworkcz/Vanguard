@@ -25,6 +25,7 @@ import {
   invoice2Unlocked,
   parseQuestionnaire,
   tranches,
+  whatsAppHref,
   type DocCategory,
   type Questionnaire,
 } from "@/lib/vanguard/domain";
@@ -103,6 +104,8 @@ export function PortalPage({ id }: { id: string }) {
   const [contactMsg, setContactMsg] = useState("");
   const [role, setRole] = useState("");
   const [book, setBook] = useState<Awaited<ReturnType<typeof listAgentBook>> | null>(null);
+  const [share, setShare] = useState("");
+  const [preview, setPreview] = useState<{ url: string; name: string; tranche?: 1 | 2 | 3 } | null>(null);
 
   async function refreshList() {
     const list = await listMyApplications();
@@ -140,6 +143,14 @@ export function PortalPage({ id }: { id: string }) {
       })
       .catch(() => undefined);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!book?.code) {
+      setShare("");
+      return;
+    }
+    setShare(`${window.location.origin}/r/${encodeURIComponent(book.code)}`);
+  }, [book?.code]);
 
   useEffect(() => {
     if (!user) return;
@@ -204,10 +215,16 @@ export function PortalPage({ id }: { id: string }) {
     await refreshDetail(app.id);
   }
 
+  function showPreview(next: { url: string; name: string; tranche?: 1 | 2 | 3 }) {
+    setPreview((cur) => {
+      if (cur?.url) URL.revokeObjectURL(cur.url);
+      return next;
+    });
+  }
+
   async function invoice(tranche: 1 | 2 | 3) {
     if (!app || !site || !visa) return;
-    const numbered = await takeInvoiceNumber().catch(() => ({ number: app.id }));
-    await buildInvoice({
+    const url = await buildInvoice({
       lang,
       tranche,
       settings: site.settings,
@@ -219,15 +236,16 @@ export function PortalPage({ id }: { id: string }) {
       employer: app.employer,
       total: app.totalCost,
       date: new Date().toISOString().slice(0, 10),
-      number: numbered.number,
+      hold: true,
     });
+    if (url) showPreview({ url, name: `${app.id}-invoice-${tranche}.pdf`, tranche });
   }
 
   async function offer() {
     if (!app || !site) return;
     const job = site.vacancies.find((item) => item.id === app.vacancyId);
     const person = parseQuestionnaire(app.questionnaire);
-    await buildOffer({
+    const url = await buildOffer({
       lang,
       settings: site.settings,
       fileId: app.id,
@@ -239,13 +257,15 @@ export function PortalPage({ id }: { id: string }) {
       hours: job?.workingHours || "",
       housing: job?.accommodation || "",
       date: new Date().toISOString().slice(0, 10),
+      hold: true,
     });
+    if (url) showPreview({ url, name: `${app.id}-offer.pdf` });
   }
 
   async function contract() {
     if (!app || !site || !visa) return;
     const person = parseQuestionnaire(app.questionnaire);
-    await buildContract({
+    const url = await buildContract({
       lang,
       settings: site.settings,
       fileId: app.id,
@@ -256,7 +276,9 @@ export function PortalPage({ id }: { id: string }) {
       duration: visa.duration,
       total: app.totalCost,
       date: new Date().toISOString().slice(0, 10),
+      hold: true,
     });
+    if (url) showPreview({ url, name: `${app.id}-agreement.pdf` });
   }
 
   return (
@@ -288,6 +310,20 @@ export function PortalPage({ id }: { id: string }) {
               </div>
             </div>
             <p className="text-sm text-mist">{t("desk_code_help")}</p>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-mist">{t("desk_link")}</p>
+              <p className="latin mt-1 break-all text-sm">{share}</p>
+              <p className="mt-1 text-sm text-mist">{t("desk_link_help")}</p>
+              <button
+                type="button"
+                className="btn mt-2"
+                onClick={() => {
+                  if (share) void navigator.clipboard.writeText(share).catch(() => undefined);
+                }}
+              >
+                {t("desk_copy")}
+              </button>
+            </div>
             {book.cases.length === 0 ? <p className="text-mist">{t("desk_empty")}</p> : null}
             <div className="sheet-wrap">
               <table className="sheet w-full min-w-[640px] text-left text-sm">
@@ -375,7 +411,17 @@ export function PortalPage({ id }: { id: string }) {
               </p>
               <p className="mt-4 text-lg">{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
               {(soon(app.cancelDeadlineAt, now) || soon(app.docDeadlineAt, now)) && app.status === "OPEN" ? (
-                <p className="mt-2 text-sm ember">{t("portal_remind")}</p>
+                <p className="mt-2 text-sm ember">
+                  {t("portal_remind")}
+                  {site?.settings.support_phone ? (
+                    <>
+                      {" "}
+                      <a className="underline" href={whatsAppHref(site.settings.support_phone, `${app.id}. ${t("portal_remind")}`)} target="_blank" rel="noopener noreferrer">
+                        {t("wa_remind")}
+                      </a>
+                    </>
+                  ) : null}
+                </p>
               ) : null}
               <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => (
@@ -524,7 +570,21 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "OPEN" && app.stage >= 2 ? (
               <div>
-                <h3 className="display text-3xl">{t("docs_title")}</h3>
+                <h3 className="display text-3xl">{t("checklist_title")}</h3>
+                <ul className="mt-3 grid gap-2 text-sm">
+                  {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
+                    const files = [...(detail?.documents.filter((d) => d.category === cat) ?? [])].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+                    const latest = files[0];
+                    const label = !latest ? t("checklist_miss") : latest.status === "REJECTED" ? t("checklist_no") : latest.status === "APPROVED" ? t("checklist_ok") : t("checklist_wait");
+                    return (
+                      <li key={cat} className="flex items-baseline justify-between gap-3 border-t border-white/10 py-2">
+                        <span>{t(`cat_${cat}`)}</span>
+                        <span className={latest?.status === "REJECTED" ? "ember" : "text-mist"}>{label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <h3 className="display mt-8 text-3xl">{t("docs_title")}</h3>
                 <p className="mt-2 text-sm text-mist">{t("docs_help")}</p>
                 <ul className="mt-4 grid gap-3">
                   {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
@@ -637,6 +697,60 @@ export function PortalPage({ id }: { id: string }) {
           <p className="mt-8">{t("loading")}</p>
         )}
       </div>
+      {preview ? (
+        <div className="fixed inset-0 z-50 grid place-items-end bg-black/70 p-3 sm:place-items-center sm:p-6">
+          <div className="flex h-[min(92vh,860px)] w-full max-w-3xl flex-col gap-3 rounded-2xl bg-[#101114] p-3">
+            <p className="text-sm text-mist">{t("preview_title")}</p>
+            <iframe title={t("preview_title")} src={preview.url} className="min-h-0 w-full flex-1 rounded-xl bg-white" />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-solid"
+                onClick={() => {
+                  if (!preview) return;
+                  if (preview.tranche && app && site && visa) {
+                    void takeInvoiceNumber()
+                      .catch(() => ({ number: app.id }))
+                      .then((numbered) =>
+                        buildInvoice({
+                          lang,
+                          tranche: preview.tranche!,
+                          settings: site.settings,
+                          fileId: app.id,
+                          client: clientName(parseQuestionnaire(app.questionnaire)),
+                          country: app.country,
+                          permit: visa.name,
+                          duration: visa.duration,
+                          employer: app.employer,
+                          total: app.totalCost,
+                          date: new Date().toISOString().slice(0, 10),
+                          number: numbered.number,
+                        }),
+                      );
+                    return;
+                  }
+                  const a = document.createElement("a");
+                  a.href = preview.url;
+                  a.download = preview.name;
+                  a.click();
+                }}
+              >
+                {t("preview_download")}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  URL.revokeObjectURL(preview.url);
+                  setPreview(null);
+                }}
+              >
+                {t("preview_close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </Shell>
   );
 }

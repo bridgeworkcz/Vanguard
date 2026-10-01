@@ -21,6 +21,8 @@ import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ProcessRouteImport } from './routes/process'
 import { Route as QuestionsRouteImport } from './routes/questions'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as CountryCodeRouteImport } from './routes/country.$code'
+import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as FilesKindIdRouteImport } from './routes/files.$kind.$id'
@@ -85,6 +87,16 @@ const SearchRoute = SearchRouteImport.update({
   path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CountryCodeRoute = CountryCodeRouteImport.update({
+  id: '/country/$code',
+  path: '/country/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RCodeRoute = RCodeRouteImport.update({
+  id: '/r/$code',
+  path: '/r/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VacanciesIdRoute = VacanciesIdRouteImport.update({
   id: '/vacancies_/$id',
   path: '/vacancies/$id',
@@ -114,6 +126,8 @@ export interface FileRoutesByFullPath {
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/country/$code': typeof CountryCodeRoute
+  '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
@@ -131,6 +145,8 @@ export interface FileRoutesByTo {
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/country/$code': typeof CountryCodeRoute
+  '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
@@ -149,6 +165,8 @@ export interface FileRoutesById {
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/country/$code': typeof CountryCodeRoute
+  '/r/$code': typeof RCodeRoute
   '/vacancies_/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
@@ -168,6 +186,8 @@ export interface FileRouteTypes {
     | '/process'
     | '/questions'
     | '/search'
+    | '/country/$code'
+    | '/r/$code'
     | '/vacancies/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
@@ -185,6 +205,8 @@ export interface FileRouteTypes {
     | '/process'
     | '/questions'
     | '/search'
+    | '/country/$code'
+    | '/r/$code'
     | '/vacancies/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
@@ -202,6 +224,8 @@ export interface FileRouteTypes {
     | '/process'
     | '/questions'
     | '/search'
+    | '/country/$code'
+    | '/r/$code'
     | '/vacancies_/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
@@ -220,6 +244,8 @@ export interface RootRouteChildren {
   ProcessRoute: typeof ProcessRoute
   QuestionsRoute: typeof QuestionsRoute
   SearchRoute: typeof SearchRoute
+  CountryCodeRoute: typeof CountryCodeRoute
+  RCodeRoute: typeof RCodeRoute
   VacanciesIdRoute: typeof VacanciesIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   FilesKindIdRoute: typeof FilesKindIdRoute
@@ -311,6 +337,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/country/$code': {
+      id: '/country/$code'
+      path: '/country/$code'
+      fullPath: '/country/$code'
+      preLoaderRoute: typeof CountryCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/r/$code': {
+      id: '/r/$code'
+      path: '/r/$code'
+      fullPath: '/r/$code'
+      preLoaderRoute: typeof RCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/vacancies_/$id': {
       id: '/vacancies_/$id'
       path: '/vacancies/$id'
@@ -348,6 +388,8 @@ const rootRouteChildren: RootRouteChildren = {
   ProcessRoute: ProcessRoute,
   QuestionsRoute: QuestionsRoute,
   SearchRoute: SearchRoute,
+  CountryCodeRoute: CountryCodeRoute,
+  RCodeRoute: RCodeRoute,
   VacanciesIdRoute: VacanciesIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   FilesKindIdRoute: FilesKindIdRoute,
