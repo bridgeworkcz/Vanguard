@@ -91,6 +91,9 @@ html[dir="rtl"] .display {
   text-transform: uppercase;
   color: #aaa;
 }
+.ember {
+  color: #ff6a1a;
+}
 html[dir="rtl"] .kicker {
   letter-spacing: 0.04em;
 }
@@ -199,4 +202,39 @@ textarea.field-light {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+.banner {
+  min-height: 8.5rem;
+  padding: 1.15rem 1.25rem;
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.75rem;
+}
+.banner b {
+  display: block;
+  max-width: 16rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  text-transform: none;
+}
+.banner span {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.banner-orange {
+  background: #ff6a1a;
+  color: #1a0b04;
+}
+.banner-paper {
+  background: #f4f5f7;
+  color: #070809;
+}
+.banner-blue {
+  background: #2f4bff;
+  color: #f4f5f7;
 }

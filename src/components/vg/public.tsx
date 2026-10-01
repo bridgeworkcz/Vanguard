@@ -69,10 +69,10 @@ export function HomePage() {
 
   return (
     <Shell>
-      <section className="min-h-[78vh]">
+      <section>
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-12 lg:py-24">
           <div className="lg:col-span-6">
-            <p className="kicker">{t("hero_kicker")}</p>
+            <p className="kicker ember">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-5xl sm:text-6xl">{title}</h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">{body}</p>
           </div>
@@ -143,7 +143,7 @@ export function HomePage() {
                 </select>
               </label>
               {product && speed ? (
-                <p className="display text-5xl sm:col-span-2 xl:col-span-4">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
+                <p className="display ember text-5xl sm:col-span-2 xl:col-span-4">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
               ) : null}
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}
@@ -154,6 +154,20 @@ export function HomePage() {
           </form>
         </div>
       </section>
+      <section className="mx-auto grid max-w-6xl gap-3 px-4 md:grid-cols-3">
+        <article className="banner banner-orange">
+          <span>01</span>
+          <b>{t("banner_fee")}</b>
+        </article>
+        <article className="banner banner-paper">
+          <span>02</span>
+          <b>{t("banner_split")}</b>
+        </article>
+        <article className="banner banner-blue">
+          <span>03</span>
+          <b>{t("banner_ministry")}</b>
+        </article>
+      </section>
       <section className="mx-auto grid max-w-6xl gap-8 px-4 py-16 md:grid-cols-3">
         <p className="kicker md:col-span-3">{t("steps_kicker")}</p>
         {[
@@ -162,7 +176,7 @@ export function HomePage() {
           [t("step3_t"), t("step3_b")],
         ].map(([h, b], i) => (
           <article key={h} className="border-t border-white/15 pt-4">
-            <p className="text-metal">0{i + 1}</p>
+            <p className="ember">0{i + 1}</p>
             <h3 className="display mt-3 text-3xl">{h}</h3>
             <p className="mt-3 text-sm leading-relaxed text-mist">{b}</p>
           </article>
@@ -203,8 +217,8 @@ export function SearchPage({
           <>
             <div className="glass mt-6 grid gap-6 p-6 md:grid-cols-3">
               <div>
-                <p className="kicker">{t("search_fee")}</p>
-                <p className="display mt-2 text-5xl">{fee}</p>
+                <p className="kicker ember">{t("search_fee")}</p>
+                <p className="display ember mt-2 text-5xl">{fee}</p>
                 <p className="text-mist">EUR</p>
               </div>
               <div>
