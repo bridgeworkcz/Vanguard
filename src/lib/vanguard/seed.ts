@@ -57,210 +57,78 @@ const HOUSING = [
   "Employer hostel, shared room, for the first contract year",
   "Housing allowance paid with the monthly wage",
   "Dormitory for the first 90 days, then a private lease",
+  "Company apartment, two workers to a room, utilities included",
+  "Employer-arranged room near the plant, rent deducted from the wage",
 ];
 
 const HOURS = [
   "40 hours a week, morning or afternoon shift",
   "38–42 hours a week, rotating shift",
   "40 hours a week, Monday to Friday",
+  "12-hour shifts, three days on and three days off",
+  "Night shift, four nights on and four nights off",
 ];
 
 const EMPLOYERS: Record<string, string[]> = {
-  Slovakia: [
-    "Volkswagen Slovakia",
-    "Kia Slovakia",
-    "Amazon Sereď",
-    "PCA Slovakia",
-    "Schaeffler Kysuce",
-    "Continental Púchov",
-    "Železiarne Podbrezová",
-    "U. S. Steel Košice",
-    "Minebea AccessSolutions",
-    "ZF Slovakia",
-  ],
-  "Czech Republic": [
-    "Škoda Auto",
-    "Foxconn CZ",
-    "Rohlík Group",
-    "Hyundai Nošovice",
-    "Bosch České Budějovice",
-    "Continental Brandýs",
-    "Honeywell Brno",
-    "Miele Uničov",
-    "Panasonic Pilsen",
-    "AGC Flat Glass",
-    "Doosan Škoda Power",
-    "Linet Želevčice",
-  ],
-  Germany: [
-    "Siemens",
-    "DHL Supply Chain",
-    "Robert Bosch",
-    "BMW Group",
-    "Mercedes-Benz",
-    "Continental",
-    "ZF Friedrichshafen",
-    "DB Schenker",
-    "Thyssenkrupp",
-    "BASF",
-    "Dräxlmaier",
-    "Kärcher",
-  ],
-  Portugal: [
-    "Volkswagen Autoeuropa",
-    "Continental Mabor",
-    "Jerónimo Martins",
-    "Bosch Braga",
-    "Embraer Portugal",
-    "Navigator Company",
-    "Sonae MC",
-    "Aptiv Braga",
-    "Ikea Industry",
-    "Luís Simões",
-  ],
-  Bulgaria: [
-    "Sensata Plovdiv",
-    "Yazaki Yambol",
-    "Gebrüder Weiss",
-    "Liebherr Radinovo",
-    "Melexis Sofia",
-    "Festo Sofia",
-    "Aurubis Pirdop",
-    "Witte Automotive",
-    "Teklas Bulgaria",
-    "Schneider Electric",
-  ],
-  Italy: [
-    "Barilla",
-    "Stellantis Italia",
-    "BCube Logistics",
-    "Lavazza",
-    "Ferrero",
-    "CNH Industrial",
-    "Ducati",
-    "Campari Group",
-    "Brembo",
-    "IMA Group",
-  ],
-  Norway: [
-    "SalMar",
-    "Lerøy Seafood",
-    "Posten Bring",
-    "Mowi",
-    "Aker Solutions",
-    "Orkla Foods",
-    "Nortura",
-    "Hydro Aluminium",
-    "Tine SA",
-  ],
-  Serbia: [
-    "Linglong Tire",
-    "Leoni Niš",
-    "Aptiv Novi Sad",
-    "ZF Serbia",
-    "Grundfos Inđija",
-    "Continental Serbia",
-    "Yazaki Kruševac",
-    "Magna Seating",
-    "Henkel Kruševac",
-    "Bosch Pećinci",
-  ],
-  Canada: [
-    "Magna International",
-    "Maple Leaf Foods",
-    "Amazon Canada",
-    "Linamar",
-    "Saputo",
-    "Martinrea",
-    "Loblaw supply",
-    "Cargill Canada",
-    "Bombardier",
-    "Sofina Foods",
-    "Maple Lodge Farms",
-  ],
-  Hungary: [
-    "Audi Hungaria",
-    "Samsung SDI",
-    "Continental Hungary",
-    "Mercedes Kecskemét",
-    "Bosch Hatvan",
-    "Suzuki Esztergom",
-    "SK On Iváncsa",
-    "Flextronics",
-    "Nestlé Szerencs",
-    "Penny Market DC",
-  ],
-  Poland: [
-    "Amazon Polska",
-    "LG Energy Solution",
-    "Biedronka DC",
-    "Volkswagen Poznań",
-    "Stellantis Gliwice",
-    "Whirlpool Łódź",
-    "Jysk logistics",
-    "Beiersdorf Poznań",
-    "Toyota Wałbrzych",
-    "Solaris Bus",
-    "Amica Wronki",
-    "Tarczyński Trzebnica",
-  ],
-  "New Zealand": [
-    "Silver Fern Farms",
-    "T&G Global",
-    "Fonterra",
-    "Alliance Group",
-    "ANZCO Foods",
-    "Zespri packhouse",
-    "Mainfreight NZ",
-    "Affco",
-    "Open Country Dairy",
-  ],
-  Belarus: [
-    "BelAZ",
-    "Santa Bremor",
-    "MAZ",
-    "Amkodor",
-    "Savushkin Product",
-    "MTZ",
-    "Atlant",
-    "Belaruskali support",
-  ],
+  Slovakia: ["Volkswagen Slovakia", "Kia Slovakia", "Amazon Sereď", "PCA Slovakia", "Schaeffler Kysuce", "Continental Púchov", "Železiarne Podbrezová", "U. S. Steel Košice", "Minebea AccessSolutions", "ZF Slovakia", "Jaguar Land Rover Nitra", "Faurecia Trnava"],
+  "Czech Republic": ["Škoda Auto", "Foxconn CZ", "Rohlík Group", "Hyundai Nošovice", "Bosch České Budějovice", "Continental Brandýs", "Honeywell Brno", "Miele Uničov", "Panasonic Pilsen", "AGC Flat Glass", "Doosan Škoda Power", "Linet Želevčice", "Toyota Kolín", "Mondi Štětí", "Ahold Czech DC", "PWO Czech"],
+  Germany: ["Siemens", "DHL Supply Chain", "Robert Bosch", "BMW Group", "Mercedes-Benz", "Continental", "ZF Friedrichshafen", "DB Schenker", "Thyssenkrupp", "BASF", "Dräxlmaier", "Kärcher", "Volkswagen Wolfsburg", "Porsche Leipzig", "Amazon Deutschland", "Schaeffler Herzogenaurach", "Brose Bamberg", "MAHLE"],
+  Portugal: ["Volkswagen Autoeuropa", "Continental Mabor", "Jerónimo Martins", "Bosch Braga", "Embraer Portugal", "Navigator Company", "Sonae MC", "Aptiv Braga", "Ikea Industry", "Luís Simões", "Corticeira Amorim", "Sumol+Compal"],
+  Bulgaria: ["Sensata Plovdiv", "Yazaki Yambol", "Gebrüder Weiss", "Liebherr Radinovo", "Melexis Sofia", "Festo Sofia", "Aurubis Pirdop", "Witte Automotive", "Teklas Bulgaria", "Schneider Electric", "Ideal Standard Sevlievo", "Kostal Bulgaria"],
+  Italy: ["Barilla", "Stellantis Italia", "BCube Logistics", "Lavazza", "Ferrero", "CNH Industrial", "Ducati", "Campari Group", "Brembo", "IMA Group", "Electrolux Italia", "Prysmian", "Luxottica", "Granarolo"],
+  Norway: ["SalMar", "Lerøy Seafood", "Posten Bring", "Mowi", "Aker Solutions", "Orkla Foods", "Nortura", "Hydro Aluminium", "Tine SA", "Norsk Gjenvinning"],
+  Serbia: ["Linglong Tire", "Leoni Niš", "Aptiv Novi Sad", "ZF Serbia", "Grundfos Inđija", "Continental Serbia", "Yazaki Kruševac", "Magna Seating", "Henkel Kruševac", "Bosch Pećinci", "Gorenje Valjevo", "Tigar Tyres"],
+  Canada: ["Magna International", "Maple Leaf Foods", "Amazon Canada", "Linamar", "Saputo", "Martinrea", "Loblaw supply", "Cargill Canada", "Bombardier", "Sofina Foods", "Maple Lodge Farms", "Exceldor", "Olymel", "JBS Canada"],
+  Hungary: ["Audi Hungaria", "Samsung SDI", "Continental Hungary", "Mercedes Kecskemét", "Bosch Hatvan", "Suzuki Esztergom", "SK On Iváncsa", "Flextronics", "Nestlé Szerencs", "Penny Market DC", "DENSO Hungary", "BYD Szeged", "Apollo Tyres", "Thyssenkrupp Hungary"],
+  Poland: ["Amazon Polska", "LG Energy Solution", "Biedronka DC", "Volkswagen Poznań", "Stellantis Gliwice", "Whirlpool Łódź", "Jysk logistics", "Beiersdorf Poznań", "Toyota Wałbrzych", "Solaris Bus", "Amica Wronki", "Tarczyński Trzebnica", "Mercedes-Benz Jawor", "MAN Trucks", "BSH Sprzęt", "Electrolux Poland", "LPP DC", "Mlekovita"],
+  "New Zealand": ["Silver Fern Farms", "T&G Global", "Fonterra", "Alliance Group", "ANZCO Foods", "Zespri packhouse", "Mainfreight NZ", "Affco", "Open Country Dairy", "Talley's"],
+  Belarus: ["BelAZ", "Santa Bremor", "MAZ", "Amkodor", "Savushkin Product", "MTZ", "Atlant", "Belaruskali support"],
 };
 
-function countFor(product: VisaProduct, pool: string[]): number {
-  if (product.country === "Czech Republic") return 8;
-  return Math.min(pool.length, product.country === "Germany" || product.country === "Poland" ? 12 : pool.length >= 11 ? 11 : 10);
-}
+const PAY: Record<string, number> = {
+  Slovakia: 980,
+  "Czech Republic": 1150,
+  Germany: 1900,
+  Portugal: 1050,
+  Bulgaria: 850,
+  Italy: 1350,
+  Norway: 2400,
+  Serbia: 780,
+  Canada: 2100,
+  Hungary: 1200,
+  Poland: 1100,
+  "New Zealand": 2200,
+  Belarus: 650,
+};
 
 export function buildVacancies(): Vacancy[] {
   const out: Vacancy[] = [];
   let n = 1;
-  const used = new Set<string>();
-  for (const product of VISA_PRODUCTS) {
-    const pool = EMPLOYERS[product.country] ?? [];
-    const nine = product.duration.includes("9");
-    const offset = nine ? 6 : 0;
-    const take = countFor(product, pool);
+  const countries = [...new Set(VISA_PRODUCTS.map((item) => item.country))];
+  for (const country of countries) {
+    const products = VISA_PRODUCTS.filter((item) => item.country === country);
+    const pool = EMPLOYERS[country] ?? [];
+    const take = Math.min(18, pool.length);
     for (let i = 0; i < take; i++) {
-      const role = ROLES[(i + offset) % ROLES.length]!;
-      const employer = pool[(i + offset) % pool.length] ?? `${product.country} employer ${i + 1}`;
-      const key = `${product.id}|${employer}|${role[0]}`;
-      if (used.has(key)) continue;
-      used.add(key);
-      const net = 900 + ((i * 47 + product.basePrice) % 520);
+      const product = products.length === 1 ? products[0]! : products[i < Math.ceil(take * 0.62) ? 0 : 1]!;
+      const role = ROLES[i % ROLES.length]!;
+      const employer = pool[i] ?? `${country} employer ${i + 1}`;
+      const net = (PAY[country] ?? 1000) + ((i * 37) % 240);
       out.push({
         id: `VAC-${String(n).padStart(4, "0")}`,
         title: role[0],
-        country: product.country,
+        country,
         visaProductId: product.id,
         employer,
-        salaryNet: `${net}–${net + 160} EUR net / month`,
-        accommodation: HOUSING[(i + offset) % HOUSING.length]!,
-        workingHours: HOURS[(i + offset) % HOURS.length]!,
-        description: `${role[1]} Site: ${employer}. Permit: ${product.name}, ${product.duration}.`,
+        salaryNet: `${net}–${net + 140} EUR net / month`,
+        accommodation: HOUSING[i % HOUSING.length]!,
+        workingHours: HOURS[i % HOURS.length]!,
+        description: `${role[1]} Employer: ${employer}. Permit term: ${product.duration}.`,
         requirements:
-          "Passport valid at least 12 months, police clearance, a medical set, and the Vanguard questionnaire.",
-        quota: 4 + (i % 5),
+          i % 4 === 0
+            ? "Passport valid at least 12 months, police clearance issued within 6 months, and a medical set."
+            : "Passport valid at least 12 months, police clearance, a medical set, and the Vanguard questionnaire.",
+        quota: 3 + (i % 6),
         active: true,
       });
       n += 1;
