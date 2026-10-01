@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { readSheetRows, appendSheetRow, updateSheetRowById } from '../server/utils/sheets.js';
 import { hashPassword, verifyPassword, createSessionToken, verifySessionToken } from '../server/utils/auth.js';
-import { mapRowToUser, mapRowToUserRecord, mapUserToRow } from '../server/utils/mappers.js';
+import { mapRowToUserRecord, mapUserToRow } from '../server/utils/mappers.js';
 import { sendSafeTelegramAlert } from '../server/utils/telegram.js';
 import type { Role, User, UserRecord } from '../src/types.js';
 
@@ -22,7 +22,15 @@ function withOwnerRole(record: UserRecord): UserRecord {
 }
 
 function publicUser(record: UserRecord): User {
-  return mapRowToUser(record as unknown as Record<string, string>);
+  return {
+    id: record.id,
+    email: record.email,
+    phone: record.phone,
+    fullName: record.fullName,
+    roles: record.roles?.length ? record.roles : ['CLIENT'],
+    createdAt: record.createdAt,
+    lastLoginAt: record.lastLoginAt
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
