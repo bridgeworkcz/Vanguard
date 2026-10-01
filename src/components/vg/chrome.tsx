@@ -10,9 +10,12 @@ import { useI18n, type Lang } from "@/lib/vanguard/i18n";
 export function Mark({ className = "size-8" }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect x="1.2" y="1.2" width="29.6" height="29.6" fill="none" stroke="currentColor" strokeWidth="1" />
-      <path d="M8.5 23.5 L16 8.5 L23.5 23.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M11.2 18.2 H20.8" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="1.25" y="1.25" width="29.5" height="29.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path fill="currentColor" d="M6.2 8.6h2.2v14.8H6.2z" />
+      <path
+        fill="currentColor"
+        d="M11 8.6 17.4 16 11 23.4v-3.1L14.6 16 11 11.7zm8.2 0L25.6 16l-6.4 7.4v-3.1L22.8 16l-3.6-4.3z"
+      />
     </svg>
   );
 }

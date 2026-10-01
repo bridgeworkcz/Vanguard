@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Vanguard Global Mobility">
-  <rect width="32" height="32" rx="8" fill="#070809"/>
-  <path fill="#f4f5f7" d="M6.2 6.2 16 27.2 25.8 6.2 21.2 6.2 16 17.6 10.8 6.2z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Vanguard">
+  <rect width="32" height="32" fill="#070809"/>
+  <path fill="#f4f5f7" d="M6.2 8.6h2.2v14.8H6.2z"/>
+  <path fill="#f4f5f7" d="M11 8.6 17.4 16 11 23.4v-3.1L14.6 16 11 11.7zm8.2 0L25.6 16l-6.4 7.4v-3.1L22.8 16l-3.6-4.3z"/>
 </svg>
