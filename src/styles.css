@@ -23,6 +23,8 @@
       radial-gradient(circle at 100% 20%, rgba(180, 180, 180, 0.05), transparent 30%),
       var(--color-ink);
     color: var(--color-paper);
+    overflow-x: clip;
+    max-width: 100%;
   }
   body {
     font-family: var(--font-sans);
@@ -159,6 +161,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.62);
+  overflow-wrap: anywhere;
 }
 .field {
   width: 100%;
@@ -307,6 +310,8 @@ textarea.field-light {
   overflow-x: auto;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
 }
 
 a,
@@ -379,6 +384,9 @@ button,
     gap: 1rem;
     padding: 0.28rem 0;
     text-align: end;
+    min-width: 0;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
   }
   table.sheet td::before {
     content: attr(data-label);

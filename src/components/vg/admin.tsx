@@ -49,6 +49,46 @@ function useAdminT() {
   return (key: CopyKey) => ADMIN_UK[key] ?? key;
 }
 
+const QUESTION_LABELS: [string, string][] = [
+  ["firstName", "Ім’я"],
+  ["lastName", "Прізвище"],
+  ["middleName", "По батькові"],
+  ["birthDate", "Дата народження"],
+  ["gender", "Стать"],
+  ["citizenship", "Громадянство"],
+  ["criminalRecord", "Судимість"],
+  ["phone", "Телефон"],
+  ["previousVisa", "Попередня віза"],
+  ["travelWithFamily", "Їде з родиною"],
+];
+
+function QuestionnaireBlock({ raw }: { raw: string }) {
+  let data: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") data = parsed as Record<string, unknown>;
+  } catch {
+    return <p className="mt-3 break-all text-sm">{raw}</p>;
+  }
+  const rows = QUESTION_LABELS.map(([key, label]) => {
+    const value = data[key];
+    if (key === "middleName" && data.middleNameAbsent === true) return [label, "немає"] as const;
+    if (value === undefined || value === null || value === "") return null;
+    return [label, String(value)] as const;
+  }).filter((row): row is readonly [string, string] => Boolean(row));
+  if (!rows.length) return null;
+  return (
+    <dl className="mt-4 grid min-w-0 gap-1 text-sm">
+      {rows.map(([label, value]) => (
+        <div key={label} className="grid min-w-0 gap-0.5 border-t border-white/10 py-2">
+          <dt className="text-mist">{label}</dt>
+          <dd className="break-all">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 async function asData(file: File) {
   const data = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -163,11 +203,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     void adminAudit().then(setAudit).catch(() => undefined);
   }, [id, role]);
 
-  useEffect(() => {
-    if (!detail || !id) return;
-    document.getElementById("case-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [detail, id]);
-
   if (pending) {
     return (
       <Shell>
@@ -209,7 +244,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
   return (
     <Shell>
-      <div className="mx-auto flex max-w-6xl gap-6 px-4 py-10">
+      <div className="mx-auto w-full min-w-0 max-w-6xl overflow-x-clip px-4 py-10 md:flex md:gap-6">
         <aside className="hidden w-44 shrink-0 md:block">
           <p className="kicker ember">{t("admin_kicker")}</p>
           <nav className="mt-4 grid gap-1">
@@ -220,7 +255,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             ))}
           </nav>
         </aside>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 w-full max-w-full flex-1 overflow-x-clip">
         <p className="kicker ember md:hidden">{t("admin_kicker")}</p>
         <div className="mt-4 flex flex-wrap gap-2 md:hidden">
           {TABS.map((name) => (
@@ -386,8 +421,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
               return (
                 <>
-                  <div className="sheet-wrap">
-                    <table className="sheet w-full min-w-[880px] text-left text-sm">
+                  <div className="sheet-wrap min-w-0 max-w-full">
+                    <table className="sheet w-full text-left text-sm md:min-w-[880px]">
                       <thead className="text-mist">
                         <tr>
                           <th className="py-2" />
@@ -457,7 +492,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               );
             })()}
             {detail && id ? (
-              <article id="case-detail" className="glass p-5">
+              <article id="case-detail" className="glass mt-4 w-full min-w-0 max-w-full overflow-x-clip p-5">
                 <p className="kicker">{detail.app.id}</p>
                 <h2 className="display text-3xl">{detail.app.vacancyTitle}</h2>
                 <p className="text-mist">
@@ -495,7 +530,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       ))}
                   </select>
                 </label>
-                <pre className="mt-3 whitespace-pre-wrap text-sm text-paper/80">{detail.app.questionnaire}</pre>
+                <QuestionnaireBlock raw={detail.app.questionnaire} />
                 <div className="mt-4 flex flex-wrap gap-2">
                   {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
                     <button type="button" className="btn" onClick={() => void act("accept")}>{t("admin_accept")}</button>
@@ -602,7 +637,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </ul>
                 <input className="field mt-2" placeholder={t("admin_reason")} value={docReason} onChange={(e) => setDocReason(e.target.value)} />
                 <form
-                  className="mt-4 flex gap-2"
+                  className="mt-4 flex min-w-0 flex-wrap gap-2"
                   onSubmit={(e) => {
                     e.preventDefault();
                     void postMessage({ data: { applicationId: detail.app.id, body: note } }).then(() => {
@@ -611,7 +646,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     });
                   }}
                 >
-                  <input className="field" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("messages")} />
+                  <input className="field min-w-0 flex-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("messages")} />
                   <button className="btn" type="submit">{t("message_send")}</button>
                 </form>
                 <ul className="mt-3 text-sm">
@@ -622,7 +657,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                   ))}
                 </ul>
                 <h3 className="mt-6 text-sm text-mist">{t("admin_history")}</h3>
-                <ul className="mt-2 text-sm">
+                <ul className="mt-2 break-all text-sm">
                   {audit
                     .filter((row) => row.target === detail.app.id)
                     .map((row) => (
