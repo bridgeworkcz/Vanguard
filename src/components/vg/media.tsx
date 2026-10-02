@@ -17,13 +17,6 @@ export type Slot = {
   cover?: boolean;
 };
 
-const CLIPS = [
-  { id: "path", src: "/media/q-path.mp4", label: "video_path" as const, mark: "video_path" },
-  { id: "papers", src: "/media/q-papers.mp4", label: "video_papers" as const, mark: "video_papers" },
-  { id: "pay", src: "/media/q-pay.mp4", label: "video_pay" as const, mark: "video_pay" },
-  { id: "release", src: "/media/q-release.mp4", label: "video_release" as const, mark: "video_release" },
-];
-
 type StepCopy = Record<string, Record<string, { t?: string; b?: string }>>;
 
 export function readSteps(raw: string): StepCopy {
@@ -212,48 +205,6 @@ export function LicenseWall({ items }: { items: Slot[] }) {
         </div>
       ) : null}
     </>
-  );
-}
-
-export function QuestionFilm() {
-  const { t } = useI18n();
-  const { data } = useSite();
-  const settings = data?.settings;
-  const video = useRef<HTMLVideoElement>(null);
-  const [clip, setClip] = useState(0);
-  const [dead, setDead] = useState(false);
-  if (!settings || settings.video_on === "0" || dead) return null;
-  const book = settings;
-  const single = book.video_src?.trim() || "";
-  function show(index: number) {
-    setClip(index);
-    window.setTimeout(() => {
-      const node = video.current;
-      if (!node) return;
-      if (single) node.currentTime = Number(book[CLIPS[index]?.mark || "video_path"]) || 0;
-      void node.play().catch(() => undefined);
-    }, 0);
-  }
-  return (
-    <section className="grid gap-3 border-t border-white/10 pt-8">
-      <p className="kicker ember">{t("video_kicker")}</p>
-      <video
-        ref={video}
-        className="w-full bg-black"
-        controls
-        playsInline
-        preload="metadata"
-        src={single || CLIPS[clip]?.src}
-        onError={() => setDead(true)}
-      />
-      <div className="flex flex-wrap gap-2">
-        {CLIPS.map((item, index) => (
-          <button key={item.id} type="button" className={`btn ${index === clip ? "btn-solid" : ""}`} onClick={() => show(index)}>
-            0{index + 1} {t(item.label)}
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
 

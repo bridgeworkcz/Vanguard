@@ -242,11 +242,5 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   banner_country: "",
   banner_start: "",
   banner_end: "",
-  video_on: "1",
-  video_src: "",
-  video_path: "0",
-  video_papers: "0",
-  video_pay: "0",
-  video_release: "0",
   step_copy: "",
 };

@@ -1090,22 +1090,6 @@ function ContentEditor({
             <input className="field" type="date" disabled={readOnly} value={settings.banner_end ?? ""} onChange={(e) => onSettings({ ...settings, banner_end: e.target.value })} />
           </label>
         </div>
-        <label className="flex items-center gap-2 text-sm text-mist">
-          <input type="checkbox" disabled={readOnly} checked={settings.video_on !== "0"} onChange={(e) => onSettings({ ...settings, video_on: e.target.checked ? "1" : "0" })} />
-          {t("admin_video")}
-        </label>
-        <label className="grid gap-1 text-sm text-mist">
-          {t("admin_video_src")}
-          <input className="field" disabled={readOnly} value={settings.video_src ?? ""} onChange={(e) => onSettings({ ...settings, video_src: e.target.value })} />
-        </label>
-        <div className="grid gap-2 sm:grid-cols-4">
-          {(["video_path", "video_papers", "video_pay", "video_release"] as const).map((key) => (
-            <label key={key} className="grid gap-1 text-sm text-mist">
-              {t(`admin_${key}`)}
-              <input className="field" type="number" min={0} disabled={readOnly} value={settings[key] ?? "0"} onChange={(e) => onSettings({ ...settings, [key]: e.target.value })} />
-            </label>
-          ))}
-        </div>
         {readOnly ? null : <button className="btn-solid w-fit" type="submit">{t("save")}</button>}
       </form>
       {readOnly ? null : (
