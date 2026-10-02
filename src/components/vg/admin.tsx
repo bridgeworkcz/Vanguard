@@ -89,7 +89,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [audit, setAudit] = useState<Awaited<ReturnType<typeof adminAudit>>>([]);
   const [draft, setDraft] = useState<Partial<Vacancy>>({});
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
-  const [newApp, setNewApp] = useState({ email: "", vacancyId: "", citizenship: "Ukraine", processing: "STANDARD" as Processing });
+  const [newApp, setNewApp] = useState({ email: "", vacancyId: "", citizenship: CITIZENSHIPS[0] ?? "", processing: "STANDARD" as Processing });
   const [userQuery, setUserQuery] = useState("");
   const [qCountry, setQCountry] = useState("");
   const [qStage, setQStage] = useState("");

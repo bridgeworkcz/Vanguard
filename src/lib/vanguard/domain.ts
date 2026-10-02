@@ -87,7 +87,6 @@ export const EMPTY_QUESTIONNAIRE: Questionnaire = {
 };
 
 export const CITIZENSHIPS = [
-  "Ukraine",
   "Georgia",
   "Moldova",
   "Armenia",
@@ -118,6 +117,7 @@ export const CITIZENSHIPS = [
   "Canada",
   "New Zealand",
   "Other",
+  "Ukraine",
 ];
 
 /** Standard is the published fee. Priority and express sit inside a 20–35% band over the old list price. */
