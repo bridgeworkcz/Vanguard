@@ -32,6 +32,7 @@ import {
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { canCancel, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
+import { DocScreen } from "./doc-view";
 
 function remain(iso: string | null, now: number) {
   if (!iso) return "";
@@ -721,58 +722,43 @@ export function PortalPage({ id }: { id: string }) {
         )}
       </div>
       {preview ? (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-black/70 p-3 sm:place-items-center sm:p-6">
-          <div className="flex h-[min(92vh,860px)] w-full max-w-3xl flex-col gap-3 rounded-2xl bg-[#101114] p-3">
-            <p className="text-sm text-mist">{t("preview_title")}</p>
-            <iframe title={t("preview_title")} src={preview.url} className="min-h-0 w-full flex-1 rounded-xl bg-white" />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn-solid"
-                onClick={() => {
-                  if (!preview) return;
-                  if (preview.tranche && app && site && visa) {
-                    void takeInvoiceNumber()
-                      .catch(() => ({ number: app.id }))
-                      .then((numbered) =>
-                        buildInvoice({
-                          lang,
-                          tranche: preview.tranche!,
-                          settings: site.settings,
-                          fileId: app.id,
-                          client: clientName(parseQuestionnaire(app.questionnaire)),
-                          country: app.country,
-                          permit: visa.name,
-                          duration: visa.duration,
-                          employer: app.employer,
-                          total: app.totalCost,
-                          date: new Date().toISOString().slice(0, 10),
-                          number: numbered.number,
-                        }),
-                      );
-                    return;
-                  }
-                  const a = document.createElement("a");
-                  a.href = preview.url;
-                  a.download = preview.name;
-                  a.click();
-                }}
-              >
-                {t("preview_download")}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  URL.revokeObjectURL(preview.url);
-                  setPreview(null);
-                }}
-              >
-                {t("preview_close")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DocScreen
+          url={preview.url}
+          title={preview.name}
+          closeLabel={t("preview_close")}
+          downloadLabel={t("preview_download")}
+          onClose={() => {
+            URL.revokeObjectURL(preview.url);
+            setPreview(null);
+          }}
+          onDownload={() => {
+            if (preview.tranche && app && site && visa) {
+              void takeInvoiceNumber()
+                .catch(() => ({ number: app.id }))
+                .then((numbered) =>
+                  buildInvoice({
+                    lang,
+                    tranche: preview.tranche!,
+                    settings: site.settings,
+                    fileId: app.id,
+                    client: clientName(parseQuestionnaire(app.questionnaire)),
+                    country: app.country,
+                    permit: visa.name,
+                    duration: visa.duration,
+                    employer: app.employer,
+                    total: app.totalCost,
+                    date: new Date().toISOString().slice(0, 10),
+                    number: numbered.number,
+                  }),
+                );
+              return;
+            }
+            const a = document.createElement("a");
+            a.href = preview.url;
+            a.download = preview.name;
+            a.click();
+          }}
+        />
       ) : null}
     </Shell>
   );
