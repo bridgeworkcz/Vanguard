@@ -90,6 +90,8 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   admin_stage: "Етап",
   admin_country: "Країна",
   admin_assign: "Призначити",
+  admin_action: "Дія",
+  admin_pick_hint: "Галочка лише призначає менеджера. Справу приймає кнопка в цьому рядку.",
   admin_export: "Записати відкриті справи",
   admin_exported: "Справи записано",
   admin_doc_ok: "Прийняти",

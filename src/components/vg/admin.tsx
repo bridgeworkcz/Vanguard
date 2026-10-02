@@ -110,6 +110,18 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [caseQuery, setCaseQuery] = useState("");
   const [casePage, setCasePage] = useState(1);
 
+  async function acceptCase(caseId: string) {
+    setErr("");
+    try {
+      await adminSetStage({ data: { id: caseId, action: "accept", reason: "" } });
+      setApps(await adminListApplications({ data: { includeIncomplete: showAll } }));
+      if (id === caseId) setDetail(await adminGetApplication({ data: caseId }));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Error";
+      setErr(message === "Not ready" ? t("admin_block_q") : message);
+    }
+  }
+
   function go(next: Tab, nextId = "") {
     void navigate({ to: "/admin", search: { tab: next, id: nextId } });
   }
@@ -150,6 +162,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
     void adminAudit().then(setAudit).catch(() => undefined);
   }, [id, role]);
+
+  useEffect(() => {
+    if (!detail || !id) return;
+    document.getElementById("case-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [detail, id]);
 
   if (pending) {
     return (
@@ -311,6 +328,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               />
               {role === "MANAGER" ? <p className="text-sm text-mist">{t("admin_only_mine")}</p> : null}
             </div>
+            <p className="text-sm text-mist">{t("admin_pick_hint")}</p>
             <div className="flex flex-wrap gap-2">
               <select className="field max-w-xs" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
                 <option value="">{t("admin_assign")}</option>
@@ -381,6 +399,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                           <th className="py-2 font-medium">{t("admin_stage")}</th>
                           <th className="py-2 font-medium">{t("portal_paid")}</th>
                           <th className="py-2 font-medium">{t("admin_assign")}</th>
+                          <th className="py-2 font-medium">{t("admin_action")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -413,6 +432,19 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                             </td>
                             <td className="latin" data-label={t("portal_paid")}>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
                             <td className="latin" data-label={t("admin_assign")}>{a.assignedManagerId || "—"}</td>
+                            <td data-label={t("admin_action")}>
+                              {a.status === "OPEN" && a.stage === 1 && a.profileComplete ? (
+                                <button type="button" className="btn" onClick={() => void acceptCase(a.id)}>
+                                  {t("admin_accept")}
+                                </button>
+                              ) : a.status === "OPEN" && a.stage === 1 ? (
+                                <span className="text-xs text-mist">{t("admin_block_q")}</span>
+                              ) : (
+                                <button type="button" className="btn" onClick={() => go("applications", a.id)}>
+                                  {t("admin_open")}
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -425,7 +457,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               );
             })()}
             {detail && id ? (
-              <article className="glass p-5">
+              <article id="case-detail" className="glass p-5">
                 <p className="kicker">{detail.app.id}</p>
                 <h2 className="display text-3xl">{detail.app.vacancyTitle}</h2>
                 <p className="text-mist">
