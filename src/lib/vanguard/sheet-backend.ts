@@ -1,5 +1,5 @@
 import { getDossierCategoryFolder, downloadFileFromDrive, resolveVaultFolder, uploadFileToDrive } from "@/lib/google/drive";
-import { appendSheetRow, appendSheetRows, clearSheetBody, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, primeSheetRows, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
@@ -86,6 +86,7 @@ async function settingMap() {
 }
 
 async function putSetting(key: string, value: string, actor: string) {
+  invalidateSheet("SystemSettings");
   const rows = await settingsRows();
   const found = rows.find((row) => row.key === key);
   const stamp = nowIso();
@@ -434,8 +435,19 @@ async function audit(actor: string, action: string, target: string, details: str
 }
 
 async function ensureSeed() {
-  const { prepareGoogle } = await import("@/lib/google/prepare");
-  await prepareGoogle();
+  try {
+    const { prepareGoogle } = await import("@/lib/google/prepare");
+    await prepareGoogle();
+  } catch (err) {
+    console.error("[google] prepare", err);
+    if (err instanceof Error && err.message.includes("busy")) throw err;
+  }
+  try {
+    await primeSheetRows(["SystemSettings", "Applications", "Vacancies", "Team", "Gallery", "DossierDocuments", "Pricing", "Users"]);
+  } catch (err) {
+    console.error("[sheets] prime", err);
+    if (err instanceof Error && err.message.includes("busy")) throw err;
+  }
   const map = await settingMap();
   if (map.seed_version === "2") {
     await safeHistory();
@@ -509,17 +521,20 @@ async function ensureHistoryBoard() {
 }
 
 async function writeHistoryBoard() {
-  const map = await settingMap();
+  let map = await settingMap();
   if (map.history_board === String(HISTORY_COUNT)) return;
+  invalidateSheet("SystemSettings");
+  map = await settingMap();
+  if (map.history_board === String(HISTORY_COUNT)) return;
+  const started = Date.parse(map.history_board_at || "");
+  const cooling = map.history_board === "writing" || map.history_board === "pending";
+  if (cooling && Number.isFinite(started) && Date.now() - started < 180_000) return;
   const end = map.history_board_end || kyivDay();
   if (!map.history_board_end) await putSetting("history_board_end", end, "system");
-  if (map.history_board === "writing") {
-    const started = Date.parse(map.history_board_at || "");
-    if (Number.isFinite(started) && Date.now() - started < 180_000) return;
-  }
   await putSetting("history_board", "writing", "system");
   await putSetting("history_board_at", nowIso(), "system");
   try {
+    invalidateSheet("Applications");
     const existing = await readSheetRows("Applications");
     const have = new Set(existing.map((row) => row.id));
     const missing = buildHistoryBoard(end).filter((row) => !have.has(row.id));
@@ -527,6 +542,7 @@ async function writeHistoryBoard() {
     await putSetting("history_board", String(HISTORY_COUNT), "system");
   } catch (err) {
     await putSetting("history_board", "pending", "system").catch(() => undefined);
+    await putSetting("history_board_at", nowIso(), "system").catch(() => undefined);
     throw err;
   }
 }
@@ -597,15 +613,24 @@ async function remindDeadlines() {
   }
 }
 
+let expireAt = 0;
+
 async function expireUnpaid() {
-  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
-  const docs = await readSheetRows("DossierDocuments");
-  for (const app of apps) {
-    if (app.status !== "OPEN" || app.stage !== 2 || !app.cancelDeadlineAt) continue;
-    if (Date.parse(app.cancelDeadlineAt) > Date.now()) continue;
-    if (docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF")) continue;
-    await saveApp(app, app.extra, { status: "CANCELLED" });
-    await restoreQuota(app.vacancyId);
+  const now = Date.now();
+  if (now - expireAt < 60_000) return;
+  expireAt = now;
+  try {
+    const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
+    const docs = await readSheetRows("DossierDocuments");
+    for (const app of apps) {
+      if (app.status !== "OPEN" || app.stage !== 2 || !app.cancelDeadlineAt) continue;
+      if (Date.parse(app.cancelDeadlineAt) > Date.now()) continue;
+      if (docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF")) continue;
+      await saveApp(app, app.extra, { status: "CANCELLED" });
+      await restoreQuota(app.vacancyId);
+    }
+  } catch (err) {
+    console.error("[expire]", err);
   }
 }
 
@@ -681,7 +706,29 @@ function mediaFrom(row: SheetRow) {
   };
 }
 
+let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
+let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
+
 export async function publicSite() {
+  if (publicCache && Date.now() - publicCache.at < 30_000) return publicCache.value;
+  if (!publicFlight) {
+    publicFlight = buildPublicSite()
+      .then((value) => {
+        publicCache = { at: Date.now(), value };
+        return value;
+      })
+      .catch((err) => {
+        if (publicCache) return publicCache.value;
+        throw err;
+      })
+      .finally(() => {
+        publicFlight = null;
+      });
+  }
+  return publicFlight;
+}
+
+async function buildPublicSite() {
   await ensureSeed();
   await ensurePartnerCatalog();
   await housekeeping();

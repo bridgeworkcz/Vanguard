@@ -82,6 +82,7 @@ const en = {
   login_switch_have: "I already have an account",
   login_or: "or",
   login_error: "That email or password was not accepted.",
+  sheets_busy: "The register is busy. Reload in a minute.",
   login_short: "Use at least 8 characters.",
   portal_kicker: "Your file",
   portal_title: "Cases on your name",
@@ -551,6 +552,7 @@ const cs: Record<keyof typeof en, string> = {
   login_switch_have: "Účet už mám",
   login_or: "nebo",
   login_error: "E-mail nebo heslo nebylo přijato.",
+  sheets_busy: "Evidence je teď zaneprázdněná. Obnovte stránku za minutu.",
   login_short: "Alespoň 8 znaků.",
   portal_kicker: "Váš spis",
   portal_title: "Spisy na vaše jméno",
@@ -1020,6 +1022,7 @@ const ur: Record<keyof typeof en, string> = {
   login_switch_have: "میرا اکاؤنٹ ہے",
   login_or: "یا",
   login_error: "یہ ای میل یا پاس ورڈ قبول نہیں ہوا۔",
+  sheets_busy: "رجسٹر اب مصروف ہے۔ ایک منٹ بعد صفحہ دوبارہ کھولیں۔",
   login_short: "کم از کم ۸ حروف۔",
   portal_kicker: "آپ کی فائل",
   portal_title: "آپ کے نام کے کیس",
@@ -1440,6 +1443,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     };
   }, [lang]);
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function softenError(raw: string, busy: string) {
+  if (/quota exceeded|RESOURCE_EXHAUSTED|Google Sheets API|register is busy|Read requests per minute/i.test(raw) || raw.length > 240) return busy;
+  return raw;
 }
 
 export function useI18n() {

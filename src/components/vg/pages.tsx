@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { listPublicFilings } from "@/lib/vanguard/api";
-import { useI18n } from "@/lib/vanguard/i18n";
+import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { Shell } from "./chrome";
 
 function Article({ kicker, title, children }: { kicker: string; title: string; children: ReactNode }) {
@@ -153,7 +153,7 @@ export function FilingsPage() {
   useEffect(() => {
     listPublicFilings()
       .then(setRows)
-      .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+      .catch((e: unknown) => setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy"))));
   }, []);
   const filtered = rows.filter((row) => !query.trim() || row.id.toLowerCase().includes(query.trim().toLowerCase()));
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));

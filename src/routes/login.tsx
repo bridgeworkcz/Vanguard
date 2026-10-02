@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
 import { accountAuth, accountBackend } from "@/lib/vanguard/account";
-import { useI18n } from "@/lib/vanguard/i18n";
+import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { Shell } from "@/components/vg/chrome";
 
 export const Route = createFileRoute("/login")({
@@ -59,7 +59,7 @@ function LoginPage() {
       }
       window.location.assign("/portal");
     } catch (error) {
-      setErr(error instanceof Error ? error.message : t("login_error"));
+      setErr(softenError(error instanceof Error ? error.message : t("login_error"), t("sheets_busy")));
       setBusy(false);
     }
   }

@@ -6,7 +6,7 @@ import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
-import { useI18n, type Lang } from "@/lib/vanguard/i18n";
+import { useI18n, softenError, type Lang } from "@/lib/vanguard/i18n";
 
 export function Mark({ className = "size-9" }: { className?: string }) {
   return (
@@ -23,13 +23,14 @@ export function Mark({ className = "size-9" }: { className?: string }) {
 }
 
 export function useSite() {
+  const { t } = useI18n();
   const [data, setData] = useState<Awaited<ReturnType<typeof getPublicSite>> | null>(null);
   const [error, setError] = useState("");
   const reload = () => {
     setError("");
     getPublicSite()
       .then(setData)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Error"));
+      .catch((e: unknown) => setError(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy"))));
   };
   useEffect(() => {
     reload();

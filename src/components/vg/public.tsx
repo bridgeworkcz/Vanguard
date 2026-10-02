@@ -5,7 +5,7 @@ import { createApplication, joinWaitlist } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
-import { useI18n } from "@/lib/vanguard/i18n";
+import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { CountryStill, CountLine, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
 
 function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS" | "weeks" | "week") => string, p: Processing, min: number, max: number) {
@@ -360,7 +360,7 @@ export function VacancyPage({
       const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() } });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Error");
+      setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
       setBusy(false);
     }
   }
