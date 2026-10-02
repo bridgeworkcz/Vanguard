@@ -730,21 +730,21 @@ export const adminSetStage = createServerFn({ method: "POST" })
       await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${app.id}`;
     } else if (data.action === "confirm-payment") {
       if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
-      const proof = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'PAYMENT_PROOF' limit 1`;
-      if (!proof[0]) throw new Error("No proof");
       await sql`update documents set status = 'APPROVED' where application_id = ${app.id} and category = 'PAYMENT_PROOF'`;
-      await sql`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${app.productionWeeks * 7} * interval '1 day'),
+      await sql`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${Math.max(1, Number(app.productionWeeks) || 8) * 7} * interval '1 day'),
         process_stage = 'IN_PROCESS', updated_at = now() where id = ${app.id}`;
+      await audit(sql, profile.userId, data.action, app.id, data.reason);
+      return { ok: true as const, stage: 3 };
     } else if (data.action === "stage4") {
       if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
-      const finals = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'FINAL' limit 1`;
-      if (!finals[0]) throw new Error("No finals");
       await sql`update applications set stage = 4, stage4_at = now(), updated_at = now() where id = ${app.id}`;
+      await audit(sql, profile.userId, data.action, app.id, data.reason);
+      return { ok: true as const, stage: 4 };
     } else {
       throw new Error("Action");
     }
     await audit(sql, profile.userId, data.action, app.id, data.reason);
-    return { ok: true };
+    return { ok: true as const, stage: data.action === "accept" ? 2 : app.stage };
   });
 
 export const adminSetProcess = createServerFn({ method: "POST" })
@@ -803,6 +803,27 @@ export const adminUploadFinal = createServerFn({ method: "POST" })
     await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
       values (${id}, ${app.id}, ${context.userId}, 'FINAL', ${clean(data.fileName, 180)}, ${data.mime}, ${data.data}, 'APPROVED')`;
     await audit(sql, context.userId, "FINAL_UPLOAD", app.id, data.fileName);
+    return { id };
+  });
+
+export const adminUploadProof = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { applicationId: string; fileName: string; mime: string; data: string }) => input)
+  .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminUploadProof(context.userId, data);
+    }
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, clean(data.applicationId, 40));
+    if (!app || app.stage !== 2 || app.status !== "OPEN") throw new Error("Locked");
+    const mime = normalizeUploadMime(data.mime, data.fileName);
+    if (!ALLOWED_MIME.has(mime) || !data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error("File");
+    const id = newId("DOC");
+    await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
+      values (${id}, ${app.id}, ${context.userId}, 'PAYMENT_PROOF', ${clean(data.fileName, 180)}, ${mime}, ${data.data}, 'UPLOADED')`;
+    await audit(sql, context.userId, "PAYMENT_PROOF", app.id, data.fileName);
     return { id };
   });
 

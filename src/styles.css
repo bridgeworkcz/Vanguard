@@ -23,7 +23,6 @@
       radial-gradient(circle at 100% 20%, rgba(180, 180, 180, 0.05), transparent 30%),
       var(--color-ink);
     color: var(--color-paper);
-    overflow-x: clip;
     max-width: 100%;
   }
   body {
@@ -33,7 +32,17 @@
     text-rendering: optimizeLegibility;
     font-synthesis: none;
     min-height: 100vh;
-    overflow-x: clip;
+  }
+  input[type="file"] {
+    color: transparent;
+    font-size: 0;
+  }
+  input[type="file"]::file-selector-button,
+  input[type="file"]::-webkit-file-upload-button {
+    display: none;
+    width: 0;
+    height: 0;
+    visibility: hidden;
   }
   body::before,
   body::after {

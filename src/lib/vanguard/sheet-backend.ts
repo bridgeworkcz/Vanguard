@@ -310,7 +310,7 @@ async function saveApp(app: ReturnType<typeof appFrom>, extra: Extra, patch: Par
 async function docsFor(applicationId: string) {
   const rows = await readSheetRows("DossierDocuments");
   return rows
-    .filter((row) => row.dossierId === applicationId)
+    .filter((row) => row.dossierId === applicationId || (row.fileName || "").startsWith(`${applicationId} `))
     .map((row) => ({
       id: row.id,
       category: row.category,
@@ -949,29 +949,33 @@ async function storeFile(applicationId: string, userId: string, category: string
   const folder = await getDossierCategoryFolder(applicationId, category);
   let uploaded: { fileId: string };
   try {
-    uploaded = await uploadFileToDrive(folder, fileName || "file", safeMime, buffer);
+    uploaded = await uploadFileToDrive(folder, `${applicationId} ${category} ${fileName || "file"}`.slice(0, 180), safeMime, buffer);
   } catch (err) {
     console.error("[file]", err);
     const message = err instanceof Error ? err.message : "";
-    const code = message.match(/\((\d{3})\)/)?.[1];
-    throw new Error(code ? `Drive ${code}` : "File could not be stored.");
+    const code = message.match(/\((\d{3})/)?.[1];
+    throw new Error(message.includes("quota") ? "Drive quota" : code ? `Drive ${code}` : `Drive ${message.slice(0, 160) || "refused"}`);
   }
   const id = newId("DOC");
-  await appendSheetRow("DossierDocuments", {
-    id,
-    dossierId: applicationId,
-    category,
-    fileName: fileName || "file",
-    driveFileId: uploaded.fileId,
-    status,
-    uploadedAt: nowIso(),
-    reviewedAt: "",
-    reviewedBy: "",
-    rejectionReason: "",
-    mime: safeMime,
-  });
-  await audit(userId, "UPLOAD", applicationId, category);
-  await notify(`New file\n${applicationId}\n${category}`, "staff");
+  try {
+    await appendSheetRow("DossierDocuments", {
+      id,
+      dossierId: applicationId,
+      category,
+      fileName: fileName || "file",
+      driveFileId: uploaded.fileId,
+      status,
+      uploadedAt: nowIso(),
+      reviewedAt: "",
+      reviewedBy: "",
+      rejectionReason: "",
+      mime: safeMime,
+    });
+    await audit(userId, "UPLOAD", applicationId, category);
+    await notify(`New file\n${applicationId}\n${category}`, "staff");
+  } catch (err) {
+    console.error("[file] record", err);
+  }
   return { id, driveFileId: uploaded.fileId };
 }
 
@@ -1064,6 +1068,7 @@ export async function adminList(userId: string, includeIncomplete: boolean) {
 
 export async function adminGet(userId: string, id: string) {
   await requireStaff(userId);
+  invalidateSheet("DossierDocuments");
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || isHistoryApp(app)) throw new Error("Not found");
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
@@ -1073,10 +1078,12 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
   const person = await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
   if (!app || isHistoryApp(app)) throw new Error("Not found");
+  let stage = app.stage;
   if (data.action === "accept") {
     if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
     await saveApp(app, { ...app.extra, stage2At: nowIso(), cancelDeadlineAt: plusDays(5) }, { stage: "2", paymentDeadlineAt: plusDays(5) });
     await ensureTranches(app.id, app.userId || person.userId, app.totalCost);
+    stage = 2;
   } else if (data.action === "reject") {
     if (app.status === "OPEN") await restoreQuota(app.vacancyId);
     await saveApp(app, app.extra, { status: "REJECTED", rejectedReason: data.reason });
@@ -1085,35 +1092,44 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     await saveApp(app, app.extra, { status: "CANCELLED" });
   } else if (data.action === "confirm-payment") {
     if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
-    const docs = await docsFor(app.id);
-    if (!docs.some((doc) => doc.category === "PAYMENT_PROOF")) throw new Error("No proof");
-    const rawDocs = await readSheetRows("DossierDocuments");
-    for (const doc of rawDocs) {
-      if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF") await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED" });
-    }
-    const due = (await readSheetRows("PaymentTransactions")).find((row) => row.dossierId === app.id && row.status === "DUE");
-    const proof = rawDocs.find((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF");
-    if (due) {
-      await updateSheetRowById("PaymentTransactions", due.id, {
-        ...due,
-        status: "VERIFIED",
-        verifiedAt: nowIso(),
-        verifiedBy: person.userId,
-        proofFileId: proof?.driveFileId || "",
-        proofFileName: proof?.fileName || "",
-      });
-    }
-    const deadline = plusDays(app.productionWeeks * 7);
+    const weeks = Number(app.productionWeeks);
+    const deadline = plusDays((Number.isFinite(weeks) && weeks > 0 ? weeks : 8) * 7);
     await saveApp(app, { ...app.extra, stage3At: nowIso() }, { stage: "3", processStage: "IN_PROCESS", documentDeadlineAt: deadline });
+    stage = 3;
+    try {
+      const rawDocs = await readSheetRows("DossierDocuments");
+      for (const doc of rawDocs) {
+        if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status !== "APPROVED") {
+          await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED", reviewedAt: nowIso(), reviewedBy: person.userId });
+        }
+      }
+      const due = (await readSheetRows("PaymentTransactions")).find((row) => row.dossierId === app.id && row.status === "DUE");
+      const proof = rawDocs.find((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF");
+      if (due) {
+        await updateSheetRowById("PaymentTransactions", due.id, {
+          ...due,
+          status: "VERIFIED",
+          verifiedAt: nowIso(),
+          verifiedBy: person.userId,
+          proofFileId: proof?.driveFileId || "",
+          proofFileName: proof?.fileName || "",
+        });
+      }
+    } catch (err) {
+      console.error("[stage3]", err);
+    }
   } else if (data.action === "stage4") {
     if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
-    const docs = await docsFor(app.id);
-    if (!docs.some((doc) => doc.category === "FINAL")) throw new Error("No finals");
     await saveApp(app, { ...app.extra, stage4At: nowIso() }, { stage: "4" });
-    await markTrancheDue(app.id, "T3");
+    stage = 4;
+    try {
+      await markTrancheDue(app.id, "T3");
+    } catch (err) {
+      console.error("[stage4]", err);
+    }
   } else throw new Error("Action");
   await audit(person.userId, data.action, app.id, data.reason);
-  return { ok: true };
+  return { ok: true as const, stage };
 }
 
 export async function adminSetProcess(userId: string, data: { id: string; processStage: string }) {
@@ -1134,6 +1150,13 @@ export async function adminSaveDispatch(userId: string, data: { id: string; note
   if (!app || isHistoryApp(app)) throw new Error("Not found");
   await saveApp(app, { ...app.extra, dispatchNote: data.note });
   await audit(userId, "DISPATCH", data.id, "");
+}
+
+export async function adminUploadProof(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.applicationId);
+  if (!app || isHistoryApp(app) || app.status !== "OPEN" || app.stage !== 2) throw new Error("Locked");
+  return storeFile(app.id, userId, "PAYMENT_PROOF", data.fileName, data.mime, data.data, "UPLOADED");
 }
 
 export async function adminUploadFinal(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {

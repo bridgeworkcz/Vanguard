@@ -2,7 +2,9 @@
 export function siteFileUrl(kind: "team" | "gallery", id: string, stored: string): string {
   if (!stored) return "";
   if (stored.startsWith("/") || stored.startsWith("data:")) return stored;
-  return `/files/${kind}/${encodeURIComponent(id)}`;
+  const drive = storedDriveId(stored);
+  const stamp = drive ? drive.slice(-12) : "0";
+  return `/files/${kind}/${encodeURIComponent(id)}?v=${encodeURIComponent(stamp)}`;
 }
 
 export function storedDriveId(stored: string): string {

@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import {
@@ -25,6 +25,7 @@ import {
   adminSetRole,
   adminSetStage,
   adminUploadFinal,
+  adminUploadProof,
   adminListMedia,
   assignManagers,
   downloadDocument,
@@ -33,20 +34,164 @@ import {
   reviewDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, PROCESS_STAGES, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, DOC_CATEGORIES, PROCESS_STAGES, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
-import { downloadStamped } from "@/lib/vanguard/pdf";
+import { DocScreen } from "./doc-view";
 import { Pager } from "./pages";
 
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
 
 const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit"];
 
+function errorMessage(err: unknown) {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === "object" && "message" in err && typeof err.message === "string") return err.message;
+  return "";
+}
+
+function stageFail(message: string, t: (key: CopyKey) => string) {
+  if (message.includes("No proof")) return t("admin_need_proof");
+  if (message.includes("No finals")) return t("admin_need_final");
+  if (message.includes("Not ready") || message.includes("Locked")) return t("admin_not_ready");
+  if (/Drive|403|404|401/i.test(message)) return t("admin_drive");
+  if (message === "File" || message.includes("File size") || message.includes("File type")) return t("admin_file_big");
+  if (/busy|register|429/i.test(message)) return t("admin_busy");
+  return t("admin_unsaved");
+}
+
 function useAdminT() {
   return (key: CopyKey) => ADMIN_UK[key] ?? key;
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const [head, body] = dataUrl.split(",");
+  const mime = /data:([^;]+)/.exec(head || "")?.[1] || "application/octet-stream";
+  const binary = atob(body || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function CaseFiles({
+  appId,
+  documents,
+  docReason,
+  onReason,
+  onChanged,
+}: {
+  appId: string;
+  documents: { id: string; category: string; fileName: string; mime: string; status: string; createdAt: string; rejectionReason: string }[];
+  docReason: string;
+  onReason: (value: string) => void;
+  onChanged: () => void;
+}) {
+  const t = useAdminT();
+  const [shots, setShots] = useState<Record<string, string>>({});
+  const [viewer, setViewer] = useState<{ url: string; title: string; fileName: string; mime: string } | null>(null);
+  const [fileErr, setFileErr] = useState("");
+  const ids = documents.map((doc) => doc.id).join("|");
+  useEffect(() => {
+    let stop = false;
+    const images = documents.filter((doc) => (doc.mime || "").startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(doc.fileName || ""));
+    void (async () => {
+      for (const doc of images) {
+        if (stop) return;
+        try {
+          const full = await downloadDocument({ data: doc.id });
+          if (!stop && full.data.startsWith("data:image/")) setShots((cur) => ({ ...cur, [doc.id]: full.data }));
+        } catch {
+          /* the name still shows */
+        }
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [appId, ids]);
+  function catLabel(category: string) {
+    const key = `cat_${category}` as CopyKey;
+    const text = t(key);
+    return text === key ? category : text;
+  }
+  const ordered = [...documents].sort((a, b) => {
+    const ai = DOC_CATEGORIES.indexOf(a.category as DocCategory);
+    const bi = DOC_CATEGORIES.indexOf(b.category as DocCategory);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || (b.createdAt || "").localeCompare(a.createdAt || "");
+  });
+  return (
+    <section className="mt-6">
+      <h3 className="display text-2xl">{t("admin_files")}</h3>
+      {ordered.length === 0 ? <p className="mt-2 text-sm text-mist">{t("admin_files_empty")}</p> : null}
+      <ul className="mt-3 grid gap-3">
+        {ordered.map((doc) => (
+          <li key={doc.id} className="glass p-3">
+            {shots[doc.id] ? <img src={shots[doc.id]} alt="" className="mb-3 max-h-64 w-full object-contain bg-black/40" /> : null}
+            <p>{catLabel(doc.category)}</p>
+            <p className="text-sm text-mist">{doc.fileName}</p>
+            <p className="text-sm text-mist">{doc.createdAt?.slice(0, 16)} · {doc.status}{doc.rejectionReason ? ` · ${doc.rejectionReason}` : ""}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setFileErr("");
+                  void downloadDocument({ data: doc.id })
+                    .then((full) => {
+                      const blob = dataUrlToBlob(full.data);
+                      const url = URL.createObjectURL(blob);
+                      if ((full.mime || "").startsWith("image/") || full.data.startsWith("data:image/")) {
+                        setShots((cur) => ({ ...cur, [doc.id]: full.data }));
+                      }
+                      setViewer({ url, title: catLabel(doc.category), fileName: full.fileName, mime: full.mime });
+                    })
+                    .catch(() => setFileErr(t("admin_file_miss")));
+                }}
+              >
+                {t("admin_open")}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void reviewDocument({ data: { id: doc.id, status: "APPROVED", reason: "" } }).then(onChanged)}
+              >
+                {t("admin_doc_ok")}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason: docReason } }).then(onChanged)}
+              >
+                {t("admin_doc_no")}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <input className="field mt-3" placeholder={t("admin_reason")} value={docReason} onChange={(e) => onReason(e.target.value)} />
+      {fileErr ? <p className="mt-2 text-sm text-metal">{fileErr}</p> : null}
+      {viewer ? (
+        <DocScreen
+          url={viewer.url}
+          title={viewer.title}
+          closeLabel={t("close")}
+          downloadLabel={t("download")}
+          onClose={() => {
+            URL.revokeObjectURL(viewer.url);
+            setViewer(null);
+          }}
+          onDownload={() => {
+            const link = document.createElement("a");
+            link.href = viewer.url;
+            link.download = viewer.fileName;
+            link.click();
+          }}
+        />
+      ) : null}
+    </section>
+  );
 }
 
 const QUESTION_LABELS: [string, string][] = [
@@ -100,37 +245,91 @@ async function asData(file: File) {
 }
 
 async function photoDataUrl(file: File) {
-  const bitmap = await createImageBitmap(file).catch(() => null);
-  if (!bitmap) throw new Error("File");
-  let edge = 1600;
-  let quality = 0.82;
+  const image = await openImage(file);
+  let edge = 1400;
+  let quality = 0.8;
   let data = "";
   try {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      const scale = Math.min(1, edge / Math.max(image.width, image.height));
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("File");
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      image.draw(ctx, canvas.width, canvas.height);
       data = canvas.toDataURL("image/jpeg", quality);
-      if (data.length <= 1_800_000) return data;
-      quality = Math.max(0.4, quality - 0.12);
-      edge = Math.round(edge * 0.8);
+      if (data.length <= 900_000) return data;
+      quality = Math.max(0.42, quality - 0.1);
+      edge = Math.round(edge * 0.75);
     }
   } finally {
-    bitmap.close();
+    image.close();
   }
-  if (!data || data.length > 2_400_000) throw new Error("File");
+  if (!data || data.length > 1_400_000) throw new Error("File");
   return data;
+}
+
+function openImage(file: File): Promise<{ width: number; height: number; draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void; close: () => void }> {
+  return createImageBitmap(file)
+    .then((bitmap) => ({
+      width: bitmap.width,
+      height: bitmap.height,
+      draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => ctx.drawImage(bitmap, 0, 0, w, h),
+      close: () => bitmap.close(),
+    }))
+    .catch(async () => {
+      const url = URL.createObjectURL(file);
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = () => reject(new Error("decode"));
+          el.src = url;
+        });
+        if (!img.naturalWidth) throw new Error("decode");
+        return {
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => ctx.drawImage(img, 0, 0, w, h),
+          close: () => URL.revokeObjectURL(url),
+        };
+      } catch {
+        URL.revokeObjectURL(url);
+        const name = `${file.name} ${file.type}`.toLowerCase();
+        if (name.includes("heic") || name.includes("heif")) throw new Error("heic");
+        throw new Error("File");
+      }
+    });
+}
+
+function PhotoPick({ label, onFile }: { label: string; onFile: (file: File) => void }) {
+  return (
+    <label className="btn relative inline-flex w-fit cursor-pointer items-center overflow-hidden">
+      {label}
+      <input
+        className="absolute inset-0 z-10 size-full cursor-pointer opacity-0"
+        type="file"
+        accept="image/*"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+    </label>
+  );
 }
 
 function photoError(err: unknown, t: (key: CopyKey) => string) {
   const text = err instanceof Error ? err.message : "";
+  if (text === "heic") return t("admin_photo_heic");
   if (text === "Three") return t("admin_three");
-  if (/Drive|stored|403|404|401/i.test(text)) return t("admin_drive");
-  return t("admin_file_big");
+  if (/Drive|stored|403|404|401|busy|register/i.test(text)) return t("admin_drive");
+  if (text === "File" || text === "File size" || text === "File type") return t("admin_file_big");
+  return t("admin_unsaved");
 }
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
@@ -164,6 +363,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [managerId, setManagerId] = useState("");
   const [exportNote, setExportNote] = useState("");
   const [docReason, setDocReason] = useState("");
+  const [stageNote, setStageNote] = useState("");
   const [caseQuery, setCaseQuery] = useState("");
   const [casePage, setCasePage] = useState(1);
 
@@ -210,6 +410,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   }, [current, role, showAll, data]);
 
   useEffect(() => {
+    if (current !== "applications") return;
+    window.scrollTo(0, 0);
+  }, [id, current]);
+
+  useEffect(() => {
     if (!id || (role !== "ADMIN" && role !== "MANAGER")) return;
     adminGetApplication({ data: id })
       .then((d) => {
@@ -249,13 +454,20 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   async function act(action: string) {
     if (!detail) return;
     setErr("");
+    setStageNote("");
     try {
-      await adminSetStage({ data: { id: detail.app.id, action, reason } });
+      const result = await adminSetStage({ data: { id: detail.app.id, action, reason } });
+      const moved = Number(result?.stage) || 0;
       const d = await adminGetApplication({ data: detail.app.id });
+      if (moved > d.app.stage && d.app.status === "OPEN") d.app.stage = moved;
       setDetail(d);
-      setApps(await adminListApplications({ data: { includeIncomplete: showAll } }));
+      const listed = await adminListApplications({ data: { includeIncomplete: showAll } });
+      setApps(listed.map((row) => (row.id === detail.app.id && moved > row.stage ? { ...row, stage: moved } : row)));
+      setStageNote(t("admin_stage_ok"));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Error");
+      const text = stageFail(errorMessage(e), t);
+      setStageNote(text);
+      setErr(text);
     }
   }
 
@@ -326,6 +538,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
         {current === "applications" && staff ? (
           <div className="mt-8 grid gap-4">
+            {!id ? (<>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
               {t("admin_show_all")}
@@ -508,8 +721,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </>
               );
             })()}
+            </>) : null}
+            {id && !detail ? <p className="mt-4">{t("loading")}</p> : null}
             {detail && id ? (
-              <article id="case-detail" className="glass mt-4 w-full min-w-0 max-w-full overflow-x-clip p-5">
+              <article id="case-detail" className="glass w-full min-w-0 max-w-full overflow-x-clip p-5">
+                <button type="button" className="btn mb-4" onClick={() => go("applications")}>{t("admin_back")}</button>
                 <p className="kicker">{detail.app.id}</p>
                 <h2 className="display text-3xl">{detail.app.vacancyTitle}</h2>
                 <p className="text-mist">
@@ -520,12 +736,21 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     ? t("portal_next_closed")
                     : detail.app.stage === 1 && !detail.app.profileComplete
                       ? t("admin_block_q")
-                      : detail.app.stage === 2 && !detail.documents.some((d) => d.category === "PAYMENT_PROOF" && d.status === "APPROVED")
-                        ? t("admin_block_pay")
+                      : detail.app.stage === 2 && !detail.documents.some((d) => d.category === "PAYMENT_PROOF")
+                      ? t("admin_need_proof")
+                      : detail.app.stage === 2
+                        ? t("admin_proof_ready")
                         : detail.documents.some((d) => d.status === "REJECTED")
                           ? t("admin_block_doc")
                           : t("admin_block_ok")}
                 </p>
+                <CaseFiles
+                  appId={detail.app.id}
+                  documents={detail.documents}
+                  docReason={docReason}
+                  onReason={setDocReason}
+                  onChanged={() => void adminGetApplication({ data: detail.app.id }).then(setDetail)}
+                />
                 <label className="mt-4 grid max-w-sm gap-1 text-sm">
                   {t("admin_referrer")}
                   <select
@@ -553,7 +778,34 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <button type="button" className="btn" onClick={() => void act("accept")}>{t("admin_accept")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 2 ? (
-                    <button type="button" className="btn" onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
+                    <>
+                      <button type="button" className="btn" onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
+                      <label className="btn relative inline-flex cursor-pointer items-center overflow-hidden">
+                        {t("admin_proof_add")}
+                        <input
+                          className="absolute inset-0 z-10 size-full cursor-pointer opacity-0"
+                          type="file"
+                          accept="image/*,application/pdf"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = "";
+                            if (!file || !detail) return;
+                            setStageNote(t("admin_photo_wait"));
+                            const pack = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+                              ? asData(file)
+                              : photoDataUrl(file).then((data) => ({ data, mime: "image/jpeg", fileName: `${file.name.replace(/\.\w+$/, "") || "receipt"}.jpg` }));
+                            void pack
+                              .then((packed) => adminUploadProof({ data: { applicationId: detail.app.id, fileName: packed.fileName, mime: packed.mime, data: packed.data } }))
+                              .then(() => adminGetApplication({ data: detail.app.id }))
+                              .then((next) => {
+                                setDetail(next);
+                                setStageNote(t("admin_proof_ready"));
+                              })
+                              .catch((e: unknown) => setStageNote(stageFail(errorMessage(e), t)));
+                          }}
+                        />
+                      </label>
+                    </>
                   ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 3 ? (
                     <button type="button" className="btn" onClick={() => void act("stage4")}>{t("admin_to4")}</button>
@@ -565,6 +817,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <button type="button" className="btn" onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
                   ) : null}
                 </div>
+                {stageNote ? <p className="mt-3 text-sm text-metal">{stageNote}</p> : null}
                 <input className="field mt-3" placeholder={t("admin_reason")} value={reason} onChange={(e) => setReason(e.target.value)} />
                 {detail.app.stage >= 3 ? (
                   <label className="mt-4 grid gap-1 text-sm">
@@ -611,48 +864,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     {t("save")}
                   </button>
                 </label>
-                <ul className="mt-4 grid gap-2 text-sm">
-                  {detail.documents.map((d) => (
-                    <li key={d.id} className="glass p-3">
-                      <p>{d.category} · {d.fileName}</p>
-                      <p className="text-mist">{d.createdAt?.slice(0, 16)} · {d.status}{d.rejectionReason ? ` · ${d.rejectionReason}` : ""}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() =>
-                            void downloadDocument({ data: d.id }).then((full) => downloadStamped(full.data, full.fileName, full.mime))
-                          }
-                        >
-                          {t("admin_open")}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() =>
-                            void reviewDocument({ data: { id: d.id, status: "APPROVED", reason: "" } }).then(() =>
-                              adminGetApplication({ data: detail.app.id }).then(setDetail),
-                            )
-                          }
-                        >
-                          {t("admin_doc_ok")}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() =>
-                            void reviewDocument({ data: { id: d.id, status: "REJECTED", reason: docReason } }).then(() =>
-                              adminGetApplication({ data: detail.app.id }).then(setDetail),
-                            )
-                          }
-                        >
-                          {t("admin_doc_no")}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <input className="field mt-2" placeholder={t("admin_reason")} value={docReason} onChange={(e) => setDocReason(e.target.value)} />
                 <form
                   className="mt-4 flex min-w-0 flex-wrap gap-2"
                   onSubmit={(e) => {
@@ -887,16 +1098,16 @@ function TeamEditor({
   const [photoData, setPhoto] = useState("");
   const [preview, setPreview] = useState("");
   const [err, setErr] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
   function pickPhoto(file: File | undefined) {
     if (!file) return;
-    setErr("");
+    setErr(t("admin_photo_wait"));
     void photoDataUrl(file)
       .then((data) => {
         setPhoto(data);
         setPreview(data);
+        setErr("");
       })
-      .catch(() => setErr(t("admin_file_big")));
+      .catch((e: unknown) => setErr(photoError(e, t)));
   }
   return (
     <div className="mt-8 grid gap-4">
@@ -925,19 +1136,7 @@ function TeamEditor({
         <input className="field" placeholder={t("name")} value={fullName} onChange={(e) => setName(e.target.value)} />
         <input className="field" placeholder={t("position")} value={position} onChange={(e) => setPosition(e.target.value)} />
         <input className="field" placeholder={t("phone")} value={phone} onChange={(e) => setPhone(e.target.value)} />
-        <div>
-          <button type="button" className="btn" onClick={() => fileRef.current?.click()}>{t("photo")}</button>
-          <input
-            ref={fileRef}
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => {
-              pickPhoto(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-        </div>
+        <PhotoPick label={t("photo")} onFile={pickPhoto} />
         {preview ? <img src={preview} alt="" className="size-16 object-cover" /> : null}
         {photoData ? <p className="text-sm text-mist md:col-span-2">{t("admin_photo_ready")}</p> : null}
         <button className="btn-solid w-fit" type="submit">{editId ? t("save") : t("add")}</button>
@@ -968,24 +1167,19 @@ function TeamEditor({
             >
               {t("edit")}
             </button>
-            <label className="btn cursor-pointer">
-              {t("admin_replace_photo")}
-              <input
-                className="sr-only"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  setErr("");
-                  void photoDataUrl(file)
-                    .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
-                    .then(onChange)
-                    .catch((e: unknown) => setErr(photoError(e, t)));
-                }}
-              />
-            </label>
+            <PhotoPick
+              label={t("admin_replace_photo")}
+              onFile={(file) => {
+                setErr(t("admin_photo_wait"));
+                void photoDataUrl(file)
+                  .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
+                  .then(() => {
+                    setErr(t("admin_photo_ok"));
+                    onChange();
+                  })
+                  .catch((e: unknown) => setErr(photoError(e, t)));
+              }}
+            />
             <button type="button" className="btn" onClick={() => void adminDeleteTeam({ data: m.id }).then(onChange)}>{t("remove")}</button>
               </>
             )}
@@ -1054,7 +1248,7 @@ function ContentEditor({
   }
   function publishPhoto(file: File | undefined, kind: string, id?: string, itemTitle?: string, caption?: string, country?: string) {
     if (!file) return;
-    setMediaErr("");
+    setMediaErr(t("admin_photo_wait"));
     void photoDataUrl(file)
       .then((imageData) =>
         adminSaveMedia({
@@ -1068,7 +1262,10 @@ function ContentEditor({
           },
         }),
       )
-      .then(saved)
+      .then(() => {
+        setMediaErr(t("admin_photo_ok"));
+        saved();
+      })
       .catch((e: unknown) => setMediaErr(photoError(e, t)));
   }
   function patchMedia(item: Slot, extra: { caption?: string; active?: boolean; cover?: boolean; sortOrder?: number }) {
@@ -1192,39 +1389,25 @@ function ContentEditor({
       </form>
       {readOnly ? null : (
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="btn w-fit cursor-pointer">
-          {t("admin_license")}
-          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "license"); e.target.value = ""; }} />
-        </label>
-        <label className="btn w-fit cursor-pointer">
-          {t("admin_office")}
-          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "office"); e.target.value = ""; }} />
-        </label>
-        <label className="btn w-fit cursor-pointer">
-          {t("admin_banner")}
-          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "banner", undefined, "Banner"); e.target.value = ""; }} />
-        </label>
-        <label className="flex flex-wrap items-center gap-2 text-sm text-mist">
+        {mediaErr ? <p className="text-sm text-metal md:col-span-2">{mediaErr}</p> : null}
+        <PhotoPick label={t("admin_license")} onFile={(file) => publishPhoto(file, "license")} />
+        <PhotoPick label={t("admin_office")} onFile={(file) => publishPhoto(file, "office")} />
+        <PhotoPick label={t("admin_banner")} onFile={(file) => publishPhoto(file, "banner", undefined, "Banner")} />
+        <div className="flex flex-wrap items-center gap-2 text-sm text-mist">
           {t("admin_country_photo")}
           <select className="field max-w-48" value={shotCountry} onChange={(e) => setShotCountry(e.target.value)}>
             {countries.map((c) => <option key={c}>{c}</option>)}
           </select>
-          <label className="btn cursor-pointer">
-            {t("add")}
-            <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "country", undefined, shotCountry, "", shotCountry); e.target.value = ""; }} />
-          </label>
-        </label>
-        <label className="flex flex-wrap items-center gap-2 text-sm text-mist md:col-span-2">
+          <PhotoPick label={t("add")} onFile={(file) => publishPhoto(file, "country", undefined, shotCountry, "", shotCountry)} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-mist md:col-span-2">
           {t("admin_logo")}
           <select className="field max-w-40" value={logoCountry} onChange={(e) => setLogoCountry(e.target.value)}>
             {countries.map((c) => <option key={c}>{c}</option>)}
           </select>
           <input className="field max-w-xs" placeholder={t("admin_partner")} value={logoName} onChange={(e) => setLogoName(e.target.value)} />
-          <label className="btn cursor-pointer">
-            {t("add")}
-            <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "logo", undefined, logoName || logoCountry, "", logoCountry); e.target.value = ""; }} />
-          </label>
-        </label>
+          <PhotoPick label={t("add")} onFile={(file) => publishPhoto(file, "logo", undefined, logoName || logoCountry, "", logoCountry)} />
+        </div>
       </div>
       )}
       <ul className="grid gap-2">
@@ -1238,10 +1421,7 @@ function ContentEditor({
                 {m.kind === "logo" ? (
                   <input className="field w-20" type="number" defaultValue={m.sortOrder} aria-label={t("admin_order")} onBlur={(e) => { const sortOrder = Number(e.target.value); if (sortOrder !== m.sortOrder) patchMedia(m, { sortOrder }); }} />
                 ) : null}
-                <label className="btn cursor-pointer">
-                  {t("admin_replace_photo")}
-                  <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], m.kind, m.id, m.title, m.caption, m.country); e.target.value = ""; }} />
-                </label>
+                <PhotoPick label={t("admin_replace_photo")} onFile={(file) => publishPhoto(file, m.kind, m.id, m.title, m.caption, m.country)} />
                 {m.kind === "license" ? <button type="button" className="btn" onClick={() => patchMedia(m, { cover: true })}>{t("admin_cover")}</button> : null}
                 {m.active === false ? (
                   <button type="button" className="btn" onClick={() => patchMedia(m, { active: true })}>{t("admin_show")}</button>
@@ -1306,24 +1486,19 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
       <p className="text-sm text-mist">{t("admin_vacancy_photo")}</p>
       {err ? <p className="text-sm text-metal">{err}</p> : null}
       {readOnly ? null : (
-        <label className="btn w-fit cursor-pointer">
-          {t("add")}
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              setErr("");
-              void photoDataUrl(file)
-                .then((imageData) => adminSaveMedia({ data: { kind: "vacancy", title: t("admin_vacancy_photo"), caption: "", imageData, vacancyId, cover: shots.length === 0 } }))
-                .then(load)
-                .catch(fail);
-            }}
-          />
-        </label>
+        <PhotoPick
+          label={t("add")}
+          onFile={(file) => {
+            setErr(t("admin_photo_wait"));
+            void photoDataUrl(file)
+              .then((imageData) => adminSaveMedia({ data: { kind: "vacancy", title: t("admin_vacancy_photo"), caption: "", imageData, vacancyId, cover: shots.length === 0 } }))
+              .then(() => {
+                setErr(t("admin_photo_ok"));
+                load();
+              })
+              .catch(fail);
+          }}
+        />
       )}
       <ul className="grid gap-2">
         {shots.map((shot) => (

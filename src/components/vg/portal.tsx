@@ -288,9 +288,14 @@ export function PortalPage({ id }: { id: string }) {
 
   function uploadError(err: unknown) {
     const text = err instanceof Error ? err.message : "";
+    if (/quota/i.test(text)) return t("docs_quota");
+    if (/Drive\s*(403|404)|insufficient|permission/i.test(text)) return t("docs_drive");
+    if (/Drive/i.test(text)) {
+      const code = text.match(/\b([45]\d{2})\b/)?.[1];
+      return code ? `${t("docs_fail")} (${code})` : t("docs_fail");
+    }
     if (/size/i.test(text)) return t("docs_big");
     if (/type/i.test(text)) return t("docs_type");
-    if (/Drive|stored|403|404|401/i.test(text)) return t("docs_drive");
     return t("docs_fail");
   }
 
@@ -679,20 +684,23 @@ export function PortalPage({ id }: { id: string }) {
                 {proof ? null : <span className="kicker ember">{t("hint_here")}</span>}
                 {t("proof_title")}
                 <span className="text-mist">{t("proof_help")}</span>
-                <input
-                  className="text-sm"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (!file) return;
-                    setProofNote(t("docs_wait"));
-                    void sendFile("PAYMENT_PROOF", file)
-                      .then(() => setProofNote(t("docs_saved")))
-                      .catch((err: unknown) => setProofNote(uploadError(err)));
-                  }}
-                />
+                <label className="btn relative mt-2 inline-flex w-fit cursor-pointer items-center overflow-hidden">
+                  {t("upload")}
+                  <input
+                    className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      setProofNote(t("docs_wait"));
+                      void sendFile("PAYMENT_PROOF", file)
+                        .then(() => setProofNote(t("docs_saved")))
+                        .catch((err: unknown) => setProofNote(uploadError(err)));
+                    }}
+                  />
+                </label>
                 {proofNote ? <span className="text-mist">{proofNote}</span> : null}
               </label>
             ) : null}
@@ -736,18 +744,21 @@ export function PortalPage({ id }: { id: string }) {
                             </article>
                           ))}
                         </div>
-                        <input
-                          className="mt-2 text-sm"
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,application/pdf"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            e.target.value = "";
-                            if (!file) return;
-                            setPendingDocs((cur) => ({ ...cur, [cat]: file }));
-                            setDocNote("");
-                          }}
-                        />
+                        <label className="btn relative mt-2 inline-flex w-fit cursor-pointer items-center overflow-hidden">
+                          {t("upload")}
+                          <input
+                            className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                            type="file"
+                            accept="image/*,application/pdf"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = "";
+                              if (!file) return;
+                              setPendingDocs((cur) => ({ ...cur, [cat]: file }));
+                              setDocNote("");
+                            }}
+                          />
+                        </label>
                         {pendingDocs[cat] ? <p className="mt-1 text-sm text-mist">{pendingDocs[cat]?.name} · {t("docs_chosen")}</p> : null}
                       </li>
                     );

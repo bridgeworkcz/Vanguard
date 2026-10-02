@@ -155,7 +155,7 @@ async function findFolder(parentFolderId: string, folderName: string): Promise<s
   const sanitizedQueryName = cleanName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const query = `'${cleanParentId}' in parents and name = '${sanitizedQueryName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchResult = await driveApiFetch<{ files?: { id: string; name: string }[] }>(
-    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)&corpora=allDrives`,
+    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)&spaces=drive`,
   );
   const files = searchResult.files || [];
   if (files.length > 1) {
@@ -211,43 +211,35 @@ export async function uploadFileToDrive(
     throw new Error('Google Drive Upload Error: Invalid parameters or empty file buffer.');
   }
 
+  const targetFolderId = getCredentials().rootFolderId;
   const token = await getAccessToken();
-  const boundary = `-------VanguardVaultBoundary${Date.now()}`;
-
-  const metadata = {
-    name: cleanFileName,
-    parents: [cleanFolderId],
-  };
-
-  const headerPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
-  const fileHeaderPart = `--${boundary}\r\nContent-Type: ${cleanMimeType}\r\n\r\n`;
-  const footerPart = `\r\n--${boundary}--`;
-
-  const multipartBody = Buffer.concat([
-    Buffer.from(headerPart, 'utf8'),
-    Buffer.from(fileHeaderPart, 'utf8'),
-    fileBuffer,
-    Buffer.from(footerPart, 'utf8'),
-  ]);
-
+  const boundary = `vg${crypto.randomBytes(12).toString("hex")}`;
+  const meta = JSON.stringify({ name: cleanFileName, parents: [targetFolderId] });
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${cleanMimeType}\r\n\r\n`,
+    "utf8",
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--`, "utf8");
+  const payload = Buffer.concat([head, fileBuffer, tail]);
   const uploadResponse = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-        'Content-Length': String(multipartBody.length),
+        Authorization: `Bearer ${token}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
       },
-      body: multipartBody,
-    }
+      body: new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength),
+    },
   );
 
   if (!uploadResponse.ok) {
-    throw new Error(`Google Drive Upload Error (${uploadResponse.status}): Failed to upload file '${cleanFileName}'.`);
+    const detail = (await uploadResponse.text()).slice(0, 280);
+    const quota = /storageQuotaExceeded|do not have storage quota/i.test(detail);
+    throw new Error(`Google Drive Upload Error (${uploadResponse.status}${quota ? " quota" : ""}): ${detail || "Failed to upload file."}`);
   }
-
-  const uploadData = (await uploadResponse.json()) as { id: string; webViewLink?: string };
+  const uploadData = (await uploadResponse.json()) as { id?: string; webViewLink?: string };
+  if (!uploadData.id) throw new Error(`Google Drive Upload Error (502): Failed to upload file '${cleanFileName}'.`);
 
   return {
     fileId: uploadData.id,
@@ -286,21 +278,12 @@ export async function resolveVaultFolder(parentFolderId: string, logicalName: st
 }
 
 export async function getDossierCategoryFolder(dossierId: string, categoryFolder: string): Promise<string> {
-  const cleanDossierId = dossierId ? dossierId.trim() : '';
-  const cleanCategory = categoryFolder ? categoryFolder.trim() : '';
-
+  const cleanDossierId = dossierId ? dossierId.trim() : "";
+  const cleanCategory = categoryFolder ? categoryFolder.trim() : "";
   if (!cleanDossierId || !cleanCategory) {
-    throw new Error('Google Drive Error: Invalid dossierId or categoryFolder parameter.');
+    throw new Error("Google Drive Error: Invalid dossierId or categoryFolder parameter.");
   }
-
-  const creds = getCredentials();
-  if (cleanDossierId === "team" || cleanDossierId === "gallery") {
-    const library = await resolveVaultFolder(creds.rootFolderId, cleanDossierId === "team" ? "Team" : "Gallery");
-    return findOrCreateFolder(library, cleanCategory);
-  }
-  const dossiersFolderId = await resolveVaultFolder(creds.rootFolderId, "Dossiers");
-  const dossierFolderId = await findOrCreateFolder(dossiersFolderId, cleanDossierId);
-  return findOrCreateFolder(dossierFolderId, cleanCategory);
+  return getCredentials().rootFolderId;
 }
 
 export async function downloadFileFromDrive(fileId:string):Promise<{buffer:Buffer;mimeType:string;name:string}>{const id=fileId.trim();if(!id)throw new Error('Invalid Drive file ID.');const meta=await driveApiFetch<{name?:string,mimeType?:string}>(`/files/${encodeURIComponent(id)}?fields=name,mimeType`);const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Google Drive Download Error (${r.status})`);return{buffer:Buffer.from(await r.arrayBuffer()),mimeType:meta.mimeType||'application/octet-stream',name:meta.name||'download'}}
