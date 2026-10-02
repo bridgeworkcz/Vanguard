@@ -731,7 +731,7 @@ export function PortalPage({ id }: { id: string }) {
                       <li key={cat} className="border-t border-white/10 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span>{t(`cat_${cat}`)}</span>
-                          <span className="text-sm text-mist">{files.length ? t("uploaded") : t("upload")}</span>
+                          <span className="text-sm text-mist">{files.length ? t("uploaded") : t("checklist_miss")}</span>
                         </div>
                         <div className="mt-2 grid gap-2">
                           {files.map((doc) => (

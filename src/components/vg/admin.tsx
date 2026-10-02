@@ -10,6 +10,9 @@ import {
   adminDeletePartner,
   adminDeleteTeam,
   adminDeleteVacancy,
+  adminDriveAuthUrl,
+  adminDriveStatus,
+  adminSaveDriveClient,
   adminGetApplication,
   adminListApplications,
   adminOverview,
@@ -64,6 +67,56 @@ function stageFail(message: string, t: (key: CopyKey) => string) {
 
 function useAdminT() {
   return (key: CopyKey) => ADMIN_UK[key] ?? key;
+}
+
+function DriveLink() {
+  const t = useAdminT();
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [note, setNote] = useState("");
+  const [linked, setLinked] = useState(false);
+  const redirect = typeof window === "undefined" ? "" : `${window.location.origin}/google/drive`;
+  useEffect(() => {
+    void adminDriveStatus()
+      .then((status) => setLinked(status.connected))
+      .catch(() => setLinked(false));
+    const hash = typeof window === "undefined" ? "" : window.location.hash;
+    if (hash === "#drive-ok") setNote(ADMIN_UK.admin_vault_ok ?? "");
+    if (hash === "#drive-fail") setNote(ADMIN_UK.admin_vault_fail ?? "");
+  }, []);
+  return (
+    <section className="glass grid gap-2 p-4">
+      <h2 className="display text-2xl">{t("admin_vault")}</h2>
+      <p className="text-sm text-mist">{t("admin_vault_help")}</p>
+      <p className="text-sm">{linked ? t("admin_vault_on") : t("admin_vault_off")}</p>
+      <p className="break-all text-xs text-mist">{t("admin_vault_uri")}: {redirect}</p>
+      <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
+      <input className="field" placeholder="Client secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+      <button
+        type="button"
+        className="btn w-fit"
+        onClick={() => {
+          const id = clientId.trim();
+          const key = secret.trim();
+          if ((id && !key) || (!id && key)) {
+            setNote(t("admin_vault_fail"));
+            return;
+          }
+          setNote("");
+          const save = id && key ? adminSaveDriveClient({ data: { clientId: id, clientSecret: key } }) : Promise.resolve({ ok: true as const });
+          void save
+            .then(() => adminDriveAuthUrl({ data: { redirectUri: redirect } }))
+            .then((res) => {
+              window.location.href = res.url;
+            })
+            .catch(() => setNote(t("admin_vault_fail")));
+        }}
+      >
+        {t("admin_vault_go")}
+      </button>
+      {note ? <p className="text-sm text-metal">{note}</p> : null}
+    </section>
+  );
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -976,7 +1029,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         ) : null}
 
         {current === "content" && staff && data ? (
-          <ContentEditor
+          <div className="mt-8 grid gap-4">
+            {isAdmin ? <DriveLink /> : null}
+            <ContentEditor
             readOnly={!isAdmin}
             settings={settingsDraft}
             media={data.media}
@@ -986,6 +1041,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             onSettings={(next) => setSettingsDraft(next)}
             onSaved={reload}
           />
+          </div>
         ) : null}
 
         {current === "pricing" && staff && data ? (

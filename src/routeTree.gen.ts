@@ -22,6 +22,7 @@ import { Route as ProcessRouteImport } from './routes/process'
 import { Route as QuestionsRouteImport } from './routes/questions'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as CountryCodeRouteImport } from './routes/country.$code'
+import { Route as GoogleDriveRouteImport } from './routes/google.drive'
 import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -92,6 +93,11 @@ const CountryCodeRoute = CountryCodeRouteImport.update({
   path: '/country/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoogleDriveRoute = GoogleDriveRouteImport.update({
+  id: '/google/drive',
+  path: '/google/drive',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RCodeRoute = RCodeRouteImport.update({
   id: '/r/$code',
   path: '/r/$code',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/country/$code': typeof CountryCodeRoute
+  '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/country/$code': typeof CountryCodeRoute
+  '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
   '/country/$code': typeof CountryCodeRoute
+  '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies_/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/questions'
     | '/search'
     | '/country/$code'
+    | '/google/drive'
     | '/r/$code'
     | '/vacancies/$id'
     | '/api/auth/$'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/questions'
     | '/search'
     | '/country/$code'
+    | '/google/drive'
     | '/r/$code'
     | '/vacancies/$id'
     | '/api/auth/$'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/questions'
     | '/search'
     | '/country/$code'
+    | '/google/drive'
     | '/r/$code'
     | '/vacancies_/$id'
     | '/api/auth/$'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   QuestionsRoute: typeof QuestionsRoute
   SearchRoute: typeof SearchRoute
   CountryCodeRoute: typeof CountryCodeRoute
+  GoogleDriveRoute: typeof GoogleDriveRoute
   RCodeRoute: typeof RCodeRoute
   VacanciesIdRoute: typeof VacanciesIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -344,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CountryCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/google/drive': {
+      id: '/google/drive'
+      path: '/google/drive'
+      fullPath: '/google/drive'
+      preLoaderRoute: typeof GoogleDriveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/r/$code': {
       id: '/r/$code'
       path: '/r/$code'
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   QuestionsRoute: QuestionsRoute,
   SearchRoute: SearchRoute,
   CountryCodeRoute: CountryCodeRoute,
+  GoogleDriveRoute: GoogleDriveRoute,
   RCodeRoute: RCodeRoute,
   VacanciesIdRoute: VacanciesIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

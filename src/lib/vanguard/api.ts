@@ -1221,6 +1221,35 @@ export const adminAllTeam = createServerFn({ method: "GET" })
     }>`select id, full_name as "fullName", position, phone, photo_data as "photoData", active from team_members order by sort_order, full_name`;
   });
 
+export const adminDriveStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (!sheetsOn()) return { connected: false };
+    const mod = await import("./sheet-backend");
+    return mod.adminDriveStatus(context.userId);
+  });
+
+export const adminSaveDriveClient = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { clientId: string; clientSecret: string }) => ({
+    clientId: clean(input?.clientId, 200),
+    clientSecret: clean(input?.clientSecret, 200),
+  }))
+  .handler(async ({ context, data }) => {
+    if (!sheetsOn()) throw new Error("Sheets");
+    const mod = await import("./sheet-backend");
+    return mod.adminSaveDriveClient(context.userId, data);
+  });
+
+export const adminDriveAuthUrl = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { redirectUri: string }) => ({ redirectUri: clean(input?.redirectUri, 300) }))
+  .handler(async ({ context, data }) => {
+    if (!sheetsOn()) throw new Error("Sheets");
+    const mod = await import("./sheet-backend");
+    return mod.adminDriveAuthUrl(context.userId, data.redirectUri);
+  });
+
 function sheetsOn() {
   return Boolean(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim());
 }

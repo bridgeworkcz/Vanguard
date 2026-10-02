@@ -1,4 +1,4 @@
-import { getDossierCategoryFolder, downloadFileFromDrive, resolveVaultFolder, uploadFileToDrive } from "@/lib/google/drive";
+import { getDossierCategoryFolder, downloadFileFromDrive, resolveVaultFolder, safeDriveRedirect, uploadFileToDrive } from "@/lib/google/drive";
 import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, primeSheetRows, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
@@ -23,6 +23,7 @@ import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
 import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, kyivMonth, monthCommission, trancheSplit } from "./ops";
+import crypto from "crypto";
 
 const MAX_DATA = 2_600_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -954,7 +955,7 @@ async function storeFile(applicationId: string, userId: string, category: string
     console.error("[file]", err);
     const message = err instanceof Error ? err.message : "";
     const code = message.match(/\((\d{3})/)?.[1];
-    throw new Error(message.includes("quota") ? "Drive quota" : code ? `Drive ${code}` : `Drive ${message.slice(0, 160) || "refused"}`);
+    throw new Error(message.includes("quota") || message.includes("reconnect") ? "Drive quota" : code ? `Drive ${code}` : `Drive ${message.slice(0, 160) || "refused"}`);
   }
   const id = newId("DOC");
   try {
@@ -1280,6 +1281,55 @@ export async function adminSaveSettings(userId: string, data: Record<string, str
     await putSetting(key, value.slice(0, 8000), userId);
   }
   await audit(userId, "SETTINGS", "site", Object.keys(data ?? {}).join(","));
+}
+
+export async function adminDriveStatus(userId: string) {
+  await requireAdmin(userId);
+  invalidateSheet("SystemSettings");
+  const map = await settingMap();
+  const env = Boolean(process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() && process.env.GOOGLE_OAUTH_CLIENT_ID?.trim());
+  return { connected: env || Boolean(map.drive_oauth_refresh_token && map.drive_oauth_client_id && map.drive_oauth_client_secret) };
+}
+
+export async function adminSaveDriveClient(userId: string, data: { clientId: string; clientSecret: string }) {
+  await requireAdmin(userId);
+  const clientId = data.clientId.trim();
+  const clientSecret = data.clientSecret.trim();
+  if (!clientId.includes(".apps.googleusercontent.com") || clientSecret.length < 8) throw new Error("Client");
+  await putSetting("drive_oauth_client_id", clientId, userId);
+  await putSetting("drive_oauth_client_secret", clientSecret, userId);
+  return { ok: true as const };
+}
+
+export async function adminDriveAuthUrl(userId: string, redirectUri: string) {
+  await requireAdmin(userId);
+  const redirect = safeDriveRedirect(redirectUri);
+  if (!redirect) throw new Error("Client");
+  invalidateSheet("SystemSettings");
+  const map = await settingMap();
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || map.drive_oauth_client_id;
+  if (!clientId) throw new Error("Client");
+  const state = crypto.randomBytes(16).toString("hex");
+  await putSetting("drive_oauth_state", state, userId);
+  await putSetting("drive_oauth_redirect", redirect, userId);
+  const { driveAuthUrl } = await import("@/lib/google/drive");
+  return { url: driveAuthUrl(clientId, redirect, state) };
+}
+
+export async function finishDriveOAuth(userId: string, code: string, redirectUri: string, state: string) {
+  await requireAdmin(userId);
+  invalidateSheet("SystemSettings");
+  const map = await settingMap();
+  if (!state || state !== map.drive_oauth_state) throw new Error("State");
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || map.drive_oauth_client_id;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || map.drive_oauth_client_secret;
+  const redirect = map.drive_oauth_redirect || safeDriveRedirect(redirectUri);
+  if (!clientId || !clientSecret || !redirect) throw new Error("Client");
+  const { exchangeDriveCode } = await import("@/lib/google/drive");
+  const refresh = await exchangeDriveCode(clientId, clientSecret, code, redirect);
+  await putSetting("drive_oauth_refresh_token", refresh, userId);
+  await putSetting("drive_oauth_state", "", userId);
+  return { ok: true as const };
 }
 
 export async function adminSaveProduct(userId: string, data: VisaProduct) {
