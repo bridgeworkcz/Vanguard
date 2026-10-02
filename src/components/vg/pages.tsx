@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { listPublicFilings } from "@/lib/vanguard/api";
 import { useI18n } from "@/lib/vanguard/i18n";
 import { Shell } from "./chrome";
+import { QuestionFilm } from "./media";
 
 function Article({ kicker, title, children }: { kicker: string; title: string; children: ReactNode }) {
   return (
@@ -77,6 +78,7 @@ export function QuestionsPage() {
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
+      <QuestionFilm />
       <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => setFind(e.target.value)} />
       {empty ? <p className="text-mist">{t("faq_none")}</p> : null}
       {pathHit ? (

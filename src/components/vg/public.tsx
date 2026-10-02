@@ -6,6 +6,7 @@ import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, what
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n } from "@/lib/vanguard/i18n";
+import { CountryStill, CountLine, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
 
 function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS" | "weeks" | "week") => string, p: Processing, min: number, max: number) {
   const n = productionWeeks(min, max, p);
@@ -180,20 +181,8 @@ export function HomePage() {
           <b>{t("banner_ministry")}</b>
         </article>
       </section>
-      <section className="mx-auto grid max-w-6xl gap-8 px-4 py-16 md:grid-cols-3">
-        <p className="kicker ember md:col-span-3">{t("steps_kicker")}</p>
-        {[
-          [t("step1_t"), t("step1_b")],
-          [t("step2_t"), t("step2_b")],
-          [t("step3_t"), t("step3_b")],
-        ].map(([h, b], i) => (
-          <article key={h} className="border-t border-white/15 pt-4">
-            <p className="ember">0{i + 1}</p>
-            <h3 className="display mt-3 text-3xl">{h}</h3>
-            <p className="mt-3 text-sm leading-relaxed text-mist">{b}</p>
-          </article>
-        ))}
-      </section>
+      <CountLine />
+      <StepRail />
     </Shell>
   );
 }
@@ -248,6 +237,7 @@ export function SearchPage({
               </div>
               <div>
                 <p className="kicker">{visa.country}</p>
+                <CountryStill country={visa.country} compact />
                 <p className="mt-2 text-lg">
                   {visa.name}
                   <span className="block text-mist">{visa.duration}</span>
@@ -390,6 +380,7 @@ export function VacancyPage({
         <p className="kicker ember mt-6">{job.country}</p>
         <h1 className="display mt-3 text-5xl">{job.title}</h1>
         <p className="mt-3 text-lg text-metal">{job.employer}</p>
+        <VacancyShots vacancyId={job.id} />
         <p className="mt-6 leading-relaxed text-paper/85">{job.description}</p>
         <dl className="mt-8 grid gap-4 sm:grid-cols-2">
           {[
@@ -482,12 +473,7 @@ export function AboutPage() {
           </div>
           <div>
             <h2 className="display text-4xl">{t("about_license")}</h2>
-            {licenses.length === 0 ? <p className="mt-6 text-mist">{t("about_license_empty")}</p> : null}
-            <div className="mt-4 grid gap-3">
-              {licenses.map((m) => (
-                <img key={m.id} src={m.imageData} alt={m.title || t("about_license")} className="w-full border border-white/15" />
-              ))}
-            </div>
+            <LicenseWall items={licenses} />
           </div>
         </div>
       </section>
@@ -514,6 +500,7 @@ export function AboutPage() {
           ))}
         </ul>
       </section>
+      <LogoStrip />
       <section className="border-t border-white/10 px-4 py-12">
         <div className="mx-auto max-w-6xl">
           <h2 className="display text-3xl">{t("about_partners")}</h2>
@@ -616,6 +603,7 @@ export function CountryPage({ code }: { code: string }) {
       <article className="mx-auto max-w-5xl px-4 py-14">
         <p className="kicker ember">{t("country_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
+        {country ? <CountryStill country={country} /> : null}
         {products.length === 0 ? <p className="mt-6 text-mist">{t("country_empty")}</p> : null}
         <div className="mt-8 grid gap-4">
           {products.map((item) => (

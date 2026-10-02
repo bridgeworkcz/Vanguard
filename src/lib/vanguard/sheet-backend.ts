@@ -651,6 +651,36 @@ async function ensurePartnerCatalog() {
   await putSetting("partners_catalog", "3", "system");
 }
 
+const MEDIA_KINDS = new Set(["office", "license", "country", "vacancy", "logo", "banner"]);
+
+function mediaKind(row: SheetRow): string {
+  const kind = (row.kind || "").trim();
+  if (MEDIA_KINDS.has(kind)) return kind;
+  return (row.caption || "").split("|")[0] === "license" ? "license" : "office";
+}
+
+function mediaCaption(row: SheetRow): string {
+  if ((row.kind || "").trim()) return row.caption || "";
+  return (row.caption || "").split("|").slice(1).join("|");
+}
+
+function mediaFrom(row: SheetRow) {
+  return {
+    id: row.id,
+    kind: mediaKind(row),
+    title: row.title || "",
+    caption: mediaCaption(row),
+    imageData: siteFileUrl("gallery", row.id, row.imageUrl),
+    sortOrder: Number(row.order) || 0,
+    active: row.isActive === "" || bool(row.isActive),
+    country: row.country || "",
+    vacancyId: row.vacancyId || "",
+    startsAt: row.startsAt || "",
+    endsAt: row.endsAt || "",
+    cover: bool(row.cover),
+  };
+}
+
 export async function publicSite() {
   await ensureSeed();
   await ensurePartnerCatalog();
@@ -670,26 +700,16 @@ export async function publicSite() {
       sortOrder: Number(row.order) || 0,
       active: true,
     }));
-  const media = (await readSheetRows("Gallery"))
-    .filter((row) => bool(row.isActive))
-    .map((row) => {
-      const [kind, ...rest] = (row.caption || "office|").split("|");
-      return {
-        id: row.id,
-        kind: kind === "license" ? "license" : "office",
-        title: row.title,
-        caption: rest.join("|"),
-        imageData: siteFileUrl("gallery", row.id, row.imageUrl),
-        sortOrder: Number(row.order) || 0,
-      };
-    });
+  const media = (await readSheetRows("Gallery")).filter((row) => row.isActive === "" || bool(row.isActive)).map(mediaFrom);
   const partners = (await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", [])).map((item) => ({
     id: item.id,
     country: item.country,
     name: item.name,
     sortOrder: item.sort,
   }));
-  return { settings, products, vacancies, team, media, partners };
+  const filings = await readSheetRows("Applications");
+  const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
+  return { settings, products, vacancies, team, media, partners, counts };
 }
 
 export async function listPublicFilings() {
@@ -1152,30 +1172,75 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
   await audit(userId, "PRICING", data.id, String(data.basePrice));
 }
 
-export async function adminSaveMedia(userId: string, data: { id?: string; kind: string; title: string; caption: string; imageData: string }) {
+export async function adminSaveMedia(
+  userId: string,
+  data: {
+    id?: string;
+    kind: string;
+    title: string;
+    caption?: string;
+    imageData?: string;
+    country?: string;
+    vacancyId?: string;
+    startsAt?: string;
+    endsAt?: string;
+    cover?: boolean;
+    active?: boolean;
+    sortOrder?: number;
+  },
+) {
   await requireAdmin(userId);
-  if (!data.imageData?.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
+  const kind = MEDIA_KINDS.has(data.kind) ? data.kind : "office";
   const id = data.id || newId("MED");
-  const kind = data.kind === "license" ? "license" : "office";
-  const mime = data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg";
-  const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
-  const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
-  const imageUrl = doc?.driveFileId ? `file:${doc.driveFileId}` : "";
-  if (!imageUrl) throw new Error("File");
-  const raw = (await readSheetRows("Gallery")).find((row) => row.id === id);
-  const row = {
+  const rows = await readSheetRows("Gallery");
+  const raw = rows.find((row) => row.id === id);
+  let imageUrl = raw?.imageUrl || "";
+  if (data.imageData) {
+    if (!data.imageData.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
+    const mime = data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg";
+    const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
+    const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
+    imageUrl = doc?.driveFileId ? `file:${doc.driveFileId}` : "";
+    if (!imageUrl) throw new Error("File");
+  } else if (!raw) {
+    throw new Error("File");
+  }
+  const vacancyId = data.vacancyId ?? raw?.vacancyId ?? "";
+  if (kind === "vacancy" && vacancyId && data.active !== false && (!raw || !(raw.isActive === "" || bool(raw.isActive)))) {
+    const live = rows.filter((row) => row.id !== id && mediaKind(row) === "vacancy" && row.vacancyId === vacancyId && (row.isActive === "" || bool(row.isActive)));
+    if (live.length >= 3) throw new Error("Three");
+  }
+  if (data.cover) {
+    for (const row of rows) {
+      if (row.id === id || !bool(row.cover)) continue;
+      const same = (kind === "vacancy" && row.vacancyId === vacancyId) || (kind === "license" && mediaKind(row) === "license");
+      if (same) await updateSheetRowById("Gallery", row.id, { cover: "false" });
+    }
+  }
+  const row: SheetRow = {
     ...(raw ?? {}),
     id,
-    title: data.title || raw?.title || (kind === "license" ? "Licence" : "Office"),
+    title: data.title || raw?.title || kind,
     imageUrl,
-    caption: `${kind}|${data.caption || ""}`,
-    order: raw?.order || "5",
-    isActive: "true",
+    caption: data.caption !== undefined ? data.caption : mediaCaption(raw ?? {}),
+    order: String(data.sortOrder ?? raw?.order ?? "5"),
+    isActive: data.active === undefined ? raw?.isActive || "true" : String(data.active),
+    kind,
+    country: data.country ?? raw?.country ?? "",
+    vacancyId,
+    startsAt: data.startsAt ?? raw?.startsAt ?? "",
+    endsAt: data.endsAt ?? raw?.endsAt ?? "",
+    cover: data.cover === undefined ? raw?.cover || "false" : String(Boolean(data.cover)),
   };
   if (raw) await updateSheetRowById("Gallery", id, row);
   else await appendSheetRow("Gallery", row);
   await audit(userId, "MEDIA", id, kind);
   return { id };
+}
+
+export async function adminListMedia(userId: string) {
+  await requireStaff(userId);
+  return (await readSheetRows("Gallery")).map(mediaFrom).sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
 }
 
 export async function adminDeleteMedia(userId: string, id: string) {

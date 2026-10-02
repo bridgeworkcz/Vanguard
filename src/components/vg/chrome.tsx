@@ -5,7 +5,7 @@ import { accountSession, accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
-import { whatsAppHref } from "@/lib/vanguard/domain";
+import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
 import { useI18n, type Lang } from "@/lib/vanguard/i18n";
 
 export function Mark({ className = "size-9" }: { className?: string }) {
@@ -56,6 +56,37 @@ export function useDesk() {
   const pending = auth.isPending || sheet === null;
   const signedIn = Boolean(auth.user) || sheet === true;
   return { pending, signedIn, user: auth.user, deskId: auth.user?.id ?? (signedIn ? "sheet" : "") };
+}
+
+function PromoBanner({
+  site,
+  lang,
+}: {
+  site: ReturnType<typeof useSite>["data"];
+  lang: Lang;
+}) {
+  const settings = site?.settings;
+  if (!settings || settings.banner_on !== "1") return null;
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  if (settings.banner_start && today < settings.banner_start) return null;
+  if (settings.banner_end && today > settings.banner_end) return null;
+  const text = settings[`banner_text_${lang}`] || settings.banner_text_en || "";
+  const image = site?.media.find((item) => item.kind === "banner" && item.imageData);
+  if (!text && !image) return null;
+  const body = (
+    <>
+      {image?.imageData ? <img src={image.imageData} alt="" /> : null}
+      {text ? <b>{text}</b> : null}
+    </>
+  );
+  if (settings.banner_country) {
+    return (
+      <Link to="/country/$code" params={{ code: countrySlug(settings.banner_country) }} className="promo-bar">
+        {body}
+      </Link>
+    );
+  }
+  return <div className="promo-bar">{body}</div>;
 }
 
 export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?: "dark" | "light" }) {
@@ -168,6 +199,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {role === "ADMIN" || role === "MANAGER" ? item("/admin", t("nav_console")) : null}
         </nav>
       </header>
+      <PromoBanner site={site} lang={lang} />
       <div className="vg-page">{children}</div>
       <footer className={`border-t px-4 pb-8 pt-8 sm:pb-24 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4">

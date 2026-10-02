@@ -292,15 +292,25 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     caption: string;
     imageData: string;
     sortOrder: number;
-  }>`select id, kind, title, caption, image_data as "imageData", sort_order as "sortOrder" from media_items where active = true order by sort_order`;
+    country: string;
+    vacancyId: string;
+    startsAt: string;
+    endsAt: string;
+    cover: boolean;
+  }>`select id, kind, title, caption, image_data as "imageData", sort_order as "sortOrder",
+    country, vacancy_id as "vacancyId", starts_at as "startsAt", ends_at as "endsAt", cover
+    from media_items where active = true order by sort_order`;
   const partners = await sql<{ id: string; country: string; name: string; sortOrder: number }>`select id, country, name, sort_order as "sortOrder" from partners where active = true order by country, sort_order`;
+  const counts = await sql<{ filed: number; issued: number }>`select count(*)::int as filed,
+    coalesce(sum(case when status = 'ISSUED' then 1 else 0 end), 0)::int as issued from applications`;
   return {
     settings: settingMap(settingsRows),
     products,
     vacancies,
     team,
-    media,
+    media: media.map((item) => ({ ...item, active: true, cover: Boolean(item.cover) })),
     partners,
+    counts: { filed: Number(counts[0]?.filed ?? 0), issued: Number(counts[0]?.issued ?? 0) },
   };
 });
 
@@ -967,7 +977,20 @@ export const adminSaveProduct = createServerFn({ method: "POST" })
 
 export const adminSaveMedia = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { id?: string; kind: string; title: string; caption: string; imageData: string }) => input)
+  .validator((input: {
+    id?: string;
+    kind: string;
+    title: string;
+    caption?: string;
+    imageData?: string;
+    country?: string;
+    vacancyId?: string;
+    startsAt?: string;
+    endsAt?: string;
+    cover?: boolean;
+    active?: boolean;
+    sortOrder?: number;
+  }) => input)
   .handler(async ({ context, data }) => {
     if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
       const mod = await import("./sheet-backend");
@@ -975,17 +998,52 @@ export const adminSaveMedia = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
-    const kind = data.kind === "license" ? "license" : "office";
-    if (!data.imageData?.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
+    const kinds = new Set(["office", "license", "country", "vacancy", "logo", "banner"]);
+    const kind = kinds.has(data.kind) ? data.kind : "office";
     const id = clean(data.id, 40) || newId("MED");
-    const title = clean(data.title, 120);
-    const caption = clean(data.caption, 300);
-    const existing = await sql<{ id: string }>`select id from media_items where id = ${id}`;
-    if (existing[0]) {
-      await sql`update media_items set kind = ${kind}, title = ${title}, caption = ${caption}, image_data = ${data.imageData}, active = true where id = ${id}`;
+    const existing = await sql<{
+      id: string;
+      title: string;
+      caption: string;
+      active: boolean;
+      cover: boolean;
+      sortOrder: number;
+      country: string;
+      vacancyId: string;
+      startsAt: string;
+      endsAt: string;
+    }>`select id, title, caption, active, cover, sort_order as "sortOrder", country, vacancy_id as "vacancyId", starts_at as "startsAt", ends_at as "endsAt" from media_items where id = ${id}`;
+    const prev = existing[0];
+    if (data.imageData && (!data.imageData.startsWith("data:") || data.imageData.length > MAX_DATA)) throw new Error("File");
+    if (!prev && !data.imageData) throw new Error("File");
+    const title = clean(data.title, 120) || prev?.title || kind;
+    const caption = data.caption === undefined ? prev?.caption || "" : clean(data.caption, 300);
+    const country = data.country === undefined ? prev?.country || "" : clean(data.country, 80);
+    const vacancyId = data.vacancyId === undefined ? prev?.vacancyId || "" : clean(data.vacancyId, 40);
+    const startsAt = data.startsAt === undefined ? prev?.startsAt || "" : clean(data.startsAt, 20);
+    const endsAt = data.endsAt === undefined ? prev?.endsAt || "" : clean(data.endsAt, 20);
+    const active = data.active === undefined ? (prev ? Boolean(prev.active) : true) : Boolean(data.active);
+    const cover = data.cover === undefined ? Boolean(prev?.cover) : Boolean(data.cover);
+    const sortOrder = data.sortOrder === undefined ? Number(prev?.sortOrder ?? 5) : Number(data.sortOrder) || 0;
+    if (kind === "vacancy" && vacancyId && active && !prev?.active) {
+      const live = await sql<{ c: number }>`select count(*)::int as c from media_items where kind = 'vacancy' and vacancy_id = ${vacancyId} and active = true and id <> ${id}`;
+      if (Number(live[0]?.c ?? 0) >= 3) throw new Error("Three");
+    }
+    if (cover && kind === "license") await sql`update media_items set cover = false where kind = 'license' and id <> ${id}`;
+    if (cover && kind === "vacancy" && vacancyId) await sql`update media_items set cover = false where kind = 'vacancy' and vacancy_id = ${vacancyId} and id <> ${id}`;
+    if (prev) {
+      if (data.imageData) {
+        await sql`update media_items set kind = ${kind}, title = ${title}, caption = ${caption}, image_data = ${data.imageData},
+          country = ${country}, vacancy_id = ${vacancyId}, starts_at = ${startsAt}, ends_at = ${endsAt},
+          cover = ${cover}, sort_order = ${sortOrder}, active = ${active} where id = ${id}`;
+      } else {
+        await sql`update media_items set kind = ${kind}, title = ${title}, caption = ${caption},
+          country = ${country}, vacancy_id = ${vacancyId}, starts_at = ${startsAt}, ends_at = ${endsAt},
+          cover = ${cover}, sort_order = ${sortOrder}, active = ${active} where id = ${id}`;
+      }
     } else {
-      await sql`insert into media_items (id, kind, title, caption, image_data, sort_order, active)
-        values (${id}, ${kind}, ${title}, ${caption}, ${data.imageData}, 5, true)`;
+      await sql`insert into media_items (id, kind, title, caption, image_data, sort_order, active, country, vacancy_id, starts_at, ends_at, cover)
+        values (${id}, ${kind}, ${title}, ${caption}, ${data.imageData ?? ""}, ${sortOrder}, ${active}, ${country}, ${vacancyId}, ${startsAt}, ${endsAt}, ${cover})`;
     }
     await audit(sql, context.userId, "MEDIA", id, kind);
     return { id };
@@ -1001,8 +1059,36 @@ export const adminDeleteMedia = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
-    await sql`delete from media_items where id = ${id}`;
+    await sql`update media_items set active = false where id = ${id}`;
     await audit(sql, context.userId, "MEDIA_DELETE", id, "");
+  });
+
+export const adminListMedia = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminListMedia(context.userId);
+    }
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const rows = await sql<{
+      id: string;
+      kind: string;
+      title: string;
+      caption: string;
+      imageData: string;
+      sortOrder: number;
+      active: boolean;
+      country: string;
+      vacancyId: string;
+      startsAt: string;
+      endsAt: string;
+      cover: boolean;
+    }>`select id, kind, title, caption, image_data as "imageData", sort_order as "sortOrder", active,
+      country, vacancy_id as "vacancyId", starts_at as "startsAt", ends_at as "endsAt", cover
+      from media_items order by sort_order, title`;
+    return rows.map((row) => ({ ...row, active: Boolean(row.active), cover: Boolean(row.cover), sortOrder: Number(row.sortOrder) || 0 }));
   });
 
 export const adminSavePartner = createServerFn({ method: "POST" })

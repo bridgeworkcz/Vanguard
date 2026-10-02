@@ -15,7 +15,7 @@ export const SHEET_SCHEMAS: Record<string, Schema> = {
   Applications: ['id','userId','vacancyId','applicantData','status','stage','visaProductId','country','processingOption','totalCost','currency','processStage','paymentDeadlineAt','documentDeadlineAt','assignedManagerId','createdAt','updatedAt','approvedAt','rejectedReason'],
   Pricing: ['id','name','description','amount','currency','active','updatedAt','updatedBy'],
   SystemSettings: ['id','key','value','updatedAt','updatedBy'],
-  Gallery: ['id','title','imageUrl','caption','order','isActive'],
+  Gallery: ['id','title','imageUrl','caption','order','isActive','kind','country','vacancyId','startsAt','endsAt','cover'],
   SupportTickets: ['id','userId','dossierId','subject','message','status','assignedManagerId','createdAt','updatedAt'],
   Backups: ['id','createdBy','driveFileId','fileName','createdAt'],
   OpenCases: ['id','snapshotAt','applicationId','email','country','stage','status','deadline'],

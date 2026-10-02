@@ -427,3 +427,60 @@ html.lang-ur .wa-fab {
   font-family: "Noto Nastaliq Urdu", var(--font-sans);
   letter-spacing: 0;
 }
+.promo-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 3.25rem;
+  padding: 0.55rem 1.1rem;
+  background: #ff6a1a;
+  color: #1a0b04;
+}
+.promo-bar b {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+.promo-bar img {
+  height: 2.4rem;
+  width: 3.4rem;
+  object-fit: cover;
+}
+.step-rail {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 4rem 1rem;
+}
+.step-card {
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 1rem;
+}
+.step-rail.play .step-card {
+  animation: step-in 0.7s ease forwards;
+  opacity: 0.28;
+}
+.step-rail.play .step-card:nth-child(2) { animation-delay: 0.15s; }
+.step-rail.play .step-card:nth-child(3) { animation-delay: 0.7s; }
+.step-rail.play .step-card:nth-child(4) { animation-delay: 1.25s; }
+.step-rail.play .step-card:nth-child(5) { animation-delay: 1.8s; }
+@keyframes step-in {
+  to { opacity: 1; }
+}
+.logo-mark img {
+  height: 2.4rem;
+  width: auto;
+  max-width: 8rem;
+  object-fit: contain;
+  filter: grayscale(1) contrast(1.15);
+  opacity: 0.82;
+}
+@media (min-width: 768px) {
+  .step-rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .step-rail .kicker {
+    grid-column: 1 / -1;
+  }
+}

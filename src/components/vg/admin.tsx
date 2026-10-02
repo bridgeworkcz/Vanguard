@@ -25,6 +25,7 @@ import {
   adminSetRole,
   adminSetStage,
   adminUploadFinal,
+  adminListMedia,
   assignManagers,
   downloadDocument,
   exportOpenCases,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, PROCESS_STAGES, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { downloadStamped } from "@/lib/vanguard/pdf";
 import { Pager } from "./pages";
@@ -607,6 +609,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 reload();
               }}
             />
+            {draft.id ? <WorkplacePhotos vacancyId={draft.id} readOnly={!isAdmin} /> : null}
             <ul className="grid gap-2">
               {data.vacancies.map((v) => (
                 <li key={v.id} className="grid items-center gap-2 border-t border-white/10 py-2 text-sm md:grid-cols-6">
@@ -944,7 +947,21 @@ function ContentEditor({
   const body = storyKey(lang, "hero_body");
   const [partner, setPartner] = useState({ country: countries[0] ?? "", name: "" });
   const [mediaErr, setMediaErr] = useState("");
-  function publishPhoto(file: File | undefined, kind: string, id?: string, itemTitle?: string, caption?: string) {
+  const [library, setLibrary] = useState<Slot[]>([]);
+  const [shotCountry, setShotCountry] = useState(countries[0] ?? "");
+  const [logoName, setLogoName] = useState("");
+  const [logoCountry, setLogoCountry] = useState(countries[0] ?? "");
+  function loadLibrary() {
+    void adminListMedia().then(setLibrary).catch(() => undefined);
+  }
+  useEffect(() => {
+    loadLibrary();
+  }, []);
+  function saved() {
+    onSaved();
+    loadLibrary();
+  }
+  function publishPhoto(file: File | undefined, kind: string, id?: string, itemTitle?: string, caption?: string, country?: string) {
     if (!file) return;
     setMediaErr("");
     void photoDataUrl(file)
@@ -953,15 +970,45 @@ function ContentEditor({
           data: {
             id,
             kind,
-            title: itemTitle || (kind === "license" ? "Licence" : "Office"),
+            title: itemTitle || (kind === "license" ? "Licence" : kind === "office" ? "Office" : itemTitle || kind),
             caption: caption || "",
             imageData,
+            country,
           },
         }),
       )
-      .then(onSaved)
-      .catch(() => setMediaErr(t("admin_file_big")));
+      .then(saved)
+      .catch((e: unknown) => setMediaErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big")));
   }
+  function patchMedia(item: Slot, extra: { caption?: string; active?: boolean; cover?: boolean; sortOrder?: number }) {
+    setMediaErr("");
+    void adminSaveMedia({
+      data: {
+        id: item.id,
+        kind: item.kind,
+        title: item.title,
+        caption: extra.caption ?? item.caption,
+        country: item.country,
+        vacancyId: item.vacancyId,
+        cover: extra.cover ?? item.cover,
+        active: extra.active ?? item.active,
+        sortOrder: extra.sortOrder ?? item.sortOrder,
+      },
+    })
+      .then(saved)
+      .catch((e: unknown) => setMediaErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big")));
+  }
+  const rows: Slot[] = library.length
+    ? library
+    : media.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        title: item.title,
+        caption: item.caption || "",
+        imageData: item.imageData,
+        sortOrder: 0,
+        active: true,
+      }));
   return (
     <div className="mt-8 grid gap-4">
       <p className="text-sm text-mist">{t("admin_live_note")}</p>
@@ -987,56 +1034,138 @@ function ContentEditor({
         <textarea className="field" disabled={readOnly} value={settings[lead] ?? ""} onChange={(e) => onSettings({ ...settings, [lead]: e.target.value })} />
         <input className="field" disabled={readOnly} value={settings[title] ?? ""} onChange={(e) => onSettings({ ...settings, [title]: e.target.value })} />
         <textarea className="field" disabled={readOnly} value={settings[body] ?? ""} onChange={(e) => onSettings({ ...settings, [body]: e.target.value })} />
+        <label className="flex items-center gap-2 text-sm text-mist">
+          <input type="checkbox" disabled={readOnly} checked={settings.motion !== "0"} onChange={(e) => onSettings({ ...settings, motion: e.target.checked ? "1" : "0" })} />
+          {t("admin_motion")}
+        </label>
+        <label className="flex items-center gap-2 text-sm text-mist">
+          <input type="checkbox" disabled={readOnly} checked={settings.count_filed !== "0"} onChange={(e) => onSettings({ ...settings, count_filed: e.target.checked ? "1" : "0" })} />
+          {t("admin_count_filed")}
+        </label>
+        <label className="flex items-center gap-2 text-sm text-mist">
+          <input type="checkbox" disabled={readOnly} checked={settings.count_issued !== "0"} onChange={(e) => onSettings({ ...settings, count_issued: e.target.checked ? "1" : "0" })} />
+          {t("admin_count_issued")}
+        </label>
+        <p className="text-sm text-mist">{t("admin_steps")}</p>
+        {[1, 2, 3, 4].map((index) => (
+          <div key={index} className="grid gap-2">
+            <input
+              className="field"
+              disabled={readOnly}
+              value={stepField(settings.step_copy || "", lang, index, "t")}
+              onChange={(e) => onSettings({ ...settings, step_copy: writeStep(settings.step_copy || "", lang, index, "t", e.target.value) })}
+            />
+            <textarea
+              className="field"
+              disabled={readOnly}
+              value={stepField(settings.step_copy || "", lang, index, "b")}
+              onChange={(e) => onSettings({ ...settings, step_copy: writeStep(settings.step_copy || "", lang, index, "b", e.target.value) })}
+            />
+          </div>
+        ))}
+        <label className="flex items-center gap-2 text-sm text-mist">
+          <input type="checkbox" disabled={readOnly} checked={settings.banner_on === "1"} onChange={(e) => onSettings({ ...settings, banner_on: e.target.checked ? "1" : "0" })} />
+          {t("admin_banner")}
+        </label>
+        <label className="grid gap-1 text-sm text-mist">
+          {t("admin_banner_text")}
+          <input className="field" disabled={readOnly} value={settings[`banner_text_${lang}`] ?? ""} onChange={(e) => onSettings({ ...settings, [`banner_text_${lang}`]: e.target.value })} />
+        </label>
+        <label className="grid gap-1 text-sm text-mist">
+          {t("admin_banner_country")}
+          <select className="field" disabled={readOnly} value={settings.banner_country ?? ""} onChange={(e) => onSettings({ ...settings, banner_country: e.target.value })}>
+            <option value="" />
+            {countries.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="grid gap-1 text-sm text-mist">
+            {t("admin_banner_start")}
+            <input className="field" type="date" disabled={readOnly} value={settings.banner_start ?? ""} onChange={(e) => onSettings({ ...settings, banner_start: e.target.value })} />
+          </label>
+          <label className="grid gap-1 text-sm text-mist">
+            {t("admin_banner_end")}
+            <input className="field" type="date" disabled={readOnly} value={settings.banner_end ?? ""} onChange={(e) => onSettings({ ...settings, banner_end: e.target.value })} />
+          </label>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-mist">
+          <input type="checkbox" disabled={readOnly} checked={settings.video_on !== "0"} onChange={(e) => onSettings({ ...settings, video_on: e.target.checked ? "1" : "0" })} />
+          {t("admin_video")}
+        </label>
+        <label className="grid gap-1 text-sm text-mist">
+          {t("admin_video_src")}
+          <input className="field" disabled={readOnly} value={settings.video_src ?? ""} onChange={(e) => onSettings({ ...settings, video_src: e.target.value })} />
+        </label>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {(["video_path", "video_papers", "video_pay", "video_release"] as const).map((key) => (
+            <label key={key} className="grid gap-1 text-sm text-mist">
+              {t(`admin_${key}`)}
+              <input className="field" type="number" min={0} disabled={readOnly} value={settings[key] ?? "0"} onChange={(e) => onSettings({ ...settings, [key]: e.target.value })} />
+            </label>
+          ))}
+        </div>
         {readOnly ? null : <button className="btn-solid w-fit" type="submit">{t("save")}</button>}
       </form>
       {readOnly ? null : (
       <div className="grid gap-3 md:grid-cols-2">
         <label className="btn w-fit cursor-pointer">
           {t("admin_license")}
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => {
-              publishPhoto(e.target.files?.[0], "license");
-              e.target.value = "";
-            }}
-          />
+          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "license"); e.target.value = ""; }} />
         </label>
         <label className="btn w-fit cursor-pointer">
           {t("admin_office")}
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={(e) => {
-              publishPhoto(e.target.files?.[0], "office");
-              e.target.value = "";
-            }}
-          />
+          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "office"); e.target.value = ""; }} />
+        </label>
+        <label className="btn w-fit cursor-pointer">
+          {t("admin_banner")}
+          <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "banner", undefined, "Banner"); e.target.value = ""; }} />
+        </label>
+        <label className="flex flex-wrap items-center gap-2 text-sm text-mist">
+          {t("admin_country_photo")}
+          <select className="field max-w-48" value={shotCountry} onChange={(e) => setShotCountry(e.target.value)}>
+            {countries.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <label className="btn cursor-pointer">
+            {t("add")}
+            <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "country", undefined, shotCountry, "", shotCountry); e.target.value = ""; }} />
+          </label>
+        </label>
+        <label className="flex flex-wrap items-center gap-2 text-sm text-mist md:col-span-2">
+          {t("admin_logo")}
+          <select className="field max-w-40" value={logoCountry} onChange={(e) => setLogoCountry(e.target.value)}>
+            {countries.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <input className="field max-w-xs" placeholder={t("admin_partner")} value={logoName} onChange={(e) => setLogoName(e.target.value)} />
+          <label className="btn cursor-pointer">
+            {t("add")}
+            <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], "logo", undefined, logoName || logoCountry, "", logoCountry); e.target.value = ""; }} />
+          </label>
         </label>
       </div>
       )}
       <ul className="grid gap-2">
-        {media.map((m) => (
-          <li key={m.id} className="flex flex-wrap items-center gap-3 text-sm">
-            <img src={m.imageData} alt="" className="h-12 w-16 object-cover" />
-            <span>{m.kind === "license" ? t("admin_license") : t("admin_office")}</span>
+        {rows.filter((item) => item.kind !== "vacancy").map((m) => (
+          <li key={m.id} className={`flex flex-wrap items-center gap-3 text-sm ${m.active === false ? "opacity-50" : ""}`}>
+            {m.active === false || !m.imageData ? <span className="grid h-12 w-16 place-items-center border border-white/15 text-xs text-mist">{t("admin_hide")}</span> : <img src={m.imageData} alt="" className="h-12 w-16 object-cover" />}
+            <span>{m.kind === "license" ? t("admin_license") : m.kind === "country" ? t("admin_country_photo") : m.kind === "logo" ? t("admin_logo") : m.kind === "banner" ? t("admin_banner") : t("admin_office")}{m.country ? ` · ${m.country}` : ""}{m.title && m.kind === "logo" ? ` · ${m.title}` : ""}</span>
             {readOnly ? null : (
               <>
+                <input className="field max-w-xs" defaultValue={m.caption} placeholder={t("admin_caption")} onBlur={(e) => { if (e.target.value !== m.caption) patchMedia(m, { caption: e.target.value }); }} />
+                {m.kind === "logo" ? (
+                  <input className="field w-20" type="number" defaultValue={m.sortOrder} aria-label={t("admin_order")} onBlur={(e) => { const sortOrder = Number(e.target.value); if (sortOrder !== m.sortOrder) patchMedia(m, { sortOrder }); }} />
+                ) : null}
                 <label className="btn cursor-pointer">
                   {t("admin_replace_photo")}
-                  <input
-                    className="sr-only"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => {
-                      publishPhoto(e.target.files?.[0], m.kind, m.id, m.title, m.caption);
-                      e.target.value = "";
-                    }}
-                  />
+                  <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { publishPhoto(e.target.files?.[0], m.kind, m.id, m.title, m.caption, m.country); e.target.value = ""; }} />
                 </label>
-                <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(onSaved)}>{t("remove")}</button>
+                {m.kind === "license" ? <button type="button" className="btn" onClick={() => patchMedia(m, { cover: true })}>{t("admin_cover")}</button> : null}
+                {m.active === false ? (
+                  <button type="button" className="btn" onClick={() => patchMedia(m, { active: true })}>{t("admin_show")}</button>
+                ) : (
+                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(saved)}>{t("admin_hide")}</button>
+                )}
               </>
             )}
           </li>
@@ -1069,6 +1198,69 @@ function ContentEditor({
               {p.country} · {p.name}
             </span>
             {readOnly ? null : <button type="button" onClick={() => void adminDeletePartner({ data: p.id }).then(onSaved)}>{t("remove")}</button>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly: boolean }) {
+  const { t } = useI18n();
+  const [rows, setRows] = useState<Slot[]>([]);
+  const [err, setErr] = useState("");
+  function load() {
+    void adminListMedia().then((all) => setRows(all.filter((item) => item.kind === "vacancy" && item.vacancyId === vacancyId))).catch(() => undefined);
+  }
+  useEffect(() => {
+    load();
+  }, [vacancyId]);
+  const shots = [...rows].sort((a, b) => Number(b.cover) - Number(a.cover) || a.sortOrder - b.sortOrder);
+  function fail(e: unknown) {
+    setErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big"));
+  }
+  return (
+    <div className="glass grid gap-3 p-4">
+      <p className="text-sm text-mist">{t("admin_vacancy_photo")}</p>
+      {err ? <p className="text-sm text-metal">{err}</p> : null}
+      {readOnly ? null : (
+        <label className="btn w-fit cursor-pointer">
+          {t("add")}
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              setErr("");
+              void photoDataUrl(file)
+                .then((imageData) => adminSaveMedia({ data: { kind: "vacancy", title: t("admin_vacancy_photo"), caption: "", imageData, vacancyId, cover: shots.length === 0 } }))
+                .then(load)
+                .catch(fail);
+            }}
+          />
+        </label>
+      )}
+      <ul className="grid gap-2">
+        {shots.map((shot) => (
+          <li key={shot.id} className={`flex flex-wrap items-center gap-2 text-sm ${shot.active === false ? "opacity-50" : ""}`}>
+            {shot.imageData && shot.active !== false ? <img src={shot.imageData} alt="" className="h-12 w-16 object-cover" /> : <span className="text-xs text-mist">{t("admin_hide")}</span>}
+            {readOnly ? null : (
+              <>
+                <input className="field max-w-xs" defaultValue={shot.caption} placeholder={t("admin_caption")} onBlur={(e) => {
+                  if (e.target.value === shot.caption) return;
+                  void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: e.target.value, vacancyId, cover: shot.cover, active: shot.active } }).then(load);
+                }} />
+                <button type="button" className="btn" onClick={() => void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: shot.caption, vacancyId, cover: true, active: true } }).then(load)}>{t("admin_cover")}</button>
+                {shot.active === false ? (
+                  <button type="button" className="btn" onClick={() => void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: shot.caption, vacancyId, active: true, cover: shot.cover } }).then(load).catch(fail)}>{t("admin_show")}</button>
+                ) : (
+                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: shot.id }).then(load)}>{t("admin_hide")}</button>
+                )}
+              </>
+            )}
           </li>
         ))}
       </ul>
