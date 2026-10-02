@@ -78,3 +78,12 @@ export function canCancel(status: string, stage: number, deadline: string | null
   const left = hoursUntil(deadline, now);
   return left !== null && left > 0;
 }
+
+export function stageTone(status: string, stage: number) {
+  if (status === "CANCELLED") return "stage-off";
+  if (status === "REJECTED") return "stage-no";
+  if (status === "ISSUED" || stage >= 4) return "stage-go";
+  if (stage === 3) return "stage-move";
+  if (stage === 2) return "stage-pay";
+  return "stage-wait";
+}

@@ -109,3 +109,25 @@ export async function sendSafeTelegramAlert(
   }
 }
 
+let menuReady = false;
+
+/** Point the bot menu button at the admin console. Once per server process. */
+export async function ensureTelegramMenu() {
+  if (menuReady) return;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || "";
+  if (!botToken || !host) return;
+  menuReady = true;
+  const url = `https://${host.replace(/^https?:\/\//, "")}/admin`;
+  const menu_button = { type: "web_app", text: "Адмін", web_app: { url } };
+  const call = (body: Record<string, unknown>) =>
+    fetch(`https://api.telegram.org/bot${botToken}/setChatMenuButton`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => undefined);
+  await call({ menu_button });
+  const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  if (chatId) await call({ chat_id: chatId, menu_button });
+}
+

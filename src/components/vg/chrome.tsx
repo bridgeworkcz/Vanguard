@@ -4,9 +4,10 @@ import { signOut } from "@/lib/auth/client";
 import { accountSession, accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { getPublicSite, getSessionProfile } from "@/lib/vanguard/api";
+import { getPublicSite, getSessionProfile, listMyApplications } from "@/lib/vanguard/api";
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
 import { useI18n, softenError, type Lang } from "@/lib/vanguard/i18n";
+import { stageTone } from "@/lib/vanguard/ops";
 
 export function Mark({ className = "size-9" }: { className?: string }) {
   return (
@@ -90,6 +91,84 @@ function PromoBanner({
   return <div className="promo-bar">{body}</div>;
 }
 
+function rememberStage(id: string, status: string, stage: number) {
+  try {
+    const key = "vg-stage-seen";
+    const seen = JSON.parse(localStorage.getItem(key) || "{}") as Record<string, string>;
+    seen[id] = `${status}:${stage}`;
+    localStorage.setItem(key, JSON.stringify(seen));
+    window.dispatchEvent(new Event("vg-stage-seen"));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function CaseNudge({ signedIn, staff }: { signedIn: boolean; staff: boolean }) {
+  const { t } = useI18n();
+  const [note, setNote] = useState<{ id: string; status: string; stage: number } | null>(null);
+  useEffect(() => {
+    if (!signedIn || staff) {
+      setNote(null);
+      return;
+    }
+    let stop = false;
+    const read = () => {
+      listMyApplications()
+        .then((rows) => {
+          if (stop) return;
+          const key = "vg-stage-seen";
+          let seen: Record<string, string> = {};
+          let fresh = true;
+          try {
+            const raw = localStorage.getItem(key);
+            fresh = raw === null;
+            seen = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+          } catch {
+            seen = {};
+          }
+          const next: Record<string, string> = {};
+          let changed: { id: string; status: string; stage: number } | null = null;
+          for (const row of rows) {
+            const mark = `${row.status}:${row.stage}`;
+            next[row.id] = mark;
+            if (!fresh && seen[row.id] !== mark) changed = { id: row.id, status: row.status, stage: row.stage };
+          }
+          if (fresh || !changed) {
+            try {
+              localStorage.setItem(key, JSON.stringify({ ...seen, ...next }));
+            } catch {
+              /* ignore */
+            }
+            if (!changed) setNote(null);
+          } else {
+            setNote(changed);
+          }
+        })
+        .catch(() => undefined);
+    };
+    read();
+    window.addEventListener("vg-stage-seen", read);
+    return () => {
+      stop = true;
+      window.removeEventListener("vg-stage-seen", read);
+    };
+  }, [signedIn, staff]);
+  if (!note) return null;
+  return (
+    <div className="border-b border-white/10 bg-white/[0.04]">
+      <Link
+        to="/portal"
+        search={{ id: note.id }}
+        className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 text-sm"
+        onClick={() => rememberStage(note.id, note.status, note.stage)}
+      >
+        <span className={stageTone(note.status, note.stage)}>{t("nudge_moved")}</span>
+        <span className="ember">{t("nudge_open")}</span>
+      </Link>
+    </div>
+  );
+}
+
 export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?: "dark" | "light" }) {
   const { t, lang, setLang } = useI18n();
   const { data: site } = useSite();
@@ -115,6 +194,14 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
       .then((p) => setRole(p.role))
       .catch(() => setRole(null));
   }, [deskId, signedIn]);
+  useEffect(() => {
+    const tg = (window as unknown as { Telegram?: { WebApp?: { ready: () => void; expand: () => void; disableVerticalSwipes?: () => void } } }).Telegram?.WebApp;
+    if (!tg) return;
+    tg.ready();
+    tg.expand();
+    tg.disableVerticalSwipes?.();
+  }, []);
+  const staff = role === "ADMIN" || role === "MANAGER";
   const item = (to: "/" | "/about" | "/contact" | "/filings" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
     <Link
       to={to}
@@ -196,11 +283,12 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/questions", t("nav_questions"))}
           {item("/agents", t("nav_agents"))}
           {item("/contact", t("nav_contact"))}
-          {signedIn ? item("/portal", t("nav_portal")) : null}
-          {role === "ADMIN" || role === "MANAGER" ? item("/admin", t("nav_console")) : null}
+          {signedIn && role && !staff ? item("/portal", t("nav_portal")) : null}
+          {staff ? item("/admin", t("nav_console")) : null}
         </nav>
       </header>
       <PromoBanner site={site} lang={lang} />
+      <CaseNudge signedIn={signedIn} staff={staff} />
       <div className="vg-page">{children}</div>
       <footer className={`border-t px-4 pb-8 pt-8 sm:pb-24 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4">

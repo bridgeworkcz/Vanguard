@@ -144,8 +144,22 @@
   text-transform: uppercase;
   color: #aaa;
 }
-.ember {
-  color: #ff6a1a;
+.stage-wait { color: #9aa4b2; }
+.stage-pay { color: #ff6a1a; }
+.stage-move { color: #7aa2ff; }
+.stage-go { color: #3dbe7a; }
+.stage-no { color: #e15b64; }
+.stage-off { color: #6e6e6e; }
+.step-live {
+  outline: 1px solid rgba(255, 106, 26, 0.85);
+  box-shadow: 0 0 0 4px rgba(255, 106, 26, 0.16);
+  animation: step-pulse 1.8s ease infinite;
+}
+@keyframes step-pulse {
+  50% { box-shadow: 0 0 0 8px rgba(255, 106, 26, 0.04); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-live { animation: none; }
 }
 .glass {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04));

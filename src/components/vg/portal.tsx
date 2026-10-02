@@ -30,7 +30,7 @@ import {
   type Questionnaire,
 } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
-import { canCancel } from "@/lib/vanguard/ops";
+import { canCancel, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 
 function remain(iso: string | null, now: number) {
@@ -132,11 +132,25 @@ export function PortalPage({ id }: { id: string }) {
   }, []);
 
   useEffect(() => {
+    if (!detail) return;
+    try {
+      const key = "vg-stage-seen";
+      const seen = JSON.parse(localStorage.getItem(key) || "{}") as Record<string, string>;
+      seen[detail.app.id] = `${detail.app.status}:${detail.app.stage}`;
+      localStorage.setItem(key, JSON.stringify(seen));
+      window.dispatchEvent(new Event("vg-stage-seen"));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [detail]);
+
+  useEffect(() => {
     if (!signedIn) return;
     getSessionProfile()
       .then((p) => {
         setContact({ email: p.email, phone: p.phone });
         setRole(p.role);
+        if (p.role === "ADMIN" || p.role === "MANAGER") void navigate({ to: "/admin", search: { tab: "overview", id: "" } });
         if (p.role === "SUBAGENT") return listAgentBook().then(setBook);
         return undefined;
       })
@@ -381,7 +395,7 @@ export function PortalPage({ id }: { id: string }) {
                 <Link to="/portal" search={{ id: row.id }} className="glass grid gap-2 p-4 sm:grid-cols-4">
                   <span className="display text-2xl sm:col-span-2">{row.vacancyTitle || row.country}</span>
                   <span className="text-sm text-mist">{row.country}</span>
-                  <span className="text-sm ember">{statusLabel(row, t)}</span>
+                  <span className={`text-sm ${stageTone(row.status, row.stage)}`}>{statusLabel(row, t)}</span>
                 </Link>
               </li>
             ))}
@@ -408,7 +422,7 @@ export function PortalPage({ id }: { id: string }) {
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
-              <p className="mt-4 text-lg">{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
+              <p className={`mt-4 text-lg ${stageTone(app.status, app.stage)}`}>{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
               {(soon(app.cancelDeadlineAt, now) || soon(app.docDeadlineAt, now)) && app.status === "OPEN" ? (
                 <p className="mt-2 text-sm ember">
                   {t("portal_remind")}
@@ -423,12 +437,16 @@ export function PortalPage({ id }: { id: string }) {
                 </p>
               ) : null}
               <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => (
-                  <li key={label} className={app.stage >= index + 1 ? "border-t-2 border-[#ff6a1a] pt-2 text-sm" : "border-t border-white/20 pt-2 text-sm text-mist"}>
-                    <span className={app.stage >= index + 1 ? "ember" : "text-mist"}>0{index + 1}</span>
-                    <span className="mt-1 block">{label}</span>
-                  </li>
-                ))}
+                {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => {
+                  const tone = ["stage-wait", "stage-pay", "stage-move", "stage-go"][index] ?? "text-mist";
+                  const on = app.stage >= index + 1;
+                  return (
+                    <li key={label} className={on ? `border-t-2 pt-2 text-sm ${tone}` : "border-t border-white/20 pt-2 text-sm text-mist"}>
+                      <span className={on ? tone : "text-mist"}>0{index + 1}</span>
+                      <span className="mt-1 block">{label}</span>
+                    </li>
+                  );
+                })}
               </ol>
               {app.status === "REJECTED" && app.rejectionReason ? <p className="mt-2">{app.rejectionReason}</p> : null}
               {app.status === "REJECTED" ? (
@@ -508,7 +526,8 @@ export function PortalPage({ id }: { id: string }) {
                   <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "family"} onChange={() => setQ({ ...q, travelWithFamily: "family" })} />{t("q_with")}</label>
                 </fieldset>
                 {qErrKey ? <p className="text-metal">{t(qErrKey)}</p> : null}
-                <button className="btn-solid w-fit" type="submit">{t("q_save")}</button>
+                <p className="kicker ember">{t("hint_here")}</p>
+                <button className="btn-solid step-live w-fit" type="submit">{t("q_save")}</button>
               </form>
             ) : null}
 
@@ -546,13 +565,17 @@ export function PortalPage({ id }: { id: string }) {
                   <p className="self-center text-sm text-mist">{t("invoice2_locked")}</p>
                 ) : null}
                 {app.stage >= 4 ? (
-                  <button type="button" className="btn" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
+                  <>
+                    {detail?.documents.some((d) => d.status === "REJECTED") ? null : <p className="kicker ember w-full">{t("hint_here")}</p>}
+                    <button type="button" className={`btn ${detail?.documents.some((d) => d.status === "REJECTED") ? "" : "step-live"}`} onClick={() => void invoice(3)}>{t("invoice_3")}</button>
+                  </>
                 ) : null}
               </div>
             ) : null}
 
             {app.status === "OPEN" && app.stage === 2 ? (
-              <label className="grid gap-2 text-sm">
+              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof ? "" : "step-live"}`}>
+                {proof ? null : <span className="kicker ember">{t("hint_here")}</span>}
                 {t("proof_title")}
                 <span className="text-mist">{t("proof_help")}</span>
                 <input
@@ -568,7 +591,8 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
 
             {app.status === "OPEN" && app.stage >= 2 ? (
-              <div>
+              <div className={app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? "" : proof || app.stage > 2 ? "step-live rounded-2xl p-4" : ""}>
+                {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : proof || app.stage > 2 ? <p className="kicker ember mb-3">{t("hint_here")}</p> : null}
                 <h3 className="display text-3xl">{t("checklist_title")}</h3>
                 <ul className="mt-3 grid gap-2 text-sm">
                   {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {

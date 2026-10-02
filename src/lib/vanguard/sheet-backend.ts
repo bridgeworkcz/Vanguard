@@ -435,6 +435,7 @@ async function audit(actor: string, action: string, target: string, details: str
 }
 
 async function ensureSeed() {
+  void import("@/lib/google/telegram").then((mod) => mod.ensureTelegramMenu()).catch(() => undefined);
   try {
     const { prepareGoogle } = await import("@/lib/google/prepare");
     await prepareGoogle();
