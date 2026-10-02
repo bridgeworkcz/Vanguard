@@ -451,18 +451,18 @@ async function ensureSeed() {
   const map = await settingMap();
   if (map.seed_version === "2") {
     await safeHistory();
+    await ensureVacancyCatalog();
     return;
   }
   const apps = await readSheetRows("Applications");
   if (apps.some((row) => !isHistorySheetRow(row))) {
     await putSetting("seed_version", "2", "system");
     await safeHistory();
+    await ensureVacancyCatalog();
     return;
   }
   const vacancies = await readSheetRows("Vacancies");
-  if (vacancies.length === 0) {
-    for (const vacancy of buildVacancies()) await appendSheetRow("Vacancies", vacancyTo(vacancy));
-  }
+  if (vacancies.length === 0) await appendSheetRows("Vacancies", buildVacancies().map((vacancy) => vacancyTo(vacancy)));
   if (!map.visa_products) await putSetting("visa_products", JSON.stringify(VISA_PRODUCTS), "system");
   if (!map.partners) await putSetting("partners", JSON.stringify(partnerRows()), "system");
   const team = await readSheetRows("Team");
@@ -499,6 +499,7 @@ async function ensureSeed() {
   }
   await putSetting("seed_version", "2", "system");
   await safeHistory();
+  await ensureVacancyCatalog();
   await housekeeping();
 }
 
@@ -509,6 +510,55 @@ async function safeHistory() {
     await ensureHistoryBoard();
   } catch (err) {
     console.error("[history]", err);
+  }
+}
+
+const VACANCY_CATALOG = "1";
+
+async function ensureVacancyCatalog() {
+  try {
+    let map = await settingMap();
+    if (map.vacancy_catalog === VACANCY_CATALOG) return;
+    invalidateSheet("SystemSettings");
+    map = await settingMap();
+    if (map.vacancy_catalog === VACANCY_CATALOG) return;
+    const started = Date.parse(map.vacancy_catalog_at || "");
+    const cooling = map.vacancy_catalog === "writing" || map.vacancy_catalog === "pending";
+    if (cooling && Number.isFinite(started) && Date.now() - started < 180_000) return;
+    await putSetting("vacancy_catalog", "writing", "system");
+    await putSetting("vacancy_catalog_at", nowIso(), "system");
+    invalidateSheet("Vacancies");
+    const existing = await readSheetRows("Vacancies");
+    const taken = new Set(existing.map((row) => `${row.country}|${(row.employerLabel || "").trim().toLowerCase()}`));
+    const ids = new Set(existing.map((row) => row.id));
+    const open = new Map<string, number>();
+    for (const row of existing) {
+      if (row.isActive === "false") continue;
+      open.set(row.country, (open.get(row.country) || 0) + 1);
+    }
+    const missing: SheetRow[] = [];
+    let extra = 1;
+    for (const vacancy of buildVacancies()) {
+      const key = `${vacancy.country}|${vacancy.employer.trim().toLowerCase()}`;
+      if (taken.has(key)) continue;
+      const count = open.get(vacancy.country) || 0;
+      if (count >= 20) continue;
+      let id = vacancy.id;
+      while (ids.has(id)) {
+        extra += 1;
+        id = `VAC-X${String(extra).padStart(4, "0")}`;
+      }
+      ids.add(id);
+      taken.add(key);
+      open.set(vacancy.country, count + 1);
+      missing.push(vacancyTo({ ...vacancy, id }));
+    }
+    if (missing.length) await appendSheetRows("Vacancies", missing);
+    await putSetting("vacancy_catalog", VACANCY_CATALOG, "system");
+  } catch (err) {
+    await putSetting("vacancy_catalog", "pending", "system").catch(() => undefined);
+    await putSetting("vacancy_catalog_at", nowIso(), "system").catch(() => undefined);
+    console.error("[vacancies]", err);
   }
 }
 

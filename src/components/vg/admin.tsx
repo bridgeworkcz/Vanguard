@@ -35,6 +35,7 @@ import {
 } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, PROCESS_STAGES, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { downloadStamped } from "@/lib/vanguard/pdf";
@@ -43,6 +44,10 @@ import { Pager } from "./pages";
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
 
 const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit"];
+
+function useAdminT() {
+  return (key: CopyKey) => ADMIN_UK[key] ?? key;
+}
 
 async function asData(file: File) {
   const data = await new Promise<string>((resolve, reject) => {
@@ -72,7 +77,8 @@ async function photoDataUrl(file: File) {
 }
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
-  const { t, lang } = useI18n();
+  const { lang } = useI18n();
+  const t = useAdminT();
   const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data, reload } = useSite();
@@ -720,7 +726,7 @@ function VacancyForm({
   initial: Partial<Vacancy>;
   onSave: (v: Vacancy) => Promise<void>;
 }) {
-  const { t } = useI18n();
+  const t = useAdminT();
   const [v, setV] = useState<Vacancy>({
     id: "",
     title: "",
@@ -789,7 +795,7 @@ function TeamEditor({
   readOnly: boolean;
   onChange: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useAdminT();
   const [editId, setEditId] = useState("");
   const [fullName, setName] = useState("");
   const [position, setPosition] = useState("");
@@ -925,7 +931,7 @@ function ContentEditor({
   onSettings: (s: Record<string, string>) => void;
   onSaved: () => void;
 }) {
-  const { t } = useI18n();
+  const t = useAdminT();
   const fields: { key: string; label: CopyKey }[] = [
     { key: "support_phone", label: "admin_field_phone" },
     { key: "support_email", label: "admin_field_email" },
@@ -1190,7 +1196,7 @@ function ContentEditor({
 }
 
 function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly: boolean }) {
-  const { t } = useI18n();
+  const t = useAdminT();
   const [rows, setRows] = useState<Slot[]>([]);
   const [err, setErr] = useState("");
   function load() {
@@ -1253,7 +1259,7 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
 }
 
 function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOnly: boolean; onSaved: () => void }) {
-  const { t } = useI18n();
+  const t = useAdminT();
   const [p, setP] = useState(product);
   useEffect(() => setP(product), [product.id, product.basePrice, product.active]);
   const toggle = (lane: Processing) => {
