@@ -55,14 +55,74 @@ function daysLeft(iso: string | null, now: number) {
   return Math.max(0, Math.ceil(ms / 86400000));
 }
 
-async function fileToData(file: File) {
-  const data = await new Promise<string>((resolve, reject) => {
+function readDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-  return { data, mime: file.type, fileName: file.name };
+}
+
+function sniffMime(file: File): string {
+  const raw = (file.type || "").toLowerCase().split(";")[0].trim();
+  if (raw === "image/jpg" || raw === "image/pjpeg") return "image/jpeg";
+  if (raw === "image/jpeg" || raw === "image/png" || raw === "image/webp" || raw === "application/pdf") return raw;
+  const ext = file.name.toLowerCase().split(".").pop() || "";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "pdf") return "application/pdf";
+  return raw;
+}
+
+function shrinkImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1800;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("type"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) reject(new Error("type"));
+          else resolve(blob);
+        },
+        "image/jpeg",
+        0.72,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("type"));
+    };
+    img.src = url;
+  });
+}
+
+async function packFile(file: File): Promise<{ data: string; mime: string; fileName: string }> {
+  const mime = sniffMime(file);
+  if (mime.startsWith("image/")) {
+    const blob = await shrinkImage(file);
+    const data = await readDataUrl(blob);
+    if (data.length > 2_400_000) throw new Error("size");
+    return { data, mime: "image/jpeg", fileName: file.name.replace(/\.\w+$/, "") + ".jpg" };
+  }
+  if (mime !== "application/pdf") throw new Error("type");
+  const data = await readDataUrl(file);
+  if (data.length > 2_400_000) throw new Error("size");
+  return { data, mime, fileName: file.name };
 }
 
 function statusLabel(app: AppRow, t: (k: CopyKey) => string) {
@@ -106,6 +166,10 @@ export function PortalPage({ id }: { id: string }) {
   const [book, setBook] = useState<Awaited<ReturnType<typeof listAgentBook>> | null>(null);
   const [share, setShare] = useState("");
   const [preview, setPreview] = useState<{ url: string; name: string; tranche?: 1 | 2 | 3 } | null>(null);
+  const [pendingDocs, setPendingDocs] = useState<Partial<Record<DocCategory, File>>>({});
+  const [docNote, setDocNote] = useState("");
+  const [docBusy, setDocBusy] = useState(false);
+  const [proofNote, setProofNote] = useState("");
 
   async function refreshList() {
     const list = await listMyApplications();
@@ -222,11 +286,47 @@ export function PortalPage({ id }: { id: string }) {
     await refreshList();
   }
 
-  async function upload(category: DocCategory, file: File) {
+  function uploadError(err: unknown) {
+    const text = err instanceof Error ? err.message : "";
+    if (/size/i.test(text)) return t("docs_big");
+    if (/type/i.test(text)) return t("docs_type");
+    if (/Drive|stored|403|404|401/i.test(text)) return t("docs_drive");
+    return t("docs_fail");
+  }
+
+  async function sendFile(category: DocCategory, file: File) {
     if (!app) return;
-    const packed = await fileToData(file);
+    const packed = await packFile(file);
     await uploadMyDocument({ data: { applicationId: app.id, category, ...packed } });
     await refreshDetail(app.id);
+  }
+
+  async function saveDocs() {
+    if (!app || docBusy) return;
+    const entries = Object.entries(pendingDocs).filter((entry): entry is [DocCategory, File] => Boolean(entry[1]));
+    if (!entries.length) {
+      setDocNote(t("docs_none"));
+      return;
+    }
+    setDocBusy(true);
+    setDocNote(t("docs_wait"));
+    const bad: string[] = [];
+    const done: DocCategory[] = [];
+    for (const [cat, file] of entries) {
+      try {
+        await sendFile(cat, file);
+        done.push(cat);
+      } catch (err) {
+        bad.push(`${t(`cat_${cat}`)} — ${uploadError(err)}`);
+      }
+    }
+    setPendingDocs((cur) => {
+      const next = { ...cur };
+      for (const cat of done) delete next[cat];
+      return next;
+    });
+    setDocBusy(false);
+    setDocNote(bad.length ? bad.join(" · ") : t("docs_saved"));
   }
 
   function showPreview(next: { url: string; name: string; tranche?: 1 | 2 | 3 }) {
@@ -585,9 +685,15 @@ export function PortalPage({ id }: { id: string }) {
                   accept="image/jpeg,image/png,image/webp,application/pdf"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) void upload("PAYMENT_PROOF", file);
+                    e.target.value = "";
+                    if (!file) return;
+                    setProofNote(t("docs_wait"));
+                    void sendFile("PAYMENT_PROOF", file)
+                      .then(() => setProofNote(t("docs_saved")))
+                      .catch((err: unknown) => setProofNote(uploadError(err)));
                   }}
                 />
+                {proofNote ? <span className="text-mist">{proofNote}</span> : null}
               </label>
             ) : null}
 
@@ -636,13 +742,21 @@ export function PortalPage({ id }: { id: string }) {
                           accept="image/jpeg,image/png,image/webp,application/pdf"
                           onChange={(e) => {
                             const file = e.target.files?.[0];
-                            if (file) void upload(cat, file);
+                            e.target.value = "";
+                            if (!file) return;
+                            setPendingDocs((cur) => ({ ...cur, [cat]: file }));
+                            setDocNote("");
                           }}
                         />
+                        {pendingDocs[cat] ? <p className="mt-1 text-sm text-mist">{pendingDocs[cat]?.name} · {t("docs_chosen")}</p> : null}
                       </li>
                     );
                   })}
                 </ul>
+                <button type="button" className="btn-solid mt-4" disabled={docBusy} onClick={() => void saveDocs()}>
+                  {docBusy ? t("docs_wait") : t("docs_save")}
+                </button>
+                {docNote ? <p className="mt-2 text-sm text-mist">{docNote}</p> : null}
               </div>
             ) : null}
 

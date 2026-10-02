@@ -184,6 +184,18 @@ export function clientName(q: Questionnaire): string {
   return [q.firstName.trim(), mid, q.lastName.trim()].filter(Boolean).join(" ");
 }
 
+export function normalizeUploadMime(mime: string, fileName: string): string {
+  const raw = (mime || "").toLowerCase().split(";")[0].trim();
+  if (raw === "image/jpg" || raw === "image/pjpeg") return "image/jpeg";
+  if (raw === "image/jpeg" || raw === "image/png" || raw === "image/webp" || raw === "application/pdf") return raw;
+  const ext = (fileName || "").toLowerCase().split(".").pop() || "";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "pdf") return "application/pdf";
+  return raw;
+}
+
 export function sameCountry(citizenship: string, destination: string): boolean {
   return citizenship.trim().toLowerCase() === destination.trim().toLowerCase();
 }

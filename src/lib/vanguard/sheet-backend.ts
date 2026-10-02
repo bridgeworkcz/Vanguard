@@ -5,6 +5,7 @@ import {
   PROCESS_STAGES,
   clientName,
   newId,
+  normalizeUploadMime,
   parseQuestionnaire,
   priceFor,
   productionWeeks,
@@ -23,7 +24,7 @@ import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
 import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, kyivMonth, monthCommission, trancheSplit } from "./ops";
 
-const MAX_DATA = 900_000;
+const MAX_DATA = 2_600_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
 type Extra = {
@@ -933,16 +934,21 @@ export async function saveQuestionnaire(userId: string, data: { id: string; ques
 }
 
 async function storeFile(applicationId: string, userId: string, category: string, fileName: string, mime: string, data: string, status: string) {
-  if (!ALLOWED_MIME.has(mime) || !data.startsWith("data:") || data.length > MAX_DATA) throw new Error("File");
+  const safeMime = normalizeUploadMime(mime, fileName);
+  if (!ALLOWED_MIME.has(safeMime)) throw new Error("File type");
+  if (!data.startsWith("data:")) throw new Error("File type");
+  if (data.length > MAX_DATA) throw new Error("File size");
   const encoded = data.split(",")[1] ?? "";
   const buffer = Buffer.from(encoded, "base64");
   const folder = await getDossierCategoryFolder(applicationId, category);
   let uploaded: { fileId: string };
   try {
-    uploaded = await uploadFileToDrive(folder, fileName || "file", mime, buffer);
+    uploaded = await uploadFileToDrive(folder, fileName || "file", safeMime, buffer);
   } catch (err) {
     console.error("[file]", err);
-    throw new Error("File could not be stored.");
+    const message = err instanceof Error ? err.message : "";
+    const code = message.match(/\((\d{3})\)/)?.[1];
+    throw new Error(code ? `Drive ${code}` : "File could not be stored.");
   }
   const id = newId("DOC");
   await appendSheetRow("DossierDocuments", {
@@ -956,7 +962,7 @@ async function storeFile(applicationId: string, userId: string, category: string
     reviewedAt: "",
     reviewedBy: "",
     rejectionReason: "",
-    mime,
+    mime: safeMime,
   });
   await audit(userId, "UPLOAD", applicationId, category);
   await notify(`New file\n${applicationId}\n${category}`, "staff");

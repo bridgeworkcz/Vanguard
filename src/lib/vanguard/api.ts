@@ -6,6 +6,7 @@ import {
   PROCESS_STAGES,
   clientName,
   newId,
+  normalizeUploadMime,
   parseQuestionnaire,
   priceFor,
   productionWeeks,
@@ -31,7 +32,7 @@ type Profile = {
 
 const STAFF = new Set(["ADMIN", "MANAGER"]);
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-const MAX_DATA = 900_000;
+const MAX_DATA = 2_600_000;
 
 function clean(v: unknown, max = 2000): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
@@ -571,11 +572,12 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
     const category = data.category;
     if (!DOC_CATEGORIES.includes(category) || category === "FINAL") throw new Error("Category");
     if (category === "PAYMENT_PROOF" && app.stage !== 2) throw new Error("Locked");
-    if (!ALLOWED_MIME.has(data.mime)) throw new Error("File type");
-    if (!data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error("File size");
+    const mime = normalizeUploadMime(data.mime, data.fileName);
+    if (!ALLOWED_MIME.has(mime)) throw new Error("File type");
+    if (!data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error(data.data?.length > MAX_DATA ? "File size" : "File type");
     const id = newId("DOC");
     await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
-      values (${id}, ${app.id}, ${context.userId}, ${category}, ${clean(data.fileName, 180)}, ${data.mime}, ${data.data}, 'UPLOADED')`;
+      values (${id}, ${app.id}, ${context.userId}, ${category}, ${clean(data.fileName, 180)}, ${mime}, ${data.data}, 'UPLOADED')`;
     await audit(sql, context.userId, "UPLOAD", app.id, category);
     return { id };
   });

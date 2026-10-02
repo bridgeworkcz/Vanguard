@@ -125,8 +125,10 @@ async function getAccessToken(): Promise<string> {
 async function driveApiFetch<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = await getAccessToken();
   const baseUrl = 'https://www.googleapis.com/drive/v3';
+  const joiner = endpoint.includes('?') ? '&' : '?';
+  const flagged = `${endpoint}${joiner}supportsAllDrives=true&includeItemsFromAllDrives=true`;
 
-  const response = await fetch(`${baseUrl}${endpoint}`, {
+  const response = await fetch(`${baseUrl}${flagged}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -153,7 +155,7 @@ async function findFolder(parentFolderId: string, folderName: string): Promise<s
   const sanitizedQueryName = cleanName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const query = `'${cleanParentId}' in parents and name = '${sanitizedQueryName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchResult = await driveApiFetch<{ files?: { id: string; name: string }[] }>(
-    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+    `/files?q=${encodeURIComponent(query)}&fields=files(id,name)&corpora=allDrives`,
   );
   const files = searchResult.files || [];
   if (files.length > 1) {
@@ -174,7 +176,7 @@ export async function findOrCreateFolder(parentFolderId: string, folderName: str
   if (existing) return existing;
 
   const token = await getAccessToken();
-  const createResponse = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+  const createResponse = await fetch('https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -229,7 +231,7 @@ export async function uploadFileToDrive(
   ]);
 
   const uploadResponse = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
     {
       method: 'POST',
       headers: {
@@ -254,7 +256,7 @@ export async function uploadFileToDrive(
 }
 
 
-export async function makeFilePublic(fileId:string):Promise<void>{const id=fileId.trim();if(!id)return;const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/permissions`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({type:'anyone',role:'reader'})});if(!r.ok){const body=await r.text();throw new Error(`Google Drive Permission Error (${r.status}): ${body.slice(0,300)}`)}}
+export async function makeFilePublic(fileId:string):Promise<void>{const id=fileId.trim();if(!id)return;const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/permissions?supportsAllDrives=true`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({type:'anyone',role:'reader'})});if(!r.ok){const body=await r.text();throw new Error(`Google Drive Permission Error (${r.status}): ${body.slice(0,300)}`)}}
 export async function deleteFileFromDrive(fileId: string): Promise<void> {
   const cleanId = fileId ? fileId.trim() : '';
   if (!cleanId) return;
@@ -301,7 +303,7 @@ export async function getDossierCategoryFolder(dossierId: string, categoryFolder
   return findOrCreateFolder(dossierFolderId, cleanCategory);
 }
 
-export async function downloadFileFromDrive(fileId:string):Promise<{buffer:Buffer;mimeType:string;name:string}>{const id=fileId.trim();if(!id)throw new Error('Invalid Drive file ID.');const meta=await driveApiFetch<{name?:string,mimeType?:string}>(`/files/${encodeURIComponent(id)}?fields=name,mimeType`);const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Google Drive Download Error (${r.status})`);return{buffer:Buffer.from(await r.arrayBuffer()),mimeType:meta.mimeType||'application/octet-stream',name:meta.name||'download'}}
+export async function downloadFileFromDrive(fileId:string):Promise<{buffer:Buffer;mimeType:string;name:string}>{const id=fileId.trim();if(!id)throw new Error('Invalid Drive file ID.');const meta=await driveApiFetch<{name?:string,mimeType?:string}>(`/files/${encodeURIComponent(id)}?fields=name,mimeType`);const token=await getAccessToken();const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Google Drive Download Error (${r.status})`);return{buffer:Buffer.from(await r.arrayBuffer()),mimeType:meta.mimeType||'application/octet-stream',name:meta.name||'download'}}
 
 export const VAULT_FOLDERS = ["Dossiers", "Backups", "Gallery", "Team", "Invoices", "Contracts"] as const;
 
