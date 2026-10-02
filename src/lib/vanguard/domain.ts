@@ -116,8 +116,8 @@ export const CITIZENSHIPS = [
   "Norway",
   "Canada",
   "New Zealand",
-  "Other",
   "Ukraine",
+  "Other",
 ];
 
 /** Standard is the published fee. Priority and express sit inside a 20–35% band over the old list price. */
