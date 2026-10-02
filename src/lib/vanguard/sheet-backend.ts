@@ -93,6 +93,7 @@ async function putSetting(key: string, value: string, actor: string) {
   const stamp = nowIso();
   if (found) await updateSheetRowById("SystemSettings", found.id, { value, updatedAt: stamp, updatedBy: actor });
   else await appendSheetRow("SystemSettings", { id: newId("SET"), key, value, updatedAt: stamp, updatedBy: actor });
+  dropPublicCache();
 }
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -303,6 +304,7 @@ async function saveApp(app: ReturnType<typeof appFrom>, extra: Extra, patch: Par
     approvedAt: patch.approvedAt ?? app.row.approvedAt ?? "",
   };
   await updateSheetRowById("Applications", app.id, row);
+  dropPublicCache();
 }
 
 async function docsFor(applicationId: string) {
@@ -761,6 +763,10 @@ function mediaFrom(row: SheetRow) {
 let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 
+function dropPublicCache() {
+  publicCache = null;
+}
+
 export async function publicSite() {
   if (publicCache && Date.now() - publicCache.at < 30_000) return publicCache.value;
   if (!publicFlight) {
@@ -966,7 +972,7 @@ async function storeFile(applicationId: string, userId: string, category: string
   });
   await audit(userId, "UPLOAD", applicationId, category);
   await notify(`New file\n${applicationId}\n${category}`, "staff");
-  return { id };
+  return { id, driveFileId: uploaded.fileId };
 }
 
 export async function uploadDoc(userId: string, data: { applicationId: string; category: DocCategory; fileName: string; mime: string; data: string }) {
@@ -1192,6 +1198,7 @@ export async function adminSaveVacancy(userId: string, data: Vacancy) {
   if (raw) await updateSheetRowById("Vacancies", id, vacancyTo(vacancy, raw));
   else await appendSheetRow("Vacancies", vacancyTo(vacancy));
   await audit(userId, "VACANCY", id, vacancy.title);
+  dropPublicCache();
   return { id };
 }
 
@@ -1200,6 +1207,7 @@ export async function adminDeleteVacancy(userId: string, id: string) {
   const raw = (await readSheetRows("Vacancies")).find((row) => row.id === id);
   if (raw) await updateSheetRowById("Vacancies", id, { ...raw, isActive: "false", updatedAt: nowIso() });
   await audit(userId, "VACANCY_ARCHIVE", id, "");
+  dropPublicCache();
 }
 
 export async function adminSaveTeam(userId: string, data: { id?: string; fullName: string; position: string; phone: string; photoData: string; active: boolean }) {
@@ -1208,11 +1216,12 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   if (!data.fullName) throw new Error("Name");
   const raw = (await readSheetRows("Team")).find((row) => row.id === id);
   let photoUrl = raw?.photoUrl || "";
-  if (data.photoData?.startsWith("data:") && data.photoData.length < MAX_DATA) {
-    const mime = data.photoData.slice(5, data.photoData.indexOf(";"));
+  if (data.photoData) {
+    if (!data.photoData.startsWith("data:")) throw new Error("File type");
+    if (data.photoData.length > MAX_DATA) throw new Error("File size");
+    const mime = data.photoData.slice(5, data.photoData.indexOf(";")) || "image/jpeg";
     const saved = await storeFile("team", userId, "PHOTO", `${id}.jpg`, mime, data.photoData, "APPROVED");
-    const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
-    if (doc?.driveFileId) photoUrl = `file:${doc.driveFileId}`;
+    photoUrl = `file:${saved.driveFileId}`;
   }
   const row = {
     id,
@@ -1228,6 +1237,7 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   if (raw) await updateSheetRowById("Team", id, row);
   else await appendSheetRow("Team", row);
   await audit(userId, "TEAM", id, data.fullName);
+  dropPublicCache();
   return { id };
 }
 
@@ -1236,6 +1246,7 @@ export async function adminDeleteTeam(userId: string, id: string) {
   const raw = (await readSheetRows("Team")).find((row) => row.id === id);
   if (raw) await updateSheetRowById("Team", id, { ...raw, isActive: "false" });
   await audit(userId, "TEAM_DELETE", id, "");
+  dropPublicCache();
 }
 
 export async function adminSaveSettings(userId: string, data: Record<string, string>) {
@@ -1274,6 +1285,7 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
   if (pricing.some((row) => row.id === data.id)) await updateSheetRowById("Pricing", data.id, priceRow);
   else await appendSheetRow("Pricing", priceRow);
   await audit(userId, "PRICING", data.id, String(data.basePrice));
+  dropPublicCache();
 }
 
 export async function adminSaveMedia(
@@ -1300,12 +1312,10 @@ export async function adminSaveMedia(
   const raw = rows.find((row) => row.id === id);
   let imageUrl = raw?.imageUrl || "";
   if (data.imageData) {
-    if (!data.imageData.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File");
-    const mime = data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg";
-    const saved = await storeFile("gallery", userId, kind.toUpperCase(), data.title || id, mime, data.imageData, "APPROVED");
-    const doc = (await readSheetRows("DossierDocuments")).find((row) => row.id === saved.id);
-    imageUrl = doc?.driveFileId ? `file:${doc.driveFileId}` : "";
-    if (!imageUrl) throw new Error("File");
+    if (!data.imageData.startsWith("data:") || data.imageData.length > MAX_DATA) throw new Error("File size");
+    const mime = normalizeUploadMime(data.imageData.slice(5, data.imageData.indexOf(";")) || "image/jpeg", `${id}.jpg`);
+    const saved = await storeFile("gallery", userId, kind.toUpperCase(), `${id}.jpg`, mime, data.imageData, "APPROVED");
+    imageUrl = `file:${saved.driveFileId}`;
   } else if (!raw) {
     throw new Error("File");
   }
@@ -1339,6 +1349,7 @@ export async function adminSaveMedia(
   if (raw) await updateSheetRowById("Gallery", id, row);
   else await appendSheetRow("Gallery", row);
   await audit(userId, "MEDIA", id, kind);
+  dropPublicCache();
   return { id };
 }
 
@@ -1352,6 +1363,7 @@ export async function adminDeleteMedia(userId: string, id: string) {
   const raw = (await readSheetRows("Gallery")).find((row) => row.id === id);
   if (raw) await updateSheetRowById("Gallery", id, { ...raw, isActive: "false" });
   await audit(userId, "MEDIA_DELETE", id, "");
+  dropPublicCache();
 }
 
 export async function adminSavePartner(userId: string, data: { id?: string; country: string; name: string }) {

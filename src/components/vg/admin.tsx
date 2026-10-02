@@ -100,20 +100,37 @@ async function asData(file: File) {
 }
 
 async function photoDataUrl(file: File) {
-  if (!file.type.startsWith("image/")) throw new Error("File");
-  const bitmap = await createImageBitmap(file);
-  const max = 1600;
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("File");
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const data = canvas.toDataURL("image/jpeg", 0.85);
-  if (data.length > 900_000) throw new Error("File");
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) throw new Error("File");
+  let edge = 1600;
+  let quality = 0.82;
+  let data = "";
+  try {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("File");
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      data = canvas.toDataURL("image/jpeg", quality);
+      if (data.length <= 1_800_000) return data;
+      quality = Math.max(0.4, quality - 0.12);
+      edge = Math.round(edge * 0.8);
+    }
+  } finally {
+    bitmap.close();
+  }
+  if (!data || data.length > 2_400_000) throw new Error("File");
   return data;
+}
+
+function photoError(err: unknown, t: (key: CopyKey) => string) {
+  const text = err instanceof Error ? err.message : "";
+  if (text === "Three") return t("admin_three");
+  if (/Drive|stored|403|404|401/i.test(text)) return t("admin_drive");
+  return t("admin_file_big");
 }
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
@@ -902,7 +919,7 @@ function TeamEditor({
               setPreview("");
               onChange();
             })
-            .catch(() => setErr(t("admin_file_big")));
+            .catch((e: unknown) => setErr(photoError(e, t)));
         }}
       >
         <input className="field" placeholder={t("name")} value={fullName} onChange={(e) => setName(e.target.value)} />
@@ -965,7 +982,7 @@ function TeamEditor({
                   void photoDataUrl(file)
                     .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
                     .then(onChange)
-                    .catch(() => setErr(t("admin_file_big")));
+                    .catch((e: unknown) => setErr(photoError(e, t)));
                 }}
               />
             </label>
@@ -1020,6 +1037,7 @@ function ContentEditor({
   const body = storyKey(lang, "hero_body");
   const [partner, setPartner] = useState({ country: countries[0] ?? "", name: "" });
   const [mediaErr, setMediaErr] = useState("");
+  const [saveNote, setSaveNote] = useState("");
   const [library, setLibrary] = useState<Slot[]>([]);
   const [shotCountry, setShotCountry] = useState(countries[0] ?? "");
   const [logoName, setLogoName] = useState("");
@@ -1051,7 +1069,7 @@ function ContentEditor({
         }),
       )
       .then(saved)
-      .catch((e: unknown) => setMediaErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big")));
+      .catch((e: unknown) => setMediaErr(photoError(e, t)));
   }
   function patchMedia(item: Slot, extra: { caption?: string; active?: boolean; cover?: boolean; sortOrder?: number }) {
     setMediaErr("");
@@ -1069,7 +1087,7 @@ function ContentEditor({
       },
     })
       .then(saved)
-      .catch((e: unknown) => setMediaErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big")));
+      .catch((e: unknown) => setMediaErr(photoError(e, t)));
   }
   const rows: Slot[] = library.length
     ? library
@@ -1091,7 +1109,13 @@ function ContentEditor({
         onSubmit={(e) => {
           e.preventDefault();
           if (readOnly) return;
-          void adminSaveSettings({ data: settings }).then(onSaved);
+          setSaveNote("");
+          void adminSaveSettings({ data: settings })
+            .then(() => {
+              setSaveNote(t("admin_saved"));
+              onSaved();
+            })
+            .catch(() => setSaveNote(t("admin_unsaved")));
         }}
       >
         {fields.map((field) => (
@@ -1164,6 +1188,7 @@ function ContentEditor({
           </label>
         </div>
         {readOnly ? null : <button className="btn-solid w-fit" type="submit">{t("save")}</button>}
+        {saveNote ? <p className="text-sm text-mist">{saveNote}</p> : null}
       </form>
       {readOnly ? null : (
       <div className="grid gap-3 md:grid-cols-2">
@@ -1274,7 +1299,7 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
   }, [vacancyId]);
   const shots = [...rows].sort((a, b) => Number(b.cover) - Number(a.cover) || a.sortOrder - b.sortOrder);
   function fail(e: unknown) {
-    setErr(e instanceof Error && e.message === "Three" ? t("admin_three") : t("admin_file_big"));
+    setErr(photoError(e, t));
   }
   return (
     <div className="glass grid gap-3 p-4">
