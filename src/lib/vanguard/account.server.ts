@@ -61,10 +61,8 @@ export function clearSessionCookie() {
   setCookie(COOKIE, "", { path: "/", httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 0 });
 }
 
-export async function readSheetSessionUser() {
-  if (!sheetsConfigured()) return null;
-  const token = getCookie(COOKIE);
-  if (!token) return null;
+export async function readSheetSessionToken(token: string | null | undefined) {
+  if (!sheetsConfigured() || !token) return null;
   const { verifySessionToken } = await import("@/lib/google/session");
   const session = verifySessionToken(token);
   if (!session) return null;
@@ -73,6 +71,10 @@ export async function readSheetSessionUser() {
   const row = rows.find((item) => item.id === session.userId);
   if (!row || row.isActive === "false") return null;
   return publicUser(row);
+}
+
+export async function readSheetSessionUser() {
+  return readSheetSessionToken(getCookie(COOKIE));
 }
 
 type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };

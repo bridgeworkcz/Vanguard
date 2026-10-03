@@ -1310,17 +1310,26 @@ export async function adminDriveAuthUrl(userId: string, redirectUri: string) {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || map.drive_oauth_client_id;
   if (!clientId) throw new Error("Client");
   const state = crypto.randomBytes(16).toString("hex");
+  const { setCookie } = await import("@tanstack/react-start/server");
+  setCookie("vg_drive_state", state, {
+    path: "/",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 15,
+  });
   await putSetting("drive_oauth_state", state, userId);
   await putSetting("drive_oauth_redirect", redirect, userId);
   const { driveAuthUrl } = await import("@/lib/google/drive");
   return { url: driveAuthUrl(clientId, redirect, state) };
 }
 
-export async function finishDriveOAuth(userId: string, code: string, redirectUri: string, state: string) {
+export async function finishDriveOAuth(userId: string, code: string, redirectUri: string, state: string, cookieState = "") {
   await requireAdmin(userId);
   invalidateSheet("SystemSettings");
   const map = await settingMap();
-  if (!state || state !== map.drive_oauth_state) throw new Error("State");
+  const stateOk = Boolean(state) && (state === map.drive_oauth_state || state === cookieState);
+  if (!stateOk) throw new Error("State");
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || map.drive_oauth_client_id;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || map.drive_oauth_client_secret;
   const redirect = map.drive_oauth_redirect || safeDriveRedirect(redirectUri);

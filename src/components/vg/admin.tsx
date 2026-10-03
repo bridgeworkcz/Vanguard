@@ -84,7 +84,20 @@ function DriveLink() {
       .catch(() => setLinked(false));
     const hash = typeof window === "undefined" ? "" : window.location.hash;
     if (hash === "#drive-ok") setNote(ADMIN_UK.admin_vault_ok ?? "");
-    if (hash === "#drive-fail") setNote(ADMIN_UK.admin_vault_fail ?? "");
+    if (hash.startsWith("#drive-fail")) {
+      const why = hash.slice("#drive-fail".length).replace(/^-/, "");
+      const text =
+        why === "secret"
+          ? "Google не прийняв Client secret. Відкрийте цей клієнт у Google Cloud, натисніть Add secret, скопіюйте новий рядок значком копіювання і вставте його сюди."
+          : why === "redirect"
+            ? "У Google в Redirect URI має бути рівно адреса, яка написана вище."
+            : why === "session"
+              ? "Сайт не побачив, що ви увійшли як адмін. Вийдіть, увійдіть знову і натисніть підключення."
+              : why === "state"
+                ? "Зв’язок із Google обірвався. Натисніть підключення ще раз і не закривайте цю вкладку."
+                : ADMIN_UK.admin_vault_fail ?? "";
+      setNote(text);
+    }
   }, []);
   function connect() {
     const id = clientId.replace(/\s+/g, "");
