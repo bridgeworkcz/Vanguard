@@ -77,11 +77,21 @@ function DriveLink() {
   const [busy, setBusy] = useState(false);
   const [googleUrl, setGoogleUrl] = useState("");
   const [linked, setLinked] = useState(false);
+  const [configured, setConfigured] = useState(false);
+  const [fromEnv, setFromEnv] = useState(false);
   const redirect = typeof window === "undefined" ? "" : `${window.location.origin}/google/drive`;
   useEffect(() => {
     void adminDriveStatus()
-      .then((status) => setLinked(status.connected))
-      .catch(() => setLinked(false));
+      .then((status) => {
+        setLinked(Boolean(status.connected));
+        setConfigured(Boolean(status.configured));
+        setFromEnv(Boolean(status.fromEnv));
+      })
+      .catch(() => {
+        setLinked(false);
+        setConfigured(false);
+        setFromEnv(false);
+      });
     const hash = typeof window === "undefined" ? "" : window.location.hash;
     if (hash === "#drive-ok") setNote(ADMIN_UK.admin_vault_ok ?? "");
     if (hash.startsWith("#drive-fail")) {
@@ -102,7 +112,8 @@ function DriveLink() {
   function connect() {
     const id = clientId.replace(/\s+/g, "");
     const key = secret.replace(/\s+/g, "");
-    if (!id || !key) {
+    const canSkipPaste = fromEnv || (configured && !id && !key);
+    if (!canSkipPaste && (!id || !key)) {
       setNote("Вставте Client ID і Client secret у два поля вище, потім натисніть ще раз.");
       return;
     }
@@ -110,7 +121,8 @@ function DriveLink() {
     setGoogleUrl("");
     setNote("Підключаю… Зараз має відкритися Google.");
     const back = redirect || `${window.location.origin}/google/drive`;
-    void adminSaveDriveClient({ data: { clientId: id, clientSecret: key } })
+    const ready = canSkipPaste ? Promise.resolve() : adminSaveDriveClient({ data: { clientId: id, clientSecret: key } });
+    void ready
       .then(() => adminDriveAuthUrl({ data: { redirectUri: back } }))
       .then((res) => {
         if (!res?.url) throw new Error("Немає адреси Google");
@@ -124,24 +136,28 @@ function DriveLink() {
       });
   }
   return (
-    <section className="glass grid gap-2 p-4">
+    <section id="vault" className="glass mt-8 grid gap-3 border border-paper/25 p-5">
       <h2 className="display text-2xl">{t("admin_vault")}</h2>
-      <p className="text-sm text-mist">{t("admin_vault_help")}</p>
+      <p className="text-sm text-mist">{fromEnv ? t("admin_vault_help_ready") : t("admin_vault_help")}</p>
       <p className="text-sm">{linked ? t("admin_vault_on") : t("admin_vault_off")}</p>
       <p className="break-all text-xs text-mist">{t("admin_vault_uri")}: {redirect}</p>
-      <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" inputMode="text" />
-      <input className="field" placeholder="Client secret" type="text" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" inputMode="text" />
+      {fromEnv ? null : (
+        <>
+          <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" inputMode="text" />
+          <input className="field" placeholder="Client secret" type="text" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" inputMode="text" />
+        </>
+      )}
       <button
         type="button"
-        className="btn w-fit"
+        className="btn-solid w-fit"
         disabled={busy}
         onMouseDown={(event) => event.preventDefault()}
         onClick={connect}
       >
-        {busy ? "Підключаю…" : t("admin_vault_go")}
+        {busy ? "Підключаю…" : linked ? t("admin_vault_again") : t("admin_vault_go")}
       </button>
       {googleUrl ? (
-        <a className="btn-solid w-fit" href={googleUrl}>
+        <a className="btn w-fit" href={googleUrl}>
           Відкрити Google
         </a>
       ) : null}
@@ -1059,9 +1075,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           />
         ) : null}
 
+        {current === "content" && isAdmin ? <DriveLink /> : null}
+
         {current === "content" && staff && data ? (
           <div className="mt-8 grid gap-4">
-            {isAdmin ? <DriveLink /> : null}
             <ContentEditor
             readOnly={!isAdmin}
             settings={settingsDraft}

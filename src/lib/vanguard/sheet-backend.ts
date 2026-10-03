@@ -1287,8 +1287,21 @@ export async function adminDriveStatus(userId: string) {
   await requireAdmin(userId);
   invalidateSheet("SystemSettings");
   const map = await settingMap();
-  const env = Boolean(process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() && process.env.GOOGLE_OAUTH_CLIENT_ID?.trim());
-  return { connected: env || Boolean(map.drive_oauth_refresh_token && map.drive_oauth_client_id && map.drive_oauth_client_secret) };
+  const { driveOAuthClientConfigured, driveOAuthFromEnv } = await import("@/lib/google/drive");
+  const envId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || "";
+  const envSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || "";
+  const envRefresh = process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || "";
+  const sheetId = map.drive_oauth_client_id || "";
+  const sheetSecret = map.drive_oauth_client_secret || "";
+  const sheetRefresh = map.drive_oauth_refresh_token || "";
+  const clientId = envId || sheetId;
+  const clientSecret = envSecret || sheetSecret;
+  const refresh = envRefresh || (envId && sheetId && envId !== sheetId ? "" : sheetRefresh);
+  return {
+    connected: Boolean(clientId && clientSecret && refresh),
+    configured: driveOAuthClientConfigured({ clientId: sheetId, clientSecret: sheetSecret }),
+    fromEnv: driveOAuthFromEnv(),
+  };
 }
 
 export async function adminSaveDriveClient(userId: string, data: { clientId: string; clientSecret: string }) {
@@ -1296,8 +1309,11 @@ export async function adminSaveDriveClient(userId: string, data: { clientId: str
   const clientId = data.clientId.replace(/\s+/g, "");
   const clientSecret = data.clientSecret.replace(/\s+/g, "");
   if (!clientId.includes(".apps.googleusercontent.com") || clientSecret.length < 8) throw new Error("Client");
+  const map = await settingMap();
+  const previous = map.drive_oauth_client_id || "";
   await putSetting("drive_oauth_client_id", clientId, userId);
   await putSetting("drive_oauth_client_secret", clientSecret, userId);
+  if (previous && previous !== clientId) await putSetting("drive_oauth_refresh_token", "", userId);
   return { ok: true as const };
 }
 

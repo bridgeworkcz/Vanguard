@@ -125,31 +125,59 @@ async function getAccessToken(): Promise<string> {
 let userDriveToken: { token: string; expiresAt: number } | null = null;
 let oauthMissAt = 0;
 
-async function readOAuthSettings(): Promise<{ clientId: string; clientSecret: string; refreshToken: string } | null> {
-  const { readSheetRows } = await import("@/lib/google/sheets");
-  const rows = await readSheetRows("SystemSettings");
-  const map: Record<string, string> = {};
-  for (const row of rows) if (row.key) map[row.key] = row.value;
-  const clientId = map.drive_oauth_client_id?.trim();
-  const clientSecret = map.drive_oauth_client_secret?.trim();
-  const refreshToken = map.drive_oauth_refresh_token?.trim();
+type DriveOAuth = { clientId: string; clientSecret: string; refreshToken: string };
+
+function envOAuthParts(): DriveOAuth {
+  return {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || "",
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || "",
+    refreshToken: process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || "",
+  };
+}
+
+function mergeDriveOAuth(sheet: DriveOAuth): DriveOAuth | null {
+  const env = envOAuthParts();
+  const clientId = env.clientId || sheet.clientId;
+  const clientSecret = env.clientSecret || sheet.clientSecret;
+  const refreshToken =
+    env.refreshToken || (env.clientId && sheet.clientId && env.clientId !== sheet.clientId ? "" : sheet.refreshToken);
   if (clientId && clientSecret && refreshToken) return { clientId, clientSecret, refreshToken };
   return null;
 }
 
-async function practiceOAuth(): Promise<{ clientId: string; clientSecret: string; refreshToken: string } | null> {
-  const envId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
-  const envSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-  const envRefresh = process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim();
-  if (envId && envSecret && envRefresh) return { clientId: envId, clientSecret: envSecret, refreshToken: envRefresh };
+export function driveOAuthFromEnv() {
+  const env = envOAuthParts();
+  return Boolean(env.clientId && env.clientSecret);
+}
+
+export function driveOAuthClientConfigured(sheet?: { clientId?: string; clientSecret?: string }) {
+  const env = envOAuthParts();
+  return Boolean((env.clientId && env.clientSecret) || (sheet?.clientId && sheet?.clientSecret));
+}
+
+async function readOAuthMap(): Promise<DriveOAuth> {
+  const { readSheetRows } = await import("@/lib/google/sheets");
+  const rows = await readSheetRows("SystemSettings");
+  const map: Record<string, string> = {};
+  for (const row of rows) if (row.key) map[row.key] = row.value;
+  return {
+    clientId: map.drive_oauth_client_id?.trim() || "",
+    clientSecret: map.drive_oauth_client_secret?.trim() || "",
+    refreshToken: map.drive_oauth_refresh_token?.trim() || "",
+  };
+}
+
+async function practiceOAuth(): Promise<DriveOAuth | null> {
+  const env = envOAuthParts();
+  if (env.clientId && env.clientSecret && env.refreshToken) return env;
   try {
-    const cached = await readOAuthSettings();
-    if (cached) return cached;
+    const merged = mergeDriveOAuth(await readOAuthMap());
+    if (merged) return merged;
     if (Date.now() - oauthMissAt < 20_000) return null;
     oauthMissAt = Date.now();
     const { invalidateSheet } = await import("@/lib/google/sheets");
     invalidateSheet("SystemSettings");
-    return await readOAuthSettings();
+    return mergeDriveOAuth(await readOAuthMap());
   } catch (err) {
     console.error("[drive] oauth", err);
   }

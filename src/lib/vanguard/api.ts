@@ -1224,7 +1224,7 @@ export const adminAllTeam = createServerFn({ method: "GET" })
 export const adminDriveStatus = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (!sheetsOn()) return { connected: false };
+    if (!sheetsOn()) return { connected: false, configured: false, fromEnv: false };
     const mod = await import("./sheet-backend");
     return mod.adminDriveStatus(context.userId);
   });
