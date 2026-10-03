@@ -74,6 +74,8 @@ function DriveLink() {
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [googleUrl, setGoogleUrl] = useState("");
   const [linked, setLinked] = useState(false);
   const redirect = typeof window === "undefined" ? "" : `${window.location.origin}/google/drive`;
   useEffect(() => {
@@ -84,37 +86,53 @@ function DriveLink() {
     if (hash === "#drive-ok") setNote(ADMIN_UK.admin_vault_ok ?? "");
     if (hash === "#drive-fail") setNote(ADMIN_UK.admin_vault_fail ?? "");
   }, []);
+  function connect() {
+    const id = clientId.replace(/\s+/g, "");
+    const key = secret.replace(/\s+/g, "");
+    if (!id || !key) {
+      setNote("Вставте Client ID і Client secret у два поля вище, потім натисніть ще раз.");
+      return;
+    }
+    setBusy(true);
+    setGoogleUrl("");
+    setNote("Підключаю… Зараз має відкритися Google.");
+    const back = redirect || `${window.location.origin}/google/drive`;
+    void adminSaveDriveClient({ data: { clientId: id, clientSecret: key } })
+      .then(() => adminDriveAuthUrl({ data: { redirectUri: back } }))
+      .then((res) => {
+        if (!res?.url) throw new Error("Немає адреси Google");
+        setGoogleUrl(res.url);
+        window.location.assign(res.url);
+      })
+      .catch((err: unknown) => {
+        setBusy(false);
+        const message = errorMessage(err);
+        setNote(message ? `${t("admin_vault_fail")} ${message}` : t("admin_vault_fail"));
+      });
+  }
   return (
     <section className="glass grid gap-2 p-4">
       <h2 className="display text-2xl">{t("admin_vault")}</h2>
       <p className="text-sm text-mist">{t("admin_vault_help")}</p>
       <p className="text-sm">{linked ? t("admin_vault_on") : t("admin_vault_off")}</p>
       <p className="break-all text-xs text-mist">{t("admin_vault_uri")}: {redirect}</p>
-      <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
-      <input className="field" placeholder="Client secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
+      <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" inputMode="text" />
+      <input className="field" placeholder="Client secret" type="text" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" inputMode="text" />
       <button
         type="button"
         className="btn w-fit"
-        onClick={() => {
-          const id = clientId.trim();
-          const key = secret.trim();
-          if ((id && !key) || (!id && key)) {
-            setNote(t("admin_vault_fail"));
-            return;
-          }
-          setNote("");
-          const save = id && key ? adminSaveDriveClient({ data: { clientId: id, clientSecret: key } }) : Promise.resolve({ ok: true as const });
-          void save
-            .then(() => adminDriveAuthUrl({ data: { redirectUri: redirect } }))
-            .then((res) => {
-              window.location.href = res.url;
-            })
-            .catch(() => setNote(t("admin_vault_fail")));
-        }}
+        disabled={busy}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={connect}
       >
-        {t("admin_vault_go")}
+        {busy ? "Підключаю…" : t("admin_vault_go")}
       </button>
-      {note ? <p className="text-sm text-metal">{note}</p> : null}
+      {googleUrl ? (
+        <a className="btn-solid w-fit" href={googleUrl}>
+          Відкрити Google
+        </a>
+      ) : null}
+      {note ? <p className="text-sm text-paper">{note}</p> : null}
     </section>
   );
 }

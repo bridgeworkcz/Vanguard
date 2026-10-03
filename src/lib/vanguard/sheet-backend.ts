@@ -1293,8 +1293,8 @@ export async function adminDriveStatus(userId: string) {
 
 export async function adminSaveDriveClient(userId: string, data: { clientId: string; clientSecret: string }) {
   await requireAdmin(userId);
-  const clientId = data.clientId.trim();
-  const clientSecret = data.clientSecret.trim();
+  const clientId = data.clientId.replace(/\s+/g, "");
+  const clientSecret = data.clientSecret.replace(/\s+/g, "");
   if (!clientId.includes(".apps.googleusercontent.com") || clientSecret.length < 8) throw new Error("Client");
   await putSetting("drive_oauth_client_id", clientId, userId);
   await putSetting("drive_oauth_client_secret", clientSecret, userId);
