@@ -23,7 +23,7 @@ import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerR
 import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
-import { canCancel, citizenshipBlocked, dueWithinHours, isOverdue, kyivMonth, monthCommission, trancheSplit } from "./ops";
+import { canCancel, citizenshipBlocked, dueWithinHours, kyivMonth, monthCommission, trancheSplit } from "./ops";
 import crypto from "crypto";
 
 const MAX_DATA = 2_600_000;
@@ -361,6 +361,101 @@ async function notify(text: string, audience: "owner" | "staff" = "owner") {
   }
 }
 
+const DOC_LABEL: Record<string, string> = {
+  PASSPORT: "Паспорт",
+  POLICE_CLEARANCE: "Довідка про несудимість",
+  PHOTO: "Фото",
+  EDUCATION: "Освіта",
+  MEDICAL: "Медична довідка",
+  OTHER: "Інший документ",
+  PAYMENT_PROOF: "Підтвердження оплати",
+  FINAL: "Готовий документ",
+};
+
+function ukYes(value: string) {
+  if (value === "yes") return "Так";
+  if (value === "no") return "Ні";
+  return "—";
+}
+
+function ukGender(value: string) {
+  if (value === "f") return "Жіноча";
+  if (value === "m") return "Чоловіча";
+  if (value === "x") return "Інша";
+  return "—";
+}
+
+function ukPace(value: string) {
+  if (value === "EXPRESS") return "Терміново";
+  if (value === "PRIORITY") return "Пріоритет";
+  return "Стандарт";
+}
+
+async function notifyFile(fileName: string, mime: string, buffer: Buffer, caption: string) {
+  try {
+    const map = await settingMap();
+    const chatId = map.telegram_owner_chat || process.env.TELEGRAM_CHAT_ID || "";
+    if (!chatId || !process.env.TELEGRAM_BOT_TOKEN || !buffer.length) return;
+    const { sendSafeTelegramDocument } = await import("@/lib/google/telegram");
+    await sendSafeTelegramDocument({ buffer, fileName: fileName || "file", mime }, caption, { chatId });
+  } catch (err) {
+    console.error("[notice]", err);
+  }
+}
+
+async function notifyFilledApplication(app: ReturnType<typeof appFrom>, questionnaire: Questionnaire, email: string) {
+  const { escapeTelegramHtml } = await import("@/lib/google/telegram");
+  const e = (value: string) => escapeTelegramHtml(value.trim() || "—");
+  const vacancy = (await loadVacancies()).find((item) => item.id === app.vacancyId);
+  const digits = questionnaire.phone.replace(/\D/g, "");
+  const phone = digits ? `<a href="https://wa.me/${digits}">${e(questionnaire.phone)}</a>` : e(questionnaire.phone);
+  const middle = questionnaire.middleNameAbsent ? "немає" : questionnaire.middleName;
+  const lines = [
+    "<b>Нова заявка</b>",
+    `Номер: ${e(app.id)}`,
+    `Ім’я: ${e(clientName(questionnaire))}`,
+    `По батькові: ${e(middle)}`,
+    `Телефон: ${phone}`,
+    `Пошта: ${e(email)}`,
+    `Дата народження: ${e(questionnaire.birthDate)}`,
+    `Стать: ${ukGender(questionnaire.gender)}`,
+    `Громадянство: ${e(questionnaire.citizenship)}`,
+    `Судимість: ${ukYes(questionnaire.criminalRecord)}`,
+    `Попередня віза: ${ukYes(questionnaire.previousVisa)}`,
+    `Подорож: ${questionnaire.travelWithFamily === "family" ? "З родиною" : questionnaire.travelWithFamily === "alone" ? "Сам" : "—"}`,
+    "",
+    `Країна: ${e(app.country)}`,
+    `Вакансія: ${e(vacancy?.title || app.vacancyTitle)}`,
+    `Роботодавець: ${e(vacancy?.employer || app.employer)}`,
+    `Зарплата: ${e(vacancy?.salaryNet || "")}`,
+    `Житло: ${e(vacancy?.accommodation || "")}`,
+    `Графік: ${e(vacancy?.workingHours || "")}`,
+    `Темп: ${ukPace(app.processing)}`,
+    `Вартість: ${e(String(app.totalCost))} EUR`,
+    `Термін: ${e(String(app.productionWeeks || ""))} тижнів`,
+  ];
+  if (vacancy?.requirements) lines.push(`Вимоги: ${e(vacancy.requirements)}`);
+  await notify(lines.join("\n"));
+  const docs = (await readSheetRows("DossierDocuments")).filter((row) => row.dossierId === app.id && row.driveFileId);
+  for (const doc of docs) {
+    try {
+      const stored = doc.driveFileId.startsWith("docs/")
+        ? await downloadPrivateDocument(doc.driveFileId)
+        : await downloadFileFromDrive(doc.driveFileId);
+      const mime = "contentType" in stored ? stored.contentType : stored.mimeType;
+      const label = DOC_LABEL[doc.category] || doc.category || "Документ";
+      await notifyFile(
+        doc.fileName || "file",
+        mime || doc.mime || "application/octet-stream",
+        stored.buffer,
+        `<b>${escapeTelegramHtml(label)}</b>\nЗаявка ${e(app.id)}\n${e(clientName(questionnaire))}`,
+      );
+    } catch (err) {
+      console.error("[notice file]", err);
+    }
+  }
+}
+
 async function restoreQuota(vacancyId: string) {
   const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancyId);
   if (!raw) return;
@@ -640,10 +735,6 @@ async function writeBackup() {
 }
 
 async function writeDigest() {
-  const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
-  const open = apps.filter((app) => app.status === "OPEN");
-  const late = open.filter((app) => isOverdue(app.cancelDeadlineAt) || isOverdue(app.docDeadlineAt));
-  await notify(`Open files: ${open.length}\nOverdue: ${late.length}`);
   await putSetting("last_digest_at", nowIso(), "system");
 }
 
@@ -653,16 +744,10 @@ async function remindDeadlines() {
     if (app.status !== "OPEN") continue;
     let extra = app.extra;
     if (!extra.paymentReminded && dueWithinHours(app.cancelDeadlineAt, 72)) {
-      const phone = app.extra.questionnaire.phone?.replace(/\D/g, "") || "";
-      const wa = phone ? `\nWhatsApp: https://wa.me/${phone}` : "";
-      await notify(`Payment due within 3 days\n${app.id}${wa}`);
       extra = { ...extra, paymentReminded: true };
       await saveApp(app, extra);
     }
     if (!extra.docReminded && dueWithinHours(app.docDeadlineAt, 72)) {
-      const phone = extra.questionnaire.phone?.replace(/\D/g, "") || "";
-      const wa = phone ? `\nWhatsApp: https://wa.me/${phone}` : "";
-      await notify(`Documents due within 3 days\n${app.id}${wa}`, "staff");
       extra = { ...extra, docReminded: true };
       await saveApp(app, extra);
     }
@@ -923,21 +1008,22 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancy.id);
   if (raw) await updateSheetRowById("Vacancies", vacancy.id, vacancyTo({ ...vacancy, quota: Math.max(0, vacancy.quota - 1) }, raw));
   await audit(userId, "APPLICATION_OPENED", id, vacancy.title);
-  await notify(`New application\n${id}\n${product.country}`);
   return { id };
 }
 
 export async function saveQuestionnaire(userId: string, data: { id: string; questionnaire: Questionnaire }) {
-  await profile(userId);
+  const person = await profile(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
   if (!app || app.userId !== userId) throw new Error("Not found");
   if (app.stage !== 1 || app.status !== "OPEN") throw new Error("Locked");
   const questionnaire = { ...parseQuestionnaire("{}"), ...data.questionnaire };
   const error = questionnaireError(questionnaire);
   if (error) return { ok: false as const, error };
+  const firstComplete = !app.profileComplete;
   await saveApp(app, { ...app.extra, questionnaire, profileComplete: true, citizenship: questionnaire.citizenship });
   await writeDossier(userId, app, clientName(questionnaire), questionnaire.citizenship);
   await audit(userId, "QUESTIONNAIRE", app.id, clientName(questionnaire));
+  if (firstComplete) await notifyFilledApplication(app, questionnaire, person.email || app.clientEmail);
   return { ok: true as const };
 }
 
@@ -975,7 +1061,6 @@ async function storeFile(applicationId: string, userId: string, category: string
       mime: safeMime,
     });
     await audit(userId, "UPLOAD", applicationId, category);
-    await notify(`New file\n${applicationId}\n${category}`, "staff");
   } catch (err) {
     console.error("[file] record", err);
   }
@@ -989,7 +1074,19 @@ export async function uploadDoc(userId: string, data: { applicationId: string; c
   if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
   if (!DOC_CATEGORIES.includes(data.category) || data.category === "FINAL") throw new Error("Category");
   if (data.category === "PAYMENT_PROOF" && app.stage !== 2) throw new Error("Locked");
-  return storeFile(app.id, userId, data.category, data.fileName, data.mime, data.data, "UPLOADED");
+  const saved = await storeFile(app.id, userId, data.category, data.fileName, data.mime, data.data, "UPLOADED");
+  const questionnaire = parseQuestionnaire(app.questionnaire);
+  const { escapeTelegramHtml } = await import("@/lib/google/telegram");
+  const label = DOC_LABEL[data.category] || "Документ";
+  const encoded = data.data.split(",")[1] ?? "";
+  const buffer = Buffer.from(encoded, "base64");
+  await notifyFile(
+    data.fileName || "file",
+    normalizeUploadMime(data.mime, data.fileName),
+    buffer,
+    `<b>${escapeTelegramHtml(label)}</b>\nЗаявка ${escapeTelegramHtml(app.id)}\n${escapeTelegramHtml(clientName(questionnaire) || "Клієнт")}`,
+  );
+  return saved;
 }
 
 export async function postMessage(userId: string, data: { applicationId: string; body: string }) {
@@ -1011,7 +1108,6 @@ export async function postMessage(userId: string, data: { applicationId: string;
     createdAt: stamp,
     updatedAt: stamp,
   });
-  await notify(`New message\n${app.id}`, "staff");
 }
 
 export async function downloadDoc(userId: string, id: string) {

@@ -109,6 +109,44 @@ export async function sendSafeTelegramAlert(
   }
 }
 
+export async function sendTelegramDocument(
+  file: { buffer: Buffer; fileName: string; mime: string },
+  caption: string,
+  options: SendTelegramOptions = {},
+): Promise<boolean> {
+  const { botToken, chatId: defaultChatId } = getCredentials();
+  const targetChatId = options.chatId ? options.chatId.trim() : defaultChatId;
+  if (!targetChatId) throw new Error("Telegram Error: Target chatId is missing.");
+  const form = new FormData();
+  form.append("chat_id", targetChatId);
+  const note = caption.trim().slice(0, 1000);
+  if (note) {
+    form.append("caption", note);
+    form.append("parse_mode", "HTML");
+  }
+  const bytes = new Uint8Array(file.buffer);
+  form.append("document", new Blob([bytes], { type: file.mime || "application/octet-stream" }), file.fileName || "file");
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: "POST", body: form });
+  if (!response.ok) throw new Error(`Telegram API responded with HTTP status ${response.status}`);
+  const data = (await response.json()) as { ok: boolean; description?: string };
+  if (!data.ok) throw new Error(`Telegram API Error: ${data.description || "Unknown Telegram API failure"}`);
+  return true;
+}
+
+export async function sendSafeTelegramDocument(
+  file: { buffer: Buffer; fileName: string; mime: string },
+  caption: string,
+  options: SendTelegramOptions = {},
+): Promise<boolean> {
+  try {
+    return await sendTelegramDocument(file, caption, options);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.warn("[Telegram Alert Warning]: Document skipped:", msg);
+    return false;
+  }
+}
+
 let menuReady = false;
 
 /** Point the bot menu button at the admin console. Once per server process. */

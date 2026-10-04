@@ -548,7 +548,6 @@ export function ContactPage() {
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2">
         <div>
           <p className="kicker ember">{t("contact_kicker")}</p>
-          <h1 className="display mt-4 text-5xl">{t("contact_title")}</h1>
         </div>
         <dl className="grid gap-6 text-lg">
           <div>
@@ -583,10 +582,6 @@ export function ContactPage() {
           ) : null}
         </dl>
       </div>
-      <section className="banner banner-blue">
-        <span>03</span>
-        <b>{t("banner_ministry")}</b>
-      </section>
     </Shell>
   );
 }
