@@ -1,4 +1,4 @@
-import { put, get, del, head } from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 
 const MAX_BYTES = 2_500_000;
 
@@ -9,94 +9,68 @@ export type BlobUploadResult = {
   size: number;
 };
 
+function blobToken() {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
+  return token;
+}
+
 /**
- * Upload a private document to Vercel Blob.
- * Returns pathname (store this in DB/Sheets) — never expose the raw url for private blobs.
+ * Upload a private document. Callers must store pathname, never the private url.
  */
 export async function uploadPrivateDocument(
   pathname: string,
   body: Buffer | Blob | ArrayBuffer | string,
   contentType: string,
 ): Promise<BlobUploadResult> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
-  }
-
   const blob = await put(pathname, body, {
     access: "private",
     contentType,
     addRandomSuffix: false,
-    token: process.env.BLOB_READ_WRITE_TOKEN,
+    token: blobToken(),
   });
-
+  const size = typeof body === "string" ? Buffer.byteLength(body) : body instanceof Buffer ? body.length : body instanceof ArrayBuffer ? body.byteLength : 0;
   return {
     pathname: blob.pathname,
     url: blob.url,
     contentType: blob.contentType || contentType,
-    size: typeof body === "string" ? Buffer.byteLength(body) : (body as Buffer).length,
+    size,
   };
 }
 
-/**
- * Download a private document as a Buffer + metadata.
- */
+/** Read a private document into memory. Pathnames start with docs/. */
 export async function downloadPrivateDocument(pathname: string): Promise<{
   buffer: Buffer;
   contentType: string;
   size: number;
 }> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
-  }
-
-  // head first to get metadata, then get the stream
-  const meta = await head(pathname, {
-    token: process.env.BLOB_READ_WRITE_TOKEN,
-  });
-
-  const result = await get(pathname, {
-    access: "private",
-    token: process.env.BLOB_READ_WRITE_TOKEN,
-  });
-
-  if (!result) {
-    throw new Error("Blob not found");
-  }
-
-  // result can be a ReadableStream or similar depending on SDK version
-  const stream = "stream" in result ? result.stream : result;
+  const result = await get(pathname, { access: "private", token: blobToken() });
+  if (!result || result.statusCode !== 200 || !result.stream) throw new Error("Blob not found");
+  const reader = result.stream.getReader();
   const chunks: Uint8Array[] = [];
-  const reader = (stream as ReadableStream).getReader();
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (value) chunks.push(value);
   }
   const buffer = Buffer.concat(chunks);
-
   return {
     buffer,
-    contentType: meta.contentType || "application/octet-stream",
-    size: meta.size || buffer.length,
+    contentType: result.blob.contentType || "application/octet-stream",
+    size: result.blob.size ?? buffer.length,
   };
 }
 
 export async function deletePrivateDocument(pathname: string): Promise<void> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
-  await del(pathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return;
+  await del(pathname, { token });
 }
 
-/** Build a consistent pathname for client documents */
-export function documentPathname(
-  applicationId: string,
-  category: string,
-  fileName: string,
-): string {
-  const safeName = fileName
-    .replace(/[^a-zA-Z0-9._\-\u0400-\u04FF]/g, "_")
-    .slice(0, 120);
-  const stamp = Date.now().toString(36);
-  return `docs/${applicationId}/${category}/${stamp}-${safeName}`;
+/** Stable private pathname for a client document. */
+export function documentPathname(applicationId: string, category: string, fileName: string): string {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._\-\u0400-\u04FF]/g, "_").slice(0, 120) || "file";
+  return `docs/${applicationId}/${category}/${Date.now().toString(36)}-${safeName}`;
 }
 
 export { MAX_BYTES };

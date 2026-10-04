@@ -15,6 +15,17 @@ export const Route = createFileRoute("/files/$kind/$id")({
         const fileId = storedDriveId(kind === "team" ? row.photoUrl : row.imageUrl);
         if (!fileId) return new Response(null, { status: 404 });
         try {
+          if (fileId.startsWith("docs/")) {
+            const { downloadPrivateDocument } = await import("@/lib/blob");
+            const file = await downloadPrivateDocument(fileId);
+            return new Response(new Uint8Array(file.buffer), {
+              headers: {
+                "content-type": file.contentType || "application/octet-stream",
+                "cache-control": "private, max-age=3600",
+                "x-content-type-options": "nosniff",
+              },
+            });
+          }
           const file = await downloadFileFromDrive(fileId);
           return new Response(new Uint8Array(file.buffer), {
             headers: {
