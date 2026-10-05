@@ -803,6 +803,52 @@ async function requireAdmin(userId: string) {
   return person;
 }
 
+function teamName(row: SheetRow) {
+  return (row.fullName || row.name || "").trim();
+}
+
+function teamHidden(row: SheetRow) {
+  const flag = (row.isActive || row.active || "").trim().toLowerCase();
+  return flag === "false" || flag === "0";
+}
+
+function teamPerson(row: SheetRow) {
+  return {
+    id: row.id || teamName(row),
+    fullName: teamName(row),
+    position: (row.position || row.role || "").trim(),
+    phone: (row.contactPhone || row.phone || "").trim(),
+    photoData: siteFileUrl("team", row.id, row.photoUrl || row.photo || ""),
+    sortOrder: Number(row.order) || 0,
+    active: !teamHidden(row),
+  };
+}
+
+async function teamRowsForSite(rows: SheetRow[]) {
+  let current = rows;
+  if (!current.some((row) => teamName(row))) {
+    for (const member of TEAM) {
+      if (current.some((row) => row.id === member.id)) continue;
+      await appendSheetRow("Team", {
+        id: member.id,
+        fullName: member.name,
+        position: member.position,
+        photoUrl: "",
+        contactPhone: member.phone,
+        languages: "[]",
+        bio: "",
+        order: String(member.sort),
+        isActive: "true",
+      });
+    }
+    invalidateSheet("Team");
+    current = await readSheetRows("Team");
+  }
+  const people = current.filter((row) => teamName(row)).map(teamPerson);
+  const visible = people.filter((person) => person.active);
+  return (visible.length ? visible : people).sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
+}
+
 function present(app: ReturnType<typeof appFrom>) {
   const { extra: _extra, row: _row, ...rest } = app;
   return rest;
@@ -899,17 +945,7 @@ async function buildPublicSite() {
     readSheetRows("Gallery"),
     readSheetRows("Applications"),
   ]);
-  const team = teamRows
-    .filter((row) => bool(row.isActive) || row.isActive === "")
-    .map((row) => ({
-      id: row.id,
-      fullName: row.fullName,
-      position: row.position,
-      phone: row.contactPhone,
-      photoData: siteFileUrl("team", row.id, row.photoUrl),
-      sortOrder: Number(row.order) || 0,
-      active: true,
-    }));
+  const team = await teamRowsForSite(teamRows);
   const media = galleryRows.filter((row) => row.isActive === "" || bool(row.isActive)).map(mediaFrom);
   let partners: { id: string; country: string; name: string; sortOrder: number }[] = [];
   try {
