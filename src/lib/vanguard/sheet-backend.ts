@@ -1,5 +1,5 @@
 import { downloadFileFromDrive, resolveVaultFolder, safeDriveRedirect, uploadFileToDrive } from "@/lib/google/drive";
-import { documentPathname, downloadPrivateDocument, uploadPrivateDocument, uploadPublicImage } from "@/lib/blob";
+import { documentPathname, downloadPrivateDocument, uploadPrivateDocument } from "@/lib/blob";
 import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, primeSheetRows, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
@@ -1413,11 +1413,22 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   if (!fullName) throw new Error("Name");
   invalidateSheet("Team");
   const raw = (await readSheetRows("Team")).find((row) => row.id === id);
+  let photoUrl = raw?.photoUrl || "";
+  const photo = data.photoData || "";
+  if (photo) {
+    if (!photo.startsWith("data:image/")) throw new Error("File type");
+    if (photo.length > 400_000) throw new Error("File size");
+    const buffer = Buffer.from(photo.split(",")[1] ?? "", "base64");
+    if (!buffer.length) throw new Error("File type");
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "member";
+    const uploaded = await uploadPrivateDocument(`docs/team/portraits/${safeId}.jpg`, buffer, "image/jpeg", true);
+    photoUrl = `file:${uploaded.pathname}`;
+  }
   const base = {
     id,
     fullName,
     position: data.position.trim(),
-    photoUrl: raw?.photoUrl || "",
+    photoUrl,
     contactPhone: data.phone.trim(),
     languages: raw?.languages || "[]",
     bio: raw?.bio || "",
@@ -1426,23 +1437,6 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   };
   if (raw) await updateSheetRowById("Team", id, base);
   else await appendSheetRow("Team", base);
-  const photo = data.photoData || "";
-  if (photo) {
-    if (!photo.startsWith("data:")) throw new Error("File type");
-    if (photo.length > MAX_DATA) throw new Error("File size");
-    const mime = normalizeUploadMime(photo.slice(5, photo.indexOf(";")) || "image/jpeg", `${id}.jpg`);
-    if (mime !== "image/jpeg" && mime !== "image/png" && mime !== "image/webp") throw new Error("File type");
-    const buffer = Buffer.from(photo.split(",")[1] ?? "", "base64");
-    if (!buffer.length) throw new Error("File type");
-    try {
-      const uploaded = await uploadPublicImage(documentPathname("team", "PHOTO", `${id}.jpg`), buffer, mime);
-      await updateSheetRowById("Team", id, { ...base, photoUrl: uploaded.url });
-    } catch (err) {
-      console.error("[team-photo]", err);
-      dropPublicCache();
-      throw new Error("unsaved");
-    }
-  }
   await audit(userId, "TEAM", id, fullName);
   dropPublicCache();
   return { id };

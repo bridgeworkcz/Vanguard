@@ -21,7 +21,7 @@ export const Route = createFileRoute("/files/$kind/$id")({
         const rows = await readSheetRows(kind === "team" ? "Team" : "Gallery");
         const row = rows.find((item) => item.id === decodeURIComponent(params.id));
         if (!row) return new Response(null, { status: 404 });
-        const stored = kind === "team" ? row.photoUrl || row.photo || "" : row.imageUrl || "";
+        const stored = (kind === "team" ? row.photoUrl || row.photo || "" : row.imageUrl || "").trim();
         if (stored.startsWith("http://") || stored.startsWith("https://")) {
           return new Response(null, { status: 302, headers: { location: stored } });
         }

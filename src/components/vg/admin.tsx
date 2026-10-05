@@ -245,13 +245,13 @@ async function asData(file: File) {
   return { data, mime: file.type, fileName: file.name };
 }
 
-async function photoDataUrl(file: File) {
+async function photoDataUrl(file: File, limit = 900_000) {
   const image = await openImage(await asReadablePhoto(file));
-  let edge = 1400;
-  let quality = 0.8;
+  let edge = 1200;
+  let quality = 0.72;
   let data = "";
   try {
-    for (let attempt = 0; attempt < 7; attempt += 1) {
+    for (let attempt = 0; attempt < 9; attempt += 1) {
       const scale = Math.min(1, edge / Math.max(image.width, image.height));
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.width * scale));
@@ -262,14 +262,14 @@ async function photoDataUrl(file: File) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       image.draw(ctx, canvas.width, canvas.height);
       data = canvas.toDataURL("image/jpeg", quality);
-      if (data.length <= 900_000) return data;
-      quality = Math.max(0.42, quality - 0.1);
-      edge = Math.round(edge * 0.75);
+      if (data.length <= limit) return data;
+      quality = Math.max(0.4, quality - 0.08);
+      edge = Math.max(420, Math.round(edge * 0.72));
     }
   } finally {
     image.close();
   }
-  if (!data || data.length > 1_400_000) throw new Error("File");
+  if (!data || data.length > limit) throw new Error("File");
   return data;
 }
 
@@ -1141,7 +1141,7 @@ function TeamEditor({
     if (!file) return;
     setNote("");
     setErr(t("admin_photo_wait"));
-    void photoDataUrl(file)
+    void photoDataUrl(file, 180_000)
       .then((data) => {
         setPhoto(data);
         setPreview(data);
@@ -1220,7 +1220,7 @@ function TeamEditor({
                 setErr("");
                 setNote("");
                 setErr(t("admin_photo_wait"));
-                void photoDataUrl(file)
+                void photoDataUrl(file, 180_000)
                   .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
                   .then(() => {
                     setErr("");
@@ -1299,7 +1299,7 @@ function ContentEditor({
   function publishPhoto(file: File | undefined, kind: string, id?: string, itemTitle?: string, caption?: string, country?: string) {
     if (!file) return;
     setMediaErr(t("admin_photo_wait"));
-    void photoDataUrl(file)
+    void photoDataUrl(file, 180_000)
       .then((imageData) =>
         adminSaveMedia({
           data: {
@@ -1540,7 +1540,7 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
           label={t("add")}
           onFile={(file) => {
             setErr(t("admin_photo_wait"));
-            void photoDataUrl(file)
+            void photoDataUrl(file, 180_000)
               .then((imageData) => adminSaveMedia({ data: { kind: "vacancy", title: t("admin_vacancy_photo"), caption: "", imageData, vacancyId, cover: shots.length === 0 } }))
               .then(() => {
                 setErr(t("admin_photo_ok"));

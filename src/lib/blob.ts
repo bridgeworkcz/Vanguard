@@ -22,11 +22,13 @@ export async function uploadPrivateDocument(
   pathname: string,
   body: Buffer | Blob | ArrayBuffer | string,
   contentType: string,
+  overwrite = false,
 ): Promise<BlobUploadResult> {
   const blob = await put(pathname, body, {
     access: "private",
     contentType,
     addRandomSuffix: false,
+    allowOverwrite: overwrite,
     token: blobToken(),
   });
   const size = typeof body === "string" ? Buffer.byteLength(body) : body instanceof Buffer ? body.length : body instanceof ArrayBuffer ? body.byteLength : 0;
