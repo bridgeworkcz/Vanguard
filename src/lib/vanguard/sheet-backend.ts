@@ -1211,7 +1211,9 @@ export async function adminOverview(userId: string) {
   const person = await requireStaff(userId);
   const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   const docs = await readSheetRows("DossierDocuments");
-  const users = (await readSheetRows("Users")).map((row) => ({
+  const users = (await readSheetRows("Users"))
+    .filter((row) => row.isActive !== "false")
+    .map((row) => ({
     userId: row.id,
     email: row.email,
     fullName: row.fullName,
@@ -1673,6 +1675,25 @@ export async function adminSetRole(userId: string, data: { userId: string; role:
   const roles = data.role === "ADMIN" ? ["ADMIN"] : data.role === "MANAGER" ? ["MANAGER"] : data.role === "SUBAGENT" ? ["SUBAGENT"] : ["CLIENT"];
   await updateSheetRowById("Users", target.id, { ...target, roles: JSON.stringify(roles) });
   await audit(userId, "ROLE", data.userId, data.role);
+}
+
+export async function adminDeleteAccount(userId: string, targetId: string) {
+  await requireAdmin(userId);
+  if (!targetId || targetId === userId) throw new Error("Self");
+  const rows = await readSheetRows("Users");
+  const target = rows.find((row) => row.id === targetId && row.isActive !== "false");
+  if (!target) throw new Error("Not found");
+  const admins = rows.filter((row) => row.id !== targetId && row.isActive !== "false" && roleOf(rolesOf(row.roles)) === "ADMIN");
+  if (roleOf(rolesOf(target.roles)) === "ADMIN" && admins.length < 1) throw new Error("Last admin");
+  await updateSheetRowById("Users", target.id, {
+    ...target,
+    email: `deleted.${target.id}@invalid.local`,
+    phone: "",
+    passwordHash: "",
+    roles: JSON.stringify(["CLIENT"]),
+    isActive: "false",
+  });
+  await audit(userId, "ACCOUNT_DELETE", target.id, target.email);
 }
 
 export async function adminSetReferrer(userId: string, data: { id: string; referrerUserId: string }) {

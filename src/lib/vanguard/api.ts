@@ -1171,6 +1171,25 @@ export const adminSetRole = createServerFn({ method: "POST" })
     await audit(sql, context.userId, "ROLE", data.userId, data.role);
   });
 
+export const adminDeleteAccount = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string }) => ({ userId: clean(input?.userId, 80) }))
+  .handler(async ({ context, data }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeleteAccount(context.userId, data.userId);
+      return;
+    }
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    if (!data.userId || data.userId === context.userId) throw new Error("Self");
+    const admins = await sql<{ c: number }>`select count(*)::int as c from profiles where role = 'ADMIN' and user_id <> ${data.userId}`;
+    const target = await sql<{ role: string }>`select role from profiles where user_id = ${data.userId}`;
+    if (target[0]?.role === "ADMIN" && Number(admins[0]?.c ?? 0) < 1) throw new Error("Last admin");
+    await sql`delete from profiles where user_id = ${data.userId}`;
+    await audit(sql, context.userId, "ACCOUNT_DELETE", data.userId, "");
+  });
+
 export const adminSetReferrer = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { id: string; referrerUserId: string }) => ({

@@ -8,6 +8,7 @@ import {
   adminCreateApplication,
   adminDeleteMedia,
   adminDeletePartner,
+  adminDeleteAccount,
   adminDeleteTeam,
   adminDeleteVacancy,
   adminGetApplication,
@@ -544,6 +545,25 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                         <option>MANAGER</option>
                         <option>ADMIN</option>
                       </select>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          if (u.userId === deskId) {
+                            setErr(t("admin_delete_self"));
+                            return;
+                          }
+                          if (!window.confirm(t("admin_delete_user_ask"))) return;
+                          void adminDeleteAccount({ data: { userId: u.userId } })
+                            .then(() => adminOverview().then(setOverview))
+                            .catch((e: unknown) => {
+                              const text = e instanceof Error ? e.message : "";
+                              setErr(text === "Last admin" ? t("admin_last_admin") : text === "Self" ? t("admin_delete_self") : t("admin_unsaved"));
+                            });
+                        }}
+                      >
+                        {t("admin_delete_user")}
+                      </button>
                     </li>
                   ))}
                 </ul>

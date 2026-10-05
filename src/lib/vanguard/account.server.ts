@@ -93,9 +93,10 @@ export async function runAccountAuth(data: AccountInput) {
     if (!email.includes("@")) throw new Error("A valid email is required.");
     if (!data.fullName) throw new Error("Full name is required.");
     if (phone.replace(/\D/g, "").length < 7) throw new Error("A valid phone number is required.");
-    if (rows.some((row) => emailOf(row.email) === email)) throw new Error("User with this email already exists.");
-    if (rows.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
-    const hasAdmin = rows.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));
+    const live = rows.filter((row) => row.isActive !== "false");
+    if (live.some((row) => emailOf(row.email) === email)) throw new Error("User with this email already exists.");
+    if (live.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
+    const hasAdmin = live.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));
     const roles = withOwner(email, hasAdmin ? ["CLIENT"] : ["ADMIN"]);
     const now = new Date().toISOString();
     const id = `USR-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
