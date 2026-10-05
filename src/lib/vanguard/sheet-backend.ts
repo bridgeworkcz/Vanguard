@@ -1,5 +1,5 @@
 import { downloadFileFromDrive, resolveVaultFolder, safeDriveRedirect, uploadFileToDrive } from "@/lib/google/drive";
-import { documentPathname, downloadPrivateDocument, uploadPrivateDocument } from "@/lib/blob";
+import { documentPathname, downloadPrivateDocument, uploadPrivateDocument, uploadPublicImage } from "@/lib/blob";
 import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, primeSheetRows, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
@@ -1433,8 +1433,8 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
     const buffer = Buffer.from(photo.split(",")[1] ?? "", "base64");
     if (!buffer.length) throw new Error("File type");
     try {
-      const uploaded = await uploadPrivateDocument(documentPathname("team", "PHOTO", `${id}.jpg`), buffer, mime);
-      await updateSheetRowById("Team", id, { ...base, photoUrl: `file:${uploaded.pathname}` });
+      const uploaded = await uploadPublicImage(documentPathname("team", "PHOTO", `${id}.jpg`), buffer, mime);
+      await updateSheetRowById("Team", id, { ...base, photoUrl: uploaded.url });
     } catch (err) {
       console.error("[team-photo]", err);
       dropPublicCache();

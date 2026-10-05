@@ -504,7 +504,7 @@ export function AboutPage() {
               {m.photoData ? (
                 <img src={m.photoData} alt="" className="aspect-square w-full object-cover" />
               ) : (
-                <div className="grid aspect-square w-full place-items-center bg-ivory text-4xl">{(m.fullName || "?").slice(0, 1)}</div>
+                <div className="grid aspect-square w-full place-items-center bg-ivory text-4xl">{(m.fullName || " ").trim().slice(0, 1)}</div>
               )}
               <p className="mt-3">{m.fullName}</p>
               <p className="text-sm text-mist">{m.position}</p>

@@ -38,6 +38,27 @@ export async function uploadPrivateDocument(
   };
 }
 
+/** A portrait the website shows in public. Store the returned url. */
+export async function uploadPublicImage(
+  pathname: string,
+  body: Buffer | Blob | ArrayBuffer | string,
+  contentType: string,
+): Promise<BlobUploadResult> {
+  const blob = await put(pathname, body, {
+    access: "public",
+    contentType,
+    addRandomSuffix: false,
+    token: blobToken(),
+  });
+  const size = typeof body === "string" ? Buffer.byteLength(body) : body instanceof Buffer ? body.length : body instanceof ArrayBuffer ? body.byteLength : 0;
+  return {
+    pathname: blob.pathname,
+    url: blob.url,
+    contentType: blob.contentType || contentType,
+    size,
+  };
+}
+
 /** Read a private document into memory. Pathnames start with docs/. */
 export async function downloadPrivateDocument(pathname: string): Promise<{
   buffer: Buffer;

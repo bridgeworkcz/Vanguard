@@ -1,7 +1,7 @@
 /** Address the browser can request. Never a Google host. */
 export function siteFileUrl(kind: "team" | "gallery", id: string, stored: string): string {
   if (!stored) return "";
-  if (stored.startsWith("/") || stored.startsWith("data:")) return stored;
+  if (stored.startsWith("/") || stored.startsWith("data:") || stored.startsWith("http://") || stored.startsWith("https://")) return stored;
   const drive = storedDriveId(stored);
   const stamp = drive ? drive.slice(-12) : "0";
   return `/files/${kind}/${encodeURIComponent(id)}?v=${encodeURIComponent(stamp)}`;
