@@ -637,7 +637,17 @@ export function PortalPage({ id }: { id: string }) {
               </form>
             ) : null}
 
-            {app.status === "OPEN" && app.stage === 1 && app.profileComplete ? <p>{t("status_wait")}</p> : null}
+            {app.status === "OPEN" && app.stage === 1 && app.profileComplete ? (
+              <div className="grid gap-3">
+                <p>{t("status_wait")}</p>
+                <p>{t("contact_ask")}</p>
+                {site?.settings.support_phone ? (
+                  <a className="btn-solid w-fit" href={whatsAppHref(site.settings.support_phone)} target="_blank" rel="noopener noreferrer">
+                    WhatsApp · {site.settings.support_phone}
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
             {app.stage === 1 ? <p className="text-sm text-mist">{t("locked_pdf")}</p> : null}
 
             {app.status === "OPEN" && app.stage === 2 ? (

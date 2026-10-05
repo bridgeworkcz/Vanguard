@@ -548,6 +548,12 @@ export function ContactPage() {
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2">
         <div>
           <p className="kicker ember">{t("contact_kicker")}</p>
+          <h1 className="display mt-4 text-5xl">{t("contact_title")}</h1>
+          {s?.support_phone ? (
+            <a className="btn-solid mt-8 inline-flex w-fit" href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
+              WhatsApp · {s.support_phone}
+            </a>
+          ) : null}
         </div>
         <dl className="grid gap-6 text-lg">
           <div>
