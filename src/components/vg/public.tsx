@@ -431,6 +431,8 @@ export function AboutPage() {
   const partners = data?.partners ?? [];
   const countries = Array.from(new Set(partners.map((p) => p.country)));
   const [openCountry, setOpenCountry] = useState<string | null>(null);
+  const [openMember, setOpenMember] = useState<string | null>(null);
+  const team = data?.team ?? [];
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-16">
@@ -501,27 +503,50 @@ export function AboutPage() {
             />
           </div>
         </div>
-        <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {(data?.team ?? []).map((m) => (
-            <li key={m.id}>
-              {m.photoData ? (
-                <img src={m.photoData} alt="" className="aspect-square w-full object-cover" />
-              ) : (
-                <div className="grid aspect-square w-full place-items-center bg-ivory text-4xl">{(m.fullName || " ").trim().slice(0, 1)}</div>
-              )}
-              <p className="mt-3">{m.fullName}</p>
-              <p className="text-sm text-mist">{m.position}</p>
-              <p className="text-sm">
-                {m.phone ? (
-                  <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="ember">
-                    {m.phone}
-                  </a>
-                ) : null}
-              </p>
-            </li>
-          ))}
-        </ul>
       </section>
+      {team.length ? (
+        <section className="border-t border-white/10 px-4 py-12">
+          <div className="mx-auto max-w-6xl">
+            <h2 className="display text-3xl">{t("about_team")}</h2>
+            <p className="mt-3 text-sm text-mist">{t("team_hint")}</p>
+            <div className="mt-6 border-t border-white/10">
+              {team.map((m) => {
+                const open = openMember === m.id;
+                return (
+                  <div key={m.id} className="border-b border-white/10">
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full items-center justify-between gap-4 py-2 text-left text-sm"
+                      aria-expanded={open}
+                      onClick={() => setOpenMember(open ? null : m.id)}
+                    >
+                      <span>{m.fullName}</span>
+                      <span className="ember text-[11px] tracking-[0.14em] uppercase">{open ? "–" : "+"}</span>
+                    </button>
+                    {open ? (
+                      <div className="grid gap-4 pb-4 sm:grid-cols-[9rem_1fr] sm:items-center">
+                        {m.photoData ? (
+                          <img src={m.photoData} alt="" className="aspect-square w-full max-w-[9rem] object-cover" />
+                        ) : (
+                          <div className="grid aspect-square w-full max-w-[9rem] place-items-center bg-ivory text-3xl">{(m.fullName || " ").trim().slice(0, 1)}</div>
+                        )}
+                        <div>
+                          <p className="text-sm text-mist">{m.position}</p>
+                          {m.phone ? (
+                            <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="ember mt-2 inline-block text-sm">
+                              {m.phone}
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      ) : null}
       <LogoStrip />
       <section className="border-t border-white/10 px-4 py-12">
         <div className="mx-auto max-w-6xl">
