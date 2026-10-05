@@ -776,9 +776,10 @@ async function expireUnpaid() {
 }
 
 async function profile(userId: string): Promise<Profile> {
-  await ensureSeed();
-  await housekeeping();
-  await expireUnpaid();
+  const map = await settingMap().catch(() => null);
+  if (!map || map.seed_version !== "2") await ensureSeed();
+  void housekeeping();
+  void expireUnpaid();
   const session = await readSheetSessionUser();
   const rows = await readSheetRows("Users");
   const row = rows.find((item) => item.id === userId);
@@ -850,7 +851,7 @@ function mediaFrom(row: SheetRow) {
 let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
 let filingsCache: { at: number; value: { id: string; citizenship: string; country: string; createdAt: string; status: string; stage: number }[] } | null = null;
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
-const PUBLIC_TTL = 5 * 60 * 1000;
+const PUBLIC_TTL = 60_000;
 
 function dropPublicCache() {
   publicCache = null;
@@ -1369,31 +1370,42 @@ export async function adminDeleteVacancy(userId: string, id: string) {
 
 export async function adminSaveTeam(userId: string, data: { id?: string; fullName: string; position: string; phone: string; photoData: string; active: boolean }) {
   await requireAdmin(userId);
-  const id = data.id || newId("TM");
-  if (!data.fullName) throw new Error("Name");
+  const id = data.id?.trim() || newId("TM");
+  const fullName = data.fullName.trim();
+  if (!fullName) throw new Error("Name");
+  invalidateSheet("Team");
   const raw = (await readSheetRows("Team")).find((row) => row.id === id);
-  let photoUrl = raw?.photoUrl || "";
-  if (data.photoData) {
-    if (!data.photoData.startsWith("data:")) throw new Error("File type");
-    if (data.photoData.length > MAX_DATA) throw new Error("File size");
-    const mime = data.photoData.slice(5, data.photoData.indexOf(";")) || "image/jpeg";
-    const saved = await storeFile("team", userId, "PHOTO", `${id}.jpg`, mime, data.photoData, "APPROVED");
-    photoUrl = `file:${saved.driveFileId}`;
-  }
-  const row = {
+  const base = {
     id,
-    fullName: data.fullName,
-    position: data.position,
-    photoUrl: photoUrl || raw?.photoUrl || "",
-    contactPhone: data.phone,
+    fullName,
+    position: data.position.trim(),
+    photoUrl: raw?.photoUrl || "",
+    contactPhone: data.phone.trim(),
     languages: raw?.languages || "[]",
     bio: raw?.bio || "",
     order: raw?.order || "9",
     isActive: String(data.active !== false),
   };
-  if (raw) await updateSheetRowById("Team", id, row);
-  else await appendSheetRow("Team", row);
-  await audit(userId, "TEAM", id, data.fullName);
+  if (raw) await updateSheetRowById("Team", id, base);
+  else await appendSheetRow("Team", base);
+  const photo = data.photoData || "";
+  if (photo) {
+    if (!photo.startsWith("data:")) throw new Error("File type");
+    if (photo.length > MAX_DATA) throw new Error("File size");
+    const mime = normalizeUploadMime(photo.slice(5, photo.indexOf(";")) || "image/jpeg", `${id}.jpg`);
+    if (mime !== "image/jpeg" && mime !== "image/png" && mime !== "image/webp") throw new Error("File type");
+    const buffer = Buffer.from(photo.split(",")[1] ?? "", "base64");
+    if (!buffer.length) throw new Error("File type");
+    try {
+      const uploaded = await uploadPrivateDocument(documentPathname("team", "PHOTO", `${id}.jpg`), buffer, mime);
+      await updateSheetRowById("Team", id, { ...base, photoUrl: `file:${uploaded.pathname}` });
+    } catch (err) {
+      console.error("[team-photo]", err);
+      dropPublicCache();
+      throw new Error("unsaved");
+    }
+  }
+  await audit(userId, "TEAM", id, fullName);
   dropPublicCache();
   return { id };
 }

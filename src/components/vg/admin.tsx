@@ -1100,8 +1100,10 @@ function TeamEditor({
   const [photoData, setPhoto] = useState("");
   const [preview, setPreview] = useState("");
   const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
   function pickPhoto(file: File | undefined) {
     if (!file) return;
+    setNote("");
     setErr(t("admin_photo_wait"));
     void photoDataUrl(file)
       .then((data) => {
@@ -1115,12 +1117,14 @@ function TeamEditor({
     <div className="mt-8 grid gap-4">
       <p className="text-sm text-mist">{t("admin_live_note")}</p>
       {err ? <p className="text-sm text-metal">{err}</p> : null}
+      {note ? <p className="text-sm text-mist">{note}</p> : null}
       {readOnly ? null : (
       <form
         className="glass grid gap-2 p-4 md:grid-cols-2"
         onSubmit={(e) => {
           e.preventDefault();
           setErr("");
+          setNote("");
           const active = editId ? (team.find((m) => m.id === editId)?.active ?? true) : true;
           void adminSaveTeam({ data: { id: editId, fullName, position, phone, photoData, active } })
             .then(() => {
@@ -1130,9 +1134,13 @@ function TeamEditor({
               setPhone("");
               setPhoto("");
               setPreview("");
+              setNote(t("admin_saved"));
               onChange();
             })
-            .catch((e: unknown) => setErr(photoError(e, t)));
+            .catch((e: unknown) => {
+              setErr(photoError(e, t));
+              onChange();
+            });
         }}
       >
         <input className="field" placeholder={t("name")} value={fullName} onChange={(e) => setName(e.target.value)} />
@@ -1165,6 +1173,7 @@ function TeamEditor({
                 setPhoto("");
                 setPreview(m.photoData);
                 setErr("");
+                setNote("");
               }}
             >
               {t("edit")}
@@ -1172,11 +1181,14 @@ function TeamEditor({
             <PhotoPick
               label={t("admin_replace_photo")}
               onFile={(file) => {
+                setErr("");
+                setNote("");
                 setErr(t("admin_photo_wait"));
                 void photoDataUrl(file)
                   .then((data) => adminSaveTeam({ data: { id: m.id, fullName: m.fullName, position: m.position, phone: m.phone, photoData: data, active: m.active } }))
                   .then(() => {
-                    setErr(t("admin_photo_ok"));
+                    setErr("");
+                    setNote(t("admin_photo_ok"));
                     onChange();
                   })
                   .catch((e: unknown) => setErr(photoError(e, t)));
