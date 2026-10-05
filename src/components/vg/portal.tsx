@@ -15,6 +15,7 @@ import {
   saveQuestionnaire,
   takeInvoiceNumber,
   updateMyContact,
+  changeMyPassword,
   uploadMyDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
@@ -29,7 +30,8 @@ import {
   type DocCategory,
   type Questionnaire,
 } from "@/lib/vanguard/domain";
-import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { useI18n, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
+import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { DocScreen } from "./doc-view";
@@ -174,6 +176,105 @@ function soon(iso: string | null, now: number) {
   return ms <= 3 * 86400000;
 }
 
+function SettingsPanel({
+  contact,
+  setContact,
+  contactMsg,
+  setContactMsg,
+}: {
+  contact: { email: string; phone: string };
+  setContact: (next: { email: string; phone: string }) => void;
+  contactMsg: string;
+  setContactMsg: (next: string) => void;
+}) {
+  const { t, lang, setLang } = useI18n();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [passMsg, setPassMsg] = useState("");
+  const [desk, setDesk] = useState(false);
+  useEffect(() => setDesk(desktopOn()), []);
+  return (
+    <div className="mt-8 grid max-w-xl gap-6">
+      <Link to="/portal" search={{ id: "" }} className="text-sm text-mist">
+        {t("portal_back")}
+      </Link>
+      <h2 className="display text-4xl">{t("settings_title")}</h2>
+      <form
+        className="glass grid gap-3 p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setContactMsg("");
+          void updateMyContact({ data: contact })
+            .then(() => setContactMsg(t("contact_saved")))
+            .catch((e: unknown) => {
+              const text = e instanceof Error ? e.message : "Error";
+              setContactMsg(text === "Locked" ? t("contact_locked") : text);
+            });
+        }}
+      >
+        <p className="text-xs uppercase tracking-widest text-mist">{t("settings_account")}</p>
+        <p className="text-sm text-mist">{t("contact_edit")}</p>
+        <p className="text-xs text-mist">{t("contact_once")}</p>
+        <input className="field" type="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} />
+        <input className="field" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} />
+        <button className="btn w-fit" type="submit">{t("save")}</button>
+        {contactMsg ? <p className="text-sm text-metal">{contactMsg}</p> : null}
+      </form>
+      <form
+        className="glass grid gap-3 p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setPassMsg("");
+          if (next.trim().length < 8) {
+            setPassMsg(t("settings_short"));
+            return;
+          }
+          if (next !== again) {
+            setPassMsg(t("settings_mismatch"));
+            return;
+          }
+          void changeMyPassword({ data: { current, next } })
+            .then(() => {
+              setCurrent("");
+              setNext("");
+              setAgain("");
+              setPassMsg(t("settings_saved"));
+            })
+            .catch((e: unknown) => {
+              const text = e instanceof Error ? e.message : "";
+              setPassMsg(text === "Short" ? t("settings_short") : t("settings_bad"));
+            });
+        }}
+      >
+        <p className="text-xs uppercase tracking-widest text-mist">{t("settings_password")}</p>
+        <input className="field" type="password" autoComplete="current-password" placeholder={t("settings_current")} value={current} onChange={(e) => setCurrent(e.target.value)} />
+        <input className="field" type="password" autoComplete="new-password" placeholder={t("settings_next")} value={next} onChange={(e) => setNext(e.target.value)} />
+        <input className="field" type="password" autoComplete="new-password" placeholder={t("settings_again")} value={again} onChange={(e) => setAgain(e.target.value)} />
+        <button className="btn w-fit" type="submit">{t("save")}</button>
+        {passMsg ? <p className="text-sm text-metal">{passMsg}</p> : null}
+      </form>
+      <div className="glass grid gap-3 p-4">
+        <p className="text-xs uppercase tracking-widest text-mist">{t("settings_lang")}</p>
+        <div className="flex gap-2">
+          {(["en", "cs", "ur"] as Lang[]).map((code) => (
+            <button key={code} type="button" className={lang === code ? "btn-solid" : "btn"} onClick={() => setLang(code)}>
+              {code.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="glass grid gap-3 p-4">
+        <p className="text-xs uppercase tracking-widest text-mist">{t("settings_view")}</p>
+        <p className="text-sm text-mist">{t("view_help")}</p>
+        <button type="button" className="btn w-fit" onClick={() => toggleDesktop()}>
+          {desk ? t("view_phone") : t("view_desktop")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function PortalPage({ id }: { id: string }) {
   const { t, lang } = useI18n();
   const { pending, signedIn, deskId } = useDesk();
@@ -271,7 +372,7 @@ export function PortalPage({ id }: { id: string }) {
   }, [deskId]);
 
   useEffect(() => {
-    if (!signedIn || !id) {
+    if (!signedIn || !id || id === "settings") {
       setDetail(null);
       return;
     }
@@ -498,28 +599,14 @@ export function PortalPage({ id }: { id: string }) {
             </div>
           </section>
         ) : null}
+        {id === "settings" ? (
+          <SettingsPanel contact={contact} setContact={setContact} contactMsg={contactMsg} setContactMsg={setContactMsg} />
+        ) : null}
         {!id ? (
           <div className="mt-8 grid gap-6">
-            <form
-              className="glass grid gap-3 p-4 sm:grid-cols-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                setContactMsg("");
-                void updateMyContact({ data: contact })
-                  .then(() => setContactMsg(t("contact_saved")))
-                  .catch((e: unknown) => {
-                    const text = e instanceof Error ? e.message : "Error";
-                    setContactMsg(text === "Locked" ? t("contact_locked") : text);
-                  });
-              }}
-            >
-              <p className="sm:col-span-3 text-sm text-mist">{t("contact_edit")}</p>
-              <p className="sm:col-span-3 text-xs text-mist">{t("contact_once")}</p>
-              <input className="field" type="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} />
-              <input className="field" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} />
-              <button className="btn" type="submit">{t("save")}</button>
-              {contactMsg ? <p className="sm:col-span-3 text-sm text-metal">{contactMsg}</p> : null}
-            </form>
+            <Link to="/portal" search={{ id: "settings" }} className="btn w-fit">
+              {t("settings_open")}
+            </Link>
           <ul className="grid gap-3">
             {rows && rows.length === 0 ? <li className="text-mist">{t("portal_empty")}</li> : null}
             {rows?.map((row) => (

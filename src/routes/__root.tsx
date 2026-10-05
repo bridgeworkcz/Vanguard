@@ -31,6 +31,11 @@ export const Route = createRootRoute({
     <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("vg-desk")==="1"){var m=document.querySelector('meta[name="viewport"]');if(m)m.setAttribute("content","width=1280")}}catch(e){}`,
+          }}
+        />
       </head>
       <body>
         <PreviewHostBridge />

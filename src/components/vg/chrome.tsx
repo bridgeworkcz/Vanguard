@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { signOut } from "@/lib/auth/client";
 import { accountSession, accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
@@ -8,6 +8,7 @@ import { getPublicSite, getSessionProfile, listMyApplications } from "@/lib/vang
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
 import { useI18n, softenError, type Lang } from "@/lib/vanguard/i18n";
 import { stageTone } from "@/lib/vanguard/ops";
+import { applyDesktop, desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 
 export function Mark({ className = "size-9" }: { className?: string }) {
   return (
@@ -194,8 +195,14 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [role, setRole] = useState<string | null>(roleCache);
   const [signingOut, setSigningOut] = useState(false);
+  const [desk, setDesk] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const gate = typeof window !== "undefined" && hasGateSessionMarker();
+  useLayoutEffect(() => {
+    const on = desktopOn();
+    setDesk(on);
+    applyDesktop(on);
+  }, []);
   useEffect(() => {
     const nav = navRef.current;
     const current = nav?.querySelector<HTMLElement>("[data-active='true']");
@@ -307,6 +314,9 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/contact", t("nav_contact"))}
           {signedIn && role && !staff ? item("/portal", t("nav_portal")) : null}
           {staff ? item("/admin", t("nav_console")) : null}
+          <button type="button" className="min-h-11 shrink-0 text-sm text-mist" onClick={() => toggleDesktop()}>
+            {desk ? t("view_phone") : t("view_desktop")}
+          </button>
         </nav>
       </header>
       <PromoBanner site={site} lang={lang} />

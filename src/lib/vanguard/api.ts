@@ -1390,3 +1390,14 @@ export const updateMyContact = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const changeMyPassword = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { current: string; next: string }) => ({
+    current: String(input?.current ?? "").slice(0, 200),
+    next: String(input?.next ?? "").slice(0, 200),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).changeMyPassword(context.userId, data);
+    throw new Error("Password");
+  });
+

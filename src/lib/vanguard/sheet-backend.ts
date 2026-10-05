@@ -1833,3 +1833,15 @@ export async function updateMyContact(userId: string, data: { email: string; pho
   return { ok: true };
 }
 
+export async function changeMyPassword(userId: string, data: { current: string; next: string }) {
+  const rows = await readSheetRows("Users");
+  const row = rows.find((item) => item.id === userId);
+  if (!row || row.isActive === "false") throw new Error("Not found");
+  const { hashPassword, verifyPassword } = await import("@/lib/google/session");
+  if (!verifyPassword(data.current, row.passwordHash || "")) throw new Error("Password");
+  if (data.next.trim().length < 8) throw new Error("Short");
+  await updateSheetRowById("Users", userId, { ...row, passwordHash: hashPassword(data.next) });
+  await audit(userId, "PASSWORD", userId, "");
+  return { ok: true };
+}
+
