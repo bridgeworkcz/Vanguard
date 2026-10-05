@@ -243,48 +243,36 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   );
   return (
     <div className={`relative z-[1] ${tone === "light" ? "paper min-h-screen" : "min-h-screen text-paper"}`}>
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 pt-3">
-          <Link to="/" className="inline-flex min-h-11 shrink-0 items-center gap-2.5">
-            <Mark className="size-9" />
-            <span className="leading-tight">
-              <span className="wordmark block">{t("brand")}</span>
-              <span className="ember mt-0.5 block text-[8px] tracking-[0.18em] uppercase">{t("brand_sub")}</span>
+      <header className="sticky top-0 z-30 overflow-x-clip border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl min-w-0 items-center gap-2 px-3 pt-3 sm:gap-3 sm:px-4">
+          <Link to="/" className="inline-flex min-h-11 min-w-0 items-center gap-2">
+            <Mark className="size-8 shrink-0 sm:size-9" />
+            <span className="min-w-0 leading-tight">
+              <span className="wordmark block truncate">{t("brand")}</span>
+              <span className="ember mt-0.5 hidden text-[8px] tracking-[0.18em] uppercase sm:block">{t("brand_sub")}</span>
             </span>
           </Link>
-          <div className="ms-auto flex shrink-0 items-center justify-end gap-2">
+          <div className="ms-auto flex min-w-0 items-center justify-end gap-1 sm:gap-2">
             {(["en", "cs", "ur"] as Lang[]).map((code) => (
               <button
                 key={code}
                 type="button"
                 onClick={() => setLang(code)}
-                className={`lang-code min-h-8 rounded-[10px] border border-white/15 px-2 text-[11px] tracking-[0.12em] ${lang === code ? "bg-white/10 text-white" : "text-[#aaa]"}`}
+                className={`lang-code inline-flex h-7 min-w-7 items-center justify-center rounded-[10px] border border-white/15 px-1.5 text-[10px] tracking-[0.08em] sm:h-8 sm:px-2 sm:text-[11px] ${lang === code ? "bg-white/10 text-white" : "text-[#aaa]"}`}
               >
                 {code.toUpperCase()}
               </button>
             ))}
-            {site?.settings.support_phone ? (
-              <a
-                href={whatsAppHref(site.settings.support_phone)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="wa-fab inline-flex min-h-8 items-center rounded-full bg-[#ff6a1a] px-2.5 text-[11px] font-bold text-[#1a0b04] sm:hidden"
-              >
-                {t("wa_label")}
-              </a>
-            ) : site ? null : (
-              <span className="inline-block min-h-8 w-16 sm:hidden" aria-hidden="true" />
-            )}
-            <div className="grid min-h-11 min-w-[6.75rem] place-items-center">
+            <div className="grid min-h-8 min-w-0 place-items-center">
               {!pending && !signedIn ? (
-                <Link to="/login" className="sign-pill">
+                <Link to="/login" className="sign-pill max-w-[5.5rem] truncate sm:max-w-none">
                   {t("nav_sign_in")}
                 </Link>
               ) : null}
               {signedIn && !gate ? (
                 <button
                   type="button"
-                  className={`min-h-11 px-2 text-sm underline-offset-4 hover:underline ${tone === "light" ? "text-ink/70" : "text-mist"}`}
+                  className={`max-w-[5.5rem] truncate px-1 text-xs underline-offset-4 hover:underline sm:max-w-none sm:px-2 sm:text-sm ${tone === "light" ? "text-ink/70" : "text-mist"}`}
                   disabled={signingOut}
                   onClick={() => {
                     setSigningOut(true);
@@ -324,7 +312,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
       <PromoBanner site={site} lang={lang} />
       <CaseNudge signedIn={signedIn} staff={staff} />
       <div className="vg-page">{children}</div>
-      <footer className={`border-t px-4 pb-8 pt-8 sm:pb-24 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
+      <footer className={`border-t px-4 pb-24 pt-8 ${tone === "light" ? "border-ink/10" : "border-white/10"}`}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4">
           <div>
             <p className="latin text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
@@ -338,7 +326,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           href={whatsAppHref(site.settings.support_phone)}
           target="_blank"
           rel="noopener noreferrer"
-          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 hidden min-h-12 items-center rounded-full bg-[#ff6a1a] px-4 text-sm font-bold text-[#1a0b04] shadow-lg sm:inline-flex"
+          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 inline-flex min-h-12 items-center rounded-full bg-[#ff6a1a] px-4 text-sm font-bold text-[#1a0b04] shadow-lg"
         >
           {t("wa_label")}
         </a>
