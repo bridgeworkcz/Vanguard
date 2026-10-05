@@ -480,7 +480,7 @@ export function AboutPage() {
         </div>
       </section>
       <section className="mx-auto max-w-6xl px-4 py-16">
-        <div className="overflow-hidden border border-white/15">
+        <div className="overflow-hidden border border-white/15 bg-[#101114]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
             <p className="text-sm">{s.legal_address}</p>
             <a
@@ -492,13 +492,14 @@ export function AboutPage() {
               {t("map_open")}
             </a>
           </div>
-          <iframe
-            title={s.legal_address || "Praha"}
-            src={`https://maps.google.com/maps?q=${encodeURIComponent(s.legal_address || "Rybná 716/24, Staré Město, 110 00 Praha 1")}&z=16&output=embed`}
-            className="h-[440px] w-full"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
+          <div className="map-night">
+            <iframe
+              title={s.legal_address || "Praha"}
+              src={`https://maps.google.com/maps?q=${encodeURIComponent(s.legal_address || "Rybná 716/24, Staré Město, 110 00 Praha 1")}&z=16&output=embed`}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
         </div>
         <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {(data?.team ?? []).map((m) => (
