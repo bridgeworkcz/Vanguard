@@ -23,39 +23,57 @@ export function Mark({ className = "size-9" }: { className?: string }) {
   );
 }
 
+type PublicSite = Awaited<ReturnType<typeof getPublicSite>>;
+
+let siteCache: PublicSite | null = null;
+let roleCache: string | null = null;
+let sheetCache: boolean | null = null;
+
 export function useSite() {
   const { t } = useI18n();
-  const [data, setData] = useState<Awaited<ReturnType<typeof getPublicSite>> | null>(null);
+  const [data, setData] = useState<PublicSite | null>(siteCache);
   const [error, setError] = useState("");
   const reload = () => {
     setError("");
-    getPublicSite()
-      .then(setData)
-      .catch((e: unknown) => setError(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy"))));
+    return getPublicSite()
+      .then((value) => {
+        siteCache = value;
+        setData(value);
+        return value;
+      })
+      .catch((e: unknown) => {
+        setError(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
+        return null;
+      });
   };
   useEffect(() => {
-    reload();
+    if (siteCache) setData(siteCache);
+    void reload();
   }, []);
   return { data, error, reload };
 }
 
 export function useDesk() {
   const auth = useCurrentUserState();
-  const [sheet, setSheet] = useState<boolean | null>(null);
+  const [sheet, setSheet] = useState<boolean | null>(sheetCache);
   useEffect(() => {
     let live = true;
     accountSession()
       .then((row) => {
-        if (live) setSheet(Boolean(row));
+        if (!live) return;
+        sheetCache = Boolean(row);
+        setSheet(sheetCache);
       })
       .catch(() => {
-        if (live) setSheet(false);
+        if (!live) return;
+        sheetCache = false;
+        setSheet(false);
       });
     return () => {
       live = false;
     };
   }, [auth.user?.id]);
-  const pending = auth.isPending || sheet === null;
+  const pending = sheet === null && !auth.user;
   const signedIn = Boolean(auth.user) || sheet === true;
   return { pending, signedIn, user: auth.user, deskId: auth.user?.id ?? (signedIn ? "sheet" : "") };
 }
@@ -174,7 +192,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const { data: site } = useSite();
   const { user, pending, signedIn, deskId } = useDesk();
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const [role, setRole] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(roleCache);
   const [signingOut, setSigningOut] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const gate = typeof window !== "undefined" && hasGateSessionMarker();
@@ -182,17 +200,29 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
     const nav = navRef.current;
     const current = nav?.querySelector<HTMLElement>("[data-active='true']");
     if (!nav || !current) return;
-    const left = current.offsetLeft - nav.offsetLeft - 16;
-    nav.scrollTo({ left: Math.max(0, left) });
+    const left = current.offsetLeft - 16;
+    const right = current.offsetLeft + current.offsetWidth + 16;
+    const viewLeft = nav.scrollLeft;
+    const viewRight = viewLeft + nav.clientWidth;
+    if (left >= viewLeft && right <= viewRight) return;
+    nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
   }, [path, lang]);
   useEffect(() => {
     if (!signedIn) {
+      roleCache = null;
       setRole(null);
       return;
     }
+    if (roleCache) setRole(roleCache);
     getSessionProfile()
-      .then((p) => setRole(p.role))
-      .catch(() => setRole(null));
+      .then((p) => {
+        roleCache = p.role;
+        setRole(p.role);
+      })
+      .catch(() => {
+        roleCache = null;
+        setRole(null);
+      });
   }, [deskId, signedIn]);
   useEffect(() => {
     const tg = (window as unknown as { Telegram?: { WebApp?: { ready: () => void; expand: () => void; disableVerticalSwipes?: () => void } } }).Telegram?.WebApp;
@@ -222,7 +252,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
               <span className="ember mt-0.5 block text-[8px] tracking-[0.18em] uppercase">{t("brand_sub")}</span>
             </span>
           </Link>
-          <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="ms-auto flex shrink-0 items-center justify-end gap-2">
             {(["en", "cs", "ur"] as Lang[]).map((code) => (
               <button
                 key={code}
@@ -242,38 +272,42 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
               >
                 {t("wa_label")}
               </a>
-            ) : null}
-            {!pending && !signedIn ? (
-              <Link to="/login" className="sign-pill">
-                {t("nav_sign_in")}
-              </Link>
-            ) : null}
-            {signedIn && !gate ? (
-              <button
-                type="button"
-                className={`min-h-11 px-2 text-sm underline-offset-4 hover:underline ${tone === "light" ? "text-ink/70" : "text-mist"}`}
-                disabled={signingOut}
-                onClick={() => {
-                  setSigningOut(true);
-                  try {
-                    sessionStorage.removeItem("grok-auth.bearer-token");
-                  } catch {
-                    /* storage unavailable */
-                  }
-                  const leave = accountSignOut()
-                    .catch(() => undefined)
-                    .then(() => {
-                      if (!user) return;
-                      return signOut();
+            ) : site ? null : (
+              <span className="inline-block min-h-8 w-16 sm:hidden" aria-hidden="true" />
+            )}
+            <div className="grid min-h-11 min-w-[6.75rem] place-items-center">
+              {!pending && !signedIn ? (
+                <Link to="/login" className="sign-pill">
+                  {t("nav_sign_in")}
+                </Link>
+              ) : null}
+              {signedIn && !gate ? (
+                <button
+                  type="button"
+                  className={`min-h-11 px-2 text-sm underline-offset-4 hover:underline ${tone === "light" ? "text-ink/70" : "text-mist"}`}
+                  disabled={signingOut}
+                  onClick={() => {
+                    setSigningOut(true);
+                    try {
+                      sessionStorage.removeItem("grok-auth.bearer-token");
+                    } catch {
+                      /* storage unavailable */
+                    }
+                    const leave = accountSignOut()
+                      .catch(() => undefined)
+                      .then(() => {
+                        if (!user) return;
+                        return signOut();
+                      });
+                    void Promise.race([leave.catch(() => undefined), new Promise((resolve) => window.setTimeout(resolve, 1600))]).then(() => {
+                      window.location.assign("/");
                     });
-                  void Promise.race([leave.catch(() => undefined), new Promise((resolve) => window.setTimeout(resolve, 1600))]).then(() => {
-                    window.location.assign("/");
-                  });
-                }}
-              >
-                {signingOut ? t("signing_out") : t("sign_out")}
-              </button>
-            ) : null}
+                  }}
+                >
+                  {signingOut ? t("signing_out") : t("sign_out")}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
         <nav ref={navRef} className="nav-scroll mx-auto flex max-w-6xl gap-x-4 overflow-x-auto px-4 pb-2 pt-1">
