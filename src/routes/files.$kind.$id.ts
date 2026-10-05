@@ -21,7 +21,7 @@ export const Route = createFileRoute("/files/$kind/$id")({
             return new Response(new Uint8Array(file.buffer), {
               headers: {
                 "content-type": file.contentType || "application/octet-stream",
-                "cache-control": "private, max-age=3600",
+                "cache-control": "public, max-age=86400, s-maxage=86400",
                 "x-content-type-options": "nosniff",
               },
             });
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/files/$kind/$id")({
           return new Response(new Uint8Array(file.buffer), {
             headers: {
               "content-type": file.mimeType || "application/octet-stream",
-              "cache-control": "private, max-age=3600",
+              "cache-control": "public, max-age=86400, s-maxage=86400",
               "x-content-type-options": "nosniff",
             },
           });

@@ -848,14 +848,29 @@ function mediaFrom(row: SheetRow) {
 }
 
 let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
+let filingsCache: { at: number; value: { id: string; citizenship: string; country: string; createdAt: string; status: string; stage: number }[] } | null = null;
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
+const PUBLIC_TTL = 5 * 60 * 1000;
 
 function dropPublicCache() {
   publicCache = null;
+  filingsCache = null;
+}
+
+/** Public pages only need the sheets. Seeding, Drive folders and history stay off this path once the register exists. */
+async function readyForPublicRead() {
+  try {
+    await primeSheetRows(["SystemSettings", "Applications", "Vacancies", "Team", "Gallery", "Pricing"]);
+  } catch (err) {
+    console.error("[sheets] prime", err);
+    if (err instanceof Error && err.message.includes("busy")) throw err;
+  }
+  const map = await settingMap();
+  if (map.seed_version !== "2") await ensureSeed();
 }
 
 export async function publicSite() {
-  if (publicCache && Date.now() - publicCache.at < 30_000) return publicCache.value;
+  if (publicCache && Date.now() - publicCache.at < PUBLIC_TTL) return publicCache.value;
   if (!publicFlight) {
     publicFlight = buildPublicSite()
       .then((value) => {
@@ -874,14 +889,16 @@ export async function publicSite() {
 }
 
 async function buildPublicSite() {
-  await ensureSeed();
-  await ensurePartnerCatalog();
-  await housekeeping();
-  await expireUnpaid();
-  const settings = await settingMap();
-  const products = (await loadProducts()).filter((item) => item.active);
-  const vacancies = (await loadVacancies()).filter((item) => item.active);
-  const team = (await readSheetRows("Team"))
+  await readyForPublicRead();
+  const [settings, products, vacancies, teamRows, galleryRows, filings] = await Promise.all([
+    settingMap(),
+    loadProducts(),
+    loadVacancies(),
+    readSheetRows("Team"),
+    readSheetRows("Gallery"),
+    readSheetRows("Applications"),
+  ]);
+  const team = teamRows
     .filter((row) => bool(row.isActive) || row.isActive === "")
     .map((row) => ({
       id: row.id,
@@ -892,22 +909,27 @@ async function buildPublicSite() {
       sortOrder: Number(row.order) || 0,
       active: true,
     }));
-  const media = (await readSheetRows("Gallery")).filter((row) => row.isActive === "" || bool(row.isActive)).map(mediaFrom);
-  const partners = (await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", [])).map((item) => ({
-    id: item.id,
-    country: item.country,
-    name: item.name,
-    sortOrder: item.sort,
-  }));
-  const filings = await readSheetRows("Applications");
+  const media = galleryRows.filter((row) => row.isActive === "" || bool(row.isActive)).map(mediaFrom);
+  let partners: { id: string; country: string; name: string; sortOrder: number }[] = [];
+  try {
+    const stored = JSON.parse(settings.partners || "[]") as { id: string; country: string; name: string; sort: number }[];
+    if (Array.isArray(stored)) {
+      partners = stored.map((item) => ({ id: item.id, country: item.country, name: item.name, sortOrder: item.sort }));
+    }
+  } catch {
+    partners = [];
+  }
   const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
-  return { settings, products, vacancies, team, media, partners, counts };
+  void housekeeping();
+  void expireUnpaid();
+  return { settings, products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };
 }
 
 export async function listPublicFilings() {
-  await ensureSeed();
+  if (filingsCache && Date.now() - filingsCache.at < PUBLIC_TTL) return filingsCache.value;
+  await readyForPublicRead();
   const apps = await loadApps();
-  return apps
+  const value = apps
     .map((app) => ({
       id: app.id,
       citizenship: app.citizenship || "",
@@ -917,6 +939,8 @@ export async function listPublicFilings() {
       stage: app.stage || 1,
     }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  filingsCache = { at: Date.now(), value };
+  return value;
 }
 
 export async function takeInvoiceNumber(userId: string) {
