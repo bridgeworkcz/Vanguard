@@ -141,6 +141,32 @@ function nextAction(app: AppRow, hasProof: boolean, rejected: boolean, t: (k: Co
   return t("portal_next_docs");
 }
 
+function fileGuide(app: AppRow, docs: { category: string; status: string }[], t: (k: CopyKey) => string) {
+  const papers = docs.filter((doc) => doc.category !== "PAYMENT_PROOF" && doc.category !== "FINAL");
+  const accepted = papers.filter((doc) => doc.status === "APPROVED").length;
+  const rejected = papers.some((doc) => doc.status === "REJECTED");
+  const proof = docs.some((doc) => doc.category === "PAYMENT_PROOF");
+  const needed = DOC_CATEGORIES.filter((cat) => cat !== "PAYMENT_PROOF" && cat !== "FINAL" && cat !== "OTHER");
+  const missing = needed.filter((cat) => !papers.some((doc) => doc.category === cat)).map((cat) => t(`cat_${cat}`));
+  if (app.status === "ISSUED") return { done: t("guide_done_issued"), miss: t("guide_none"), when: t("guide_when_issued") };
+  if (app.status === "CANCELLED" || app.status === "REJECTED") {
+    return { done: app.profileComplete ? t("guide_done_q") : t("guide_none"), miss: t("guide_none"), when: t("guide_when_closed") };
+  }
+  if (!app.profileComplete) return { done: t("guide_none"), miss: t("guide_miss_q"), when: t("guide_when_1") };
+  const done = [t("guide_done_q")];
+  if (app.stage >= 2) done.push(t("guide_done_accept"));
+  if (proof || app.stage > 2) done.push(t("guide_done_pay"));
+  if (accepted) done.push(`${accepted} ${t("guide_done_papers")}`);
+  const miss: string[] = [];
+  if (app.stage === 1) miss.push(t("guide_miss_accept"));
+  if (app.stage === 2 && !proof) miss.push(t("guide_miss_pay"));
+  if (app.stage >= 2 && app.stage < 4 && missing.length) miss.push(`${t("guide_miss_papers")}: ${missing.join(", ")}`);
+  if (rejected) miss.push(t("guide_miss_replace"));
+  if (app.stage >= 4) miss.push(t("guide_miss_final"));
+  const when = app.stage <= 1 ? t("guide_when_1") : app.stage === 2 && !proof ? t("guide_when_2") : app.stage >= 4 ? t("guide_when_4") : t("guide_when_3");
+  return { done: done.join(" "), miss: miss.length ? miss.join(" ") : t("guide_none"), when };
+}
+
 function soon(iso: string | null, now: number) {
   if (!iso) return false;
   const ms = new Date(iso).getTime() - now;
@@ -554,6 +580,26 @@ export function PortalPage({ id }: { id: string }) {
                   );
                 })}
               </ol>
+              {(() => {
+                const guide = fileGuide(app, detail?.documents ?? [], t);
+                return (
+                  <section className="mt-5 grid gap-4 border border-white/15 p-4 sm:grid-cols-3">
+                    <h3 className="display text-xl sm:col-span-3">{t("guide_title")}</h3>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-mist">{t("guide_done")}</p>
+                      <p className="mt-2 text-sm">{guide.done}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-mist">{t("guide_miss")}</p>
+                      <p className="mt-2 text-sm">{guide.miss}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-mist">{t("guide_when")}</p>
+                      <p className="mt-2 text-sm">{guide.when}</p>
+                    </div>
+                  </section>
+                );
+              })()}
               {app.status === "REJECTED" && app.rejectionReason ? <p className="mt-2">{app.rejectionReason}</p> : null}
               {app.status === "REJECTED" ? (
                 <button

@@ -273,7 +273,8 @@ export function SearchPage({
                   <div className="md:col-span-2">
                     <h2 className="display text-3xl">{job.title}</h2>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
-                    <p className="mt-2 text-sm text-mist">{t("search_wait")}</p>
+                    <p className="mt-2 text-sm text-mist">{visa.country} · {visa.duration}</p>
+                    <p className="mt-1 text-sm text-mist">{t("search_wait")}</p>
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
                   <div>
@@ -307,6 +308,7 @@ export function SearchPage({
                       {job.title}
                     </Link>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
+                    <p className="mt-2 text-sm">{visa.country} · {visa.duration}</p>
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
                   <p className="text-sm text-metal">
@@ -649,7 +651,8 @@ export function CountryPage({ code }: { code: string }) {
             <li key={job.id} className="border-t border-white/10 py-3">
               <p className="display text-2xl">{job.title}</p>
               <p className="text-sm text-mist">{job.employer}</p>
-              <p className="mt-2 text-sm ember">{job.salaryNet}</p>
+              <p className="mt-2 text-sm">{country} · {products.find((item) => item.id === job.visaProductId)?.duration}</p>
+              <p className="mt-1 text-sm ember">{job.salaryNet}</p>
               <p className="text-sm">{job.workingHours}</p>
               <p className="text-sm text-mist">{job.accommodation}</p>
               <p className="mt-1 text-sm text-mist">{job.quota > 0 ? `${job.quota} ${t("search_quota")}` : t("search_wait")}</p>
