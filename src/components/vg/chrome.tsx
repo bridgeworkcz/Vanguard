@@ -43,8 +43,8 @@ export function useSite() {
         return value;
       })
       .catch((e: unknown) => {
-        setError(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
-        return null;
+        if (!siteCache) setError(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
+        return siteCache;
       });
   };
   useEffect(() => {

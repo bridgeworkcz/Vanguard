@@ -62,13 +62,19 @@ const enc = (v: string) => encodeURIComponent(v);
 
 export const SHEETS_BUSY = "The register is busy. Reload in a minute.";
 
+let pauseUntil = 0;
+
 function sheetFail(status: number, body: string): Error {
   console.error(`[sheets] ${status} ${body.slice(0, 400)}`);
-  if (status === 429 || status === 503) return new Error(SHEETS_BUSY);
+  if (status === 429 || status === 503) {
+    pauseUntil = Date.now() + 30_000;
+    return new Error(SHEETS_BUSY);
+  }
   return new Error("The register is unavailable.");
 }
 
 async function sheetsFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (Date.now() < pauseUntil && !options.method) throw new Error(SHEETS_BUSY);
   const token = await accessToken();
   const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId()}${path}`, {
     ...options,
@@ -84,7 +90,7 @@ async function metadata(): Promise<{ sheets?: { properties?: { title?: string } 
 }
 
 const TITLE_TTL = 10 * 60 * 1000;
-const ROW_TTL = 45_000;
+const ROW_TTL = 3 * 60 * 1000;
 let titleCache: { at: number; titles: Set<string> } | null = null;
 const headerCache = new Map<string, string[]>();
 const rowCache = new Map<string, { at: number; rows: SheetRow[] }>();
@@ -161,17 +167,20 @@ export async function readSheetRows(name: string): Promise<SheetRow[]> {
   const flight = rowFlight.get(name);
   if (flight) return flight;
   const job = (async () => {
-    try {
-      const schema = await ensureSchema(name);
-      const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(schema.length)}`);
-      const rows = rowsFrom(schema, result.values || []);
-      rowCache.set(name, { at: Date.now(), rows });
-      return rows;
-    } catch (err) {
-      if (hit) return hit.rows;
-      throw err;
-    }
-  })();
+    const schema = SHEET_SCHEMAS[name];
+    if (!schema) throw new Error(`Unknown sheet schema: ${name}`);
+    const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(schema.length)}`);
+    const values = result.values || [];
+    const header = (values[0] || []).map(String);
+    const rows = values.length ? rowsFrom(header.length ? header : [...schema], values) : [];
+    rowCache.set(name, { at: Date.now(), rows });
+    return rows;
+  })().catch((err) => {
+    if (hit) return hit.rows;
+    const stale = rowCache.get(name);
+    if (stale) return stale.rows;
+    throw err;
+  });
   rowFlight.set(name, job);
   try {
     return await job;
@@ -188,11 +197,13 @@ export async function primeSheetRows(names: string[]): Promise<void> {
   });
   if (!need.length) return;
   const job = (async () => {
-    const schemas = await Promise.all(need.map((name) => ensureSchema(name)));
-    const grids = await batchValues(need.map((name, index) => `${name}!A:${col(schemas[index].length)}`));
+    const grids = await batchValues(need.map((name) => `${name}!A:${col((SHEET_SCHEMAS[name] || []).length || 1)}`));
     const out = new Map<string, SheetRow[]>();
     need.forEach((name, index) => {
-      const rows = rowsFrom(schemas[index], grids[index] || []);
+      const values = grids[index] || [];
+      const header = (values[0] || []).map(String);
+      const schema = SHEET_SCHEMAS[name] || [];
+      const rows = values.length ? rowsFrom(header.length ? header : [...schema], values) : [];
       rowCache.set(name, { at: Date.now(), rows });
       out.set(name, rows);
     });

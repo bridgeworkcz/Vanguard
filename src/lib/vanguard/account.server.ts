@@ -67,10 +67,24 @@ export async function readSheetSessionToken(token: string | null | undefined) {
   const session = verifySessionToken(token);
   if (!session) return null;
   const { readSheetRows } = await import("@/lib/google/sheets");
-  const rows = await readSheetRows("Users");
-  const row = rows.find((item) => item.id === session.userId);
-  if (!row || row.isActive === "false") return null;
-  return publicUser(row);
+  try {
+    const rows = await readSheetRows("Users");
+    const row = rows.find((item) => item.id === session.userId);
+    if (!row || row.isActive === "false") return null;
+    return publicUser(row);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (!/busy|unavailable|429/i.test(message)) throw err;
+    const roles = withOwner(session.email, session.roles);
+    return {
+      id: session.userId,
+      email: session.email,
+      phone: "",
+      fullName: session.email,
+      roles,
+      role: roles.includes("ADMIN") ? "ADMIN" : roles.includes("MANAGER") ? "MANAGER" : roles.includes("SUBAGENT") ? "SUBAGENT" : "CLIENT",
+    } as ReturnType<typeof publicUser>;
+  }
 }
 
 export async function readSheetSessionUser() {

@@ -710,7 +710,7 @@ async function housekeeping() {
     if (now - Date.parse(map.last_digest_at || "0") > 20 * 3600 * 1000) await writeDigest();
     await remindDeadlines();
   } catch (err) {
-    housekeepingAt = 0;
+    housekeepingAt = Date.now();
     console.error("[housekeeping]", err);
   }
 }
@@ -758,7 +758,7 @@ let expireAt = 0;
 
 async function expireUnpaid() {
   const now = Date.now();
-  if (now - expireAt < 60_000) return;
+  if (now - expireAt < 10 * 60 * 1000) return;
   expireAt = now;
   try {
     const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
@@ -897,42 +897,77 @@ function mediaFrom(row: SheetRow) {
 let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
 let filingsCache: { at: number; value: { id: string; citizenship: string; country: string; createdAt: string; status: string; stage: number }[] } | null = null;
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
-const PUBLIC_TTL = 60_000;
+const PUBLIC_TTL = 90_000;
+const SNAP_PATH = "cache/public-site.json";
 
 function dropPublicCache() {
-  publicCache = null;
+  if (publicCache) publicCache = { at: 0, value: publicCache.value };
   filingsCache = null;
+  void refreshPublic();
 }
 
-/** Public pages only need the sheets. Seeding, Drive folders and history stay off this path once the register exists. */
+async function readSnap() {
+  try {
+    const { downloadPrivateDocument } = await import("@/lib/blob");
+    const file = await downloadPrivateDocument(SNAP_PATH);
+    const parsed = JSON.parse(file.buffer.toString("utf8")) as { at?: number; value?: Awaited<ReturnType<typeof buildPublicSite>> };
+    if (!parsed?.value || typeof parsed.at !== "number") return null;
+    return { at: parsed.at, value: parsed.value };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSnap(value: Awaited<ReturnType<typeof buildPublicSite>>) {
+  try {
+    const { uploadPrivateDocument } = await import("@/lib/blob");
+    await uploadPrivateDocument(SNAP_PATH, JSON.stringify({ at: Date.now(), value }), "application/json", true);
+  } catch (err) {
+    console.error("[site-cache]", err);
+  }
+}
+
+function refreshPublic() {
+  if (publicFlight) return publicFlight;
+  publicFlight = buildPublicSite()
+    .then((value) => {
+      publicCache = { at: Date.now(), value };
+      void writeSnap(value);
+      return value;
+    })
+    .catch((err) => {
+      if (publicCache) return publicCache.value;
+      throw err;
+    })
+    .finally(() => {
+      publicFlight = null;
+    });
+  return publicFlight;
+}
+
+/** A saved copy is served while the table is busy. The table is read about once a minute. */
 async function readyForPublicRead() {
   try {
     await primeSheetRows(["SystemSettings", "Applications", "Vacancies", "Team", "Gallery", "Pricing"]);
   } catch (err) {
     console.error("[sheets] prime", err);
-    if (err instanceof Error && err.message.includes("busy")) throw err;
+    if (err instanceof Error && err.message.includes("busy") && !publicCache) throw err;
   }
-  const map = await settingMap();
-  if (map.seed_version !== "2") await ensureSeed();
+  const map = await settingMap().catch(() => null);
+  if (map && map.seed_version !== "2") await ensureSeed();
 }
 
 export async function publicSite() {
   if (publicCache && Date.now() - publicCache.at < PUBLIC_TTL) return publicCache.value;
-  if (!publicFlight) {
-    publicFlight = buildPublicSite()
-      .then((value) => {
-        publicCache = { at: Date.now(), value };
-        return value;
-      })
-      .catch((err) => {
-        if (publicCache) return publicCache.value;
-        throw err;
-      })
-      .finally(() => {
-        publicFlight = null;
-      });
+  if (!publicCache) {
+    const snap = await readSnap();
+    if (snap) publicCache = snap;
   }
-  return publicFlight;
+  if (publicCache) {
+    if (Date.now() - publicCache.at >= PUBLIC_TTL) void refreshPublic();
+    return publicCache.value;
+  }
+  return refreshPublic();
 }
 
 async function buildPublicSite() {
@@ -957,27 +992,30 @@ async function buildPublicSite() {
     partners = [];
   }
   const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
-  void housekeeping();
-  void expireUnpaid();
   return { settings, products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };
 }
 
 export async function listPublicFilings() {
   if (filingsCache && Date.now() - filingsCache.at < PUBLIC_TTL) return filingsCache.value;
-  await readyForPublicRead();
-  const apps = await loadApps();
-  const value = apps
-    .map((app) => ({
-      id: app.id,
-      citizenship: app.citizenship || "",
-      country: app.country || "",
-      createdAt: app.createdAt || "",
-      status: app.status || "OPEN",
-      stage: app.stage || 1,
-    }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  filingsCache = { at: Date.now(), value };
-  return value;
+  try {
+    await readyForPublicRead();
+    const apps = await loadApps();
+    const value = apps
+      .map((app) => ({
+        id: app.id,
+        citizenship: app.citizenship || "",
+        country: app.country || "",
+        createdAt: app.createdAt || "",
+        status: app.status || "OPEN",
+        stage: app.stage || 1,
+      }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    filingsCache = { at: Date.now(), value };
+    return value;
+  } catch (err) {
+    if (filingsCache) return filingsCache.value;
+    throw err;
+  }
 }
 
 export async function takeInvoiceNumber(userId: string) {
