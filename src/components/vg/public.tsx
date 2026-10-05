@@ -424,7 +424,7 @@ export function AboutPage() {
   const s = data?.settings ?? {};
   const lead = s[storyKey(lang, "about_lead")] || s.about_lead_en;
   const story = s[storyKey(lang, "about_story")] || s.about_story_en;
-  const office = data?.media.filter((m) => m.kind === "office") ?? [];
+  const office = data?.media.filter((m) => m.kind === "office" && m.active !== false) ?? [];
   const licenses = data?.media.filter((m) => m.kind === "license") ?? [];
   const partners = data?.partners ?? [];
   const countries = Array.from(new Set(partners.map((p) => p.country)));
@@ -442,15 +442,7 @@ export function AboutPage() {
       </section>
       <section className="mx-auto max-w-6xl px-4 py-16">
         <h2 className="display text-4xl">{t("about_office")}</h2>
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <figure>
-            <img src="/media/office-rybna-front.jpg" alt="The office on Rybná, from the street" className="aspect-[3/2] w-full object-cover" />
-            <figcaption className="mt-2 text-sm text-mist">Rybná 24. From the street.</figcaption>
-          </figure>
-          <figure>
-            <img src="/media/office-rybna-corner.jpg" alt="The same office, the entrance" className="aspect-[3/2] w-full object-cover" />
-            <figcaption className="mt-2 text-sm text-mist">The same house. The entrance.</figcaption>
-          </figure>
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
           {office.map((m) => (
             <figure key={m.id}>
               <img src={m.imageData} alt={m.title} className="aspect-[4/3] w-full object-cover" />
