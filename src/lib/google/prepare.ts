@@ -5,17 +5,24 @@ export type WorkspacePrep = { sheets: SheetPrep[]; folders: string[] };
 
 let pending: Promise<WorkspacePrep> | null = null;
 let cooldownUntil = 0;
+let ready: WorkspacePrep | null = null;
 
-/** Create missing spreadsheet tabs and Drive folders. Safe to call on every cold start. */
+/** Create missing spreadsheet tabs once per server process. A busy minute must not lock sign-in. */
 export function prepareGoogle(): Promise<WorkspacePrep> {
+  if (ready) return Promise.resolve(ready);
   if (pending) return pending;
-  if (Date.now() < cooldownUntil) return Promise.reject(new Error("The register is busy. Reload in a minute."));
-  pending = run().catch((err) => {
-    pending = null;
-    const message = err instanceof Error ? err.message : "";
-    if (message.includes("busy") || message.includes("429")) cooldownUntil = Date.now() + 60_000;
-    throw err;
-  });
+  if (Date.now() < cooldownUntil) return Promise.resolve({ sheets: [], folders: [] });
+  pending = run()
+    .then((value) => {
+      ready = value;
+      return value;
+    })
+    .catch((err) => {
+      pending = null;
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("busy") || message.includes("429")) cooldownUntil = Date.now() + 60_000;
+      throw err;
+    });
   return pending;
 }
 
