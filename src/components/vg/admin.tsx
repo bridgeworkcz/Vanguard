@@ -10,9 +10,6 @@ import {
   adminDeletePartner,
   adminDeleteTeam,
   adminDeleteVacancy,
-  adminDriveAuthUrl,
-  adminDriveStatus,
-  adminSaveDriveClient,
   adminGetApplication,
   adminListApplications,
   adminOverview,
@@ -67,103 +64,6 @@ function stageFail(message: string, t: (key: CopyKey) => string) {
 
 function useAdminT() {
   return (key: CopyKey) => ADMIN_UK[key] ?? key;
-}
-
-function DriveLink() {
-  const t = useAdminT();
-  const [clientId, setClientId] = useState("");
-  const [secret, setSecret] = useState("");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [googleUrl, setGoogleUrl] = useState("");
-  const [linked, setLinked] = useState(false);
-  const [configured, setConfigured] = useState(false);
-  const [fromEnv, setFromEnv] = useState(false);
-  const redirect = typeof window === "undefined" ? "" : `${window.location.origin}/google/drive`;
-  useEffect(() => {
-    void adminDriveStatus()
-      .then((status) => {
-        setLinked(Boolean(status.connected));
-        setConfigured(Boolean(status.configured));
-        setFromEnv(Boolean(status.fromEnv));
-      })
-      .catch(() => {
-        setLinked(false);
-        setConfigured(false);
-        setFromEnv(false);
-      });
-    const hash = typeof window === "undefined" ? "" : window.location.hash;
-    if (hash === "#drive-ok") setNote(ADMIN_UK.admin_vault_ok ?? "");
-    if (hash.startsWith("#drive-fail")) {
-      const why = hash.slice("#drive-fail".length).replace(/^-/, "");
-      const text =
-        why === "secret"
-          ? "Google не прийняв Client secret. Відкрийте цей клієнт у Google Cloud, натисніть Add secret, скопіюйте новий рядок значком копіювання і вставте його сюди."
-          : why === "redirect"
-            ? "У Google в Redirect URI має бути рівно адреса, яка написана вище."
-            : why === "session"
-              ? "Сайт не побачив, що ви увійшли як адмін. Вийдіть, увійдіть знову і натисніть підключення."
-              : why === "state"
-                ? "Зв’язок із Google обірвався. Натисніть підключення ще раз і не закривайте цю вкладку."
-                : ADMIN_UK.admin_vault_fail ?? "";
-      setNote(text);
-    }
-  }, []);
-  function connect() {
-    const id = clientId.replace(/\s+/g, "");
-    const key = secret.replace(/\s+/g, "");
-    const canSkipPaste = fromEnv || (configured && !id && !key);
-    if (!canSkipPaste && (!id || !key)) {
-      setNote("Вставте Client ID і Client secret у два поля вище, потім натисніть ще раз.");
-      return;
-    }
-    setBusy(true);
-    setGoogleUrl("");
-    setNote("Підключаю… Зараз має відкритися Google.");
-    const back = redirect || `${window.location.origin}/google/drive`;
-    const ready = canSkipPaste ? Promise.resolve() : adminSaveDriveClient({ data: { clientId: id, clientSecret: key } });
-    void ready
-      .then(() => adminDriveAuthUrl({ data: { redirectUri: back } }))
-      .then((res) => {
-        if (!res?.url) throw new Error("Немає адреси Google");
-        setGoogleUrl(res.url);
-        window.location.assign(res.url);
-      })
-      .catch((err: unknown) => {
-        setBusy(false);
-        const message = errorMessage(err);
-        setNote(message ? `${t("admin_vault_fail")} ${message}` : t("admin_vault_fail"));
-      });
-  }
-  return (
-    <section id="vault" className="glass mt-8 grid gap-3 border border-paper/25 p-5">
-      <h2 className="display text-2xl">{t("admin_vault")}</h2>
-      <p className="text-sm text-mist">{fromEnv ? t("admin_vault_help_ready") : t("admin_vault_help")}</p>
-      <p className="text-sm">{linked ? t("admin_vault_on") : t("admin_vault_off")}</p>
-      <p className="break-all text-xs text-mist">{t("admin_vault_uri")}: {redirect}</p>
-      {fromEnv ? null : (
-        <>
-          <input className="field" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" inputMode="text" />
-          <input className="field" placeholder="Client secret" type="text" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" inputMode="text" />
-        </>
-      )}
-      <button
-        type="button"
-        className="btn-solid w-fit"
-        disabled={busy}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={connect}
-      >
-        {busy ? "Підключаю…" : linked ? t("admin_vault_again") : t("admin_vault_go")}
-      </button>
-      {googleUrl ? (
-        <a className="btn w-fit" href={googleUrl}>
-          Відкрити Google
-        </a>
-      ) : null}
-      {note ? <p className="text-sm text-paper">{note}</p> : null}
-    </section>
-  );
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -1074,8 +974,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             }}
           />
         ) : null}
-
-        {current === "content" && isAdmin ? <DriveLink /> : null}
 
         {current === "content" && staff && data ? (
           <div className="mt-8 grid gap-4">
