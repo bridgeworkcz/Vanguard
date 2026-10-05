@@ -245,7 +245,7 @@ async function asData(file: File) {
 }
 
 async function photoDataUrl(file: File) {
-  const image = await openImage(file);
+  const image = await openImage(await asReadablePhoto(file));
   let edge = 1400;
   let quality = 0.8;
   let data = "";
@@ -270,6 +270,24 @@ async function photoDataUrl(file: File) {
   }
   if (!data || data.length > 1_400_000) throw new Error("File");
   return data;
+}
+
+async function asReadablePhoto(file: File) {
+  try {
+    const probe = await openImage(file);
+    probe.close();
+    return file;
+  } catch {
+    const convert = (await import("heic2any")).default;
+    try {
+      const result = await convert({ blob: file, toType: "image/jpeg", quality: 0.86 });
+      const blob = Array.isArray(result) ? result[0] : result;
+      if (!blob) throw new Error("File");
+      return new File([blob], "photo.jpg", { type: "image/jpeg" });
+    } catch {
+      throw new Error("heic");
+    }
+  }
 }
 
 function openImage(file: File): Promise<{ width: number; height: number; draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void; close: () => void }> {
@@ -298,9 +316,7 @@ function openImage(file: File): Promise<{ width: number; height: number; draw: (
         };
       } catch {
         URL.revokeObjectURL(url);
-        const name = `${file.name} ${file.type}`.toLowerCase();
-        if (name.includes("heic") || name.includes("heif")) throw new Error("heic");
-        throw new Error("File");
+        throw new Error("decode");
       }
     });
 }
@@ -312,7 +328,7 @@ function PhotoPick({ label, onFile }: { label: string; onFile: (file: File) => v
       <input
         className="absolute inset-0 z-10 size-full cursor-pointer opacity-0"
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.avif,.jfif"
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";

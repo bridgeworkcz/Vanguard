@@ -93,7 +93,7 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   admin_unsaved: "Не збережено. Спробуйте ще раз.",
   admin_drive: "Google Drive не прийняв фото. Папка сховища має бути відкрита для облікового запису практики як редактор.",
   admin_photo_wait: "Завантажую фото…",
-  admin_photo_heic: "Телефон віддав фото у форматі HEIC. Браузер його не читає. Збережіть як JPEG і спробуйте ще раз.",
+  admin_photo_heic: "Цей файл не вдалося відкрити як фото. Підійде JPEG, PNG, WEBP, GIF, HEIC з айфона.",
   admin_photo_ok: "Фото збережено.",
   admin_partner: "Назва роботодавця",
   admin_show_all: "Показати незавершені",
