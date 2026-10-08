@@ -1045,7 +1045,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site.json";
+const SNAP_PATH = "cache/public-site-v3.json";
+const SNAP_GEN = 3;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -1057,8 +1058,8 @@ async function readSnap() {
   try {
     const { downloadPrivateDocument } = await import("@/lib/blob");
     const file = await downloadPrivateDocument(SNAP_PATH);
-    const parsed = JSON.parse(file.buffer.toString("utf8")) as { at?: number; value?: Awaited<ReturnType<typeof buildPublicSite>> };
-    if (!parsed?.value || typeof parsed.at !== "number") return null;
+    const parsed = JSON.parse(file.buffer.toString("utf8")) as { at?: number; gen?: number; value?: Awaited<ReturnType<typeof buildPublicSite>> };
+    if (!parsed?.value || typeof parsed.at !== "number" || parsed.gen !== SNAP_GEN) return null;
     return { at: parsed.at, value: parsed.value };
   } catch {
     return null;
@@ -1068,7 +1069,7 @@ async function readSnap() {
 async function writeSnap(value: Awaited<ReturnType<typeof buildPublicSite>>) {
   try {
     const { uploadPrivateDocument } = await import("@/lib/blob");
-    await uploadPrivateDocument(SNAP_PATH, JSON.stringify({ at: Date.now(), value }), "application/json", true);
+    await uploadPrivateDocument(SNAP_PATH, JSON.stringify({ at: Date.now(), gen: SNAP_GEN, value }), "application/json", true);
   } catch (err) {
     console.error("[site-cache]", err);
   }
