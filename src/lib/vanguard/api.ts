@@ -24,6 +24,8 @@ import {
   type VisaProduct,
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { limited } from "./guard";
+import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { canCancel, citizenshipBlocked, kyivMonth, monthCommission } from "./ops";
 
 type Profile = {
@@ -318,7 +320,7 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
   const counts = await sql<{ filed: number; issued: number }>`select count(*)::int as filed,
     coalesce(sum(case when status = 'ISSUED' then 1 else 0 end), 0)::int as issued from applications`;
   return {
-    settings: settingMap(settingsRows),
+    settings: toPublicSettings(settingMap(settingsRows)),
     products,
     vacancies,
     team,
@@ -355,6 +357,13 @@ export const takeInvoiceNumber = createServerFn({ method: "POST" })
       return mod.takeInvoiceNumber(context.userId);
     }
     const sql = await getSql();
+    const profile = await ctxProfile(sql, context.userId);
+    const staff = STAFF.has(profile.role);
+    if (!staff) {
+      const open = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and status = 'OPEN' and stage >= 2 limit 1`;
+      if (!open[0]) throw new Error("Locked");
+    }
+    if (limited(`invoice:${context.userId}`, 12, 60 * 60 * 1000)) throw new Error("Locked");
     const rows = await sql<{ value: string }>`select value from settings where key = 'invoice_seq'`;
     const next = (Number(rows[0]?.value) || 1000) + 1;
     await sql`insert into settings (key, value) values ('invoice_seq', ${String(next)}) on conflict (key) do update set value = ${String(next)}`;
@@ -485,7 +494,15 @@ export const getMyApplication = createServerFn({ method: "POST" })
     if (!app || app.userId !== context.userId) throw new Error("Not found");
     const documents = await docsFor(sql, id);
     const messages = await messagesFor(sql, id);
-    return { app, documents, messages };
+    let wallet = "";
+    let network = "";
+    if (app.status === "OPEN" && app.stage >= 2) {
+      const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('usdt_wallet', 'usdt_network')`;
+      const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+      wallet = (map.usdt_wallet || "").trim();
+      network = map.usdt_network || "TRC-20 (TRON)";
+    }
+    return { app, documents, messages, wallet, network };
   });
 
 type CreateInput = { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; lang?: string };
@@ -504,6 +521,9 @@ export const noteFunnel = createServerFn({ method: "POST" })
     kind: input?.kind === "apply" || input?.kind === "question" ? input.kind : ("calc" as const),
   }))
   .handler(async ({ data }) => {
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    if (limited(`funnel:${ip.slice(0, 80)}`, 30, 60_000)) return { ok: true };
     if (!(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim())) return { ok: true };
     const mod = await import("./sheet-backend");
     const kind = data.kind === "apply" || data.kind === "question" ? data.kind : "calc";
@@ -994,6 +1014,19 @@ export const adminDeleteTeam = createServerFn({ method: "POST" })
     await requireAdmin(sql, context.userId);
     await sql`delete from team_members where id = ${id}`;
     await audit(sql, context.userId, "TEAM_DELETE", id, "");
+  });
+
+export const adminGetSettings = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      return mod.adminGetSettings(context.userId);
+    }
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const rows = await sql<{ key: string; value: string }>`select key, value from settings`;
+    return toStaffSettings(settingMap(rows));
   });
 
 export const adminSaveSettings = createServerFn({ method: "POST" })

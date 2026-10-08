@@ -15,6 +15,7 @@ import {
   adminDeleteTeam,
   adminDeleteVacancy,
   adminGetApplication,
+  adminGetSettings,
   adminListApplications,
   adminOverview,
   adminSaveDispatch,
@@ -420,6 +421,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [audit, setAudit] = useState<Awaited<ReturnType<typeof adminAudit>>>([]);
   const [draft, setDraft] = useState<Partial<Vacancy>>({});
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
+  const [staffSettings, setStaffSettings] = useState<Record<string, string> | null>(null);
   const [newApp, setNewApp] = useState({ email: "", vacancyId: "", citizenship: CITIZENSHIPS[0] ?? "", processing: "STANDARD" as Processing });
   const [userQuery, setUserQuery] = useState("");
   const [qCountry, setQCountry] = useState("");
@@ -489,7 +491,15 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     }
     if (current === "team" && (role === "ADMIN" || role === "MANAGER")) void adminAllTeam().then(setTeam);
     if (current === "audit") void adminAudit().then(setAudit);
-    if (current === "content" && data) setSettingsDraft(data.settings);
+    if (current === "content" && data && role !== "ADMIN") setSettingsDraft(data.settings);
+    if ((current === "content" || current === "pricing") && role === "ADMIN") {
+      void adminGetSettings()
+        .then((rows) => {
+          setStaffSettings(rows);
+          if (current === "content") setSettingsDraft(rows);
+        })
+        .catch(() => setErr(t("admin_unsaved")));
+    }
   }, [current, role, showAll, data]);
 
   useEffect(() => {
@@ -1322,7 +1332,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           />
         ) : null}
 
-        {current === "content" && staff && data ? (
+        {current === "content" && staff && data && (role !== "ADMIN" || Object.keys(settingsDraft).length > 0) ? (
           <div className="mt-8 grid gap-4">
             <ContentEditor
             readOnly={!isAdmin}
@@ -1343,7 +1353,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             {data.products.map((p) => {
               let log: { at: string; by: string; amount: string } | undefined;
               try {
-                const book = JSON.parse(data.settings.price_log || "{}") as Record<string, { at: string; by: string; amount: string }>;
+                const book = JSON.parse(staffSettings?.price_log || "{}") as Record<string, { at: string; by: string; amount: string }>;
                 log = book[p.id];
               } catch {
                 log = undefined;

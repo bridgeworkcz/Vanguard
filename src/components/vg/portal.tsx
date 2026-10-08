@@ -586,7 +586,7 @@ export function PortalPage({ id }: { id: string }) {
     const url = await buildInvoice({
       lang,
       tranche,
-      settings: site.settings,
+      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
       client: clientName(parseQuestionnaire(app.questionnaire)),
       country: app.country,
@@ -606,7 +606,7 @@ export function PortalPage({ id }: { id: string }) {
     const person = parseQuestionnaire(app.questionnaire);
     const url = await buildOffer({
       lang,
-      settings: site.settings,
+      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
       client: clientName(person),
       country: app.country,
@@ -626,7 +626,7 @@ export function PortalPage({ id }: { id: string }) {
     const person = parseQuestionnaire(app.questionnaire);
     const url = await buildContract({
       lang,
-      settings: site.settings,
+      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
       client: clientName(person),
       q: person,
@@ -1103,10 +1103,10 @@ export function PortalPage({ id }: { id: string }) {
                 {!thirdPaid && app.stage >= 4 ? (
                   <button type="button" className="btn-solid" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
                 ) : null}
-                {site?.settings.usdt_wallet && !thirdPaid && app.stage >= 2 ? (
+                {detail?.wallet && !thirdPaid && app.stage >= 2 ? (
                   <p className="w-full break-all text-sm">
-                    {t("contact_wallet")}: {site.settings.usdt_wallet}
-                    {site.settings.usdt_network ? <span className="mt-1 block text-mist">{site.settings.usdt_network}</span> : null}
+                    {t("contact_wallet")}: {detail.wallet}
+                    {detail.network ? <span className="mt-1 block text-mist">{detail.network}</span> : null}
                   </p>
                 ) : null}
               </div>
@@ -1330,7 +1330,7 @@ export function PortalPage({ id }: { id: string }) {
                   buildInvoice({
                     lang,
                     tranche: preview.tranche!,
-                    settings: site.settings,
+                    settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
                     fileId: app.id,
                     client: clientName(parseQuestionnaire(app.questionnaire)),
                     country: app.country,

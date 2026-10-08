@@ -24,6 +24,8 @@ import {
   type VisaProduct,
 } from "./domain";
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { limited } from "./guard";
+import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
@@ -1142,7 +1144,7 @@ async function buildPublicSite() {
     partners = [];
   }
   const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
-  return { settings, products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };
+  return { settings: toPublicSettings(settings), products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };
 }
 
 export async function listPublicFilings() {
@@ -1169,7 +1171,13 @@ export async function listPublicFilings() {
 }
 
 export async function takeInvoiceNumber(userId: string) {
-  await profile(userId);
+  const person = await profile(userId);
+  const staff = person.role === "ADMIN" || person.role === "MANAGER";
+  if (!staff) {
+    const open = (await loadApps()).some((app) => app.userId === userId && app.status === "OPEN" && app.stage >= 2);
+    if (!open) throw new Error("Locked");
+  }
+  if (limited(`invoice:${userId}`, 12, 60 * 60 * 1000)) throw new Error("Locked");
   const map = await settingMap();
   const next = (Number(map.invoice_seq) || 1000) + 1;
   await putSetting("invoice_seq", String(next), userId);
@@ -1209,7 +1217,14 @@ export async function getMine(userId: string, id: string) {
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || app.userId !== userId) throw new Error("Not found");
   await persistLegacyCap(app);
-  return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
+  let wallet = "";
+  let network = "";
+  if (app.status === "OPEN" && app.stage >= 2) {
+    const map = await settingMap();
+    wallet = (map.usdt_wallet || "").trim();
+    network = map.usdt_network || "TRC-20 (TRON)";
+  }
+  return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id), wallet, network };
 }
 
 async function resolveReferrer(code: string): Promise<string> {
@@ -1310,8 +1325,7 @@ async function storeFile(applicationId: string, userId: string, category: string
     storedPath = uploaded.pathname;
   } catch (err) {
     console.error("[file]", err);
-    const message = err instanceof Error ? err.message : "";
-    throw new Error(`Drive ${message.slice(0, 160) || "refused"}`);
+    throw new Error("Drive refused");
   }
   const id = newId("DOC");
   try {
@@ -1724,6 +1738,11 @@ export async function adminDeleteTeam(userId: string, id: string) {
   if (raw) await updateSheetRowById("Team", id, { ...raw, isActive: "false" });
   await audit(userId, "TEAM_DELETE", id, "");
   dropPublicCache();
+}
+
+export async function adminGetSettings(userId: string) {
+  await requireAdmin(userId);
+  return toStaffSettings(await settingMap());
 }
 
 export async function adminSaveSettings(userId: string, data: Record<string, string>) {

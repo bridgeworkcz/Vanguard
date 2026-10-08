@@ -11,6 +11,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Vanguard Global Mobility" },
       { name: "description", content: "Work-permit filings from a Prague office. The fee is fixed before you choose an opening." },
+      { name: "referrer", content: "strict-origin-when-cross-origin" },
       { name: "theme-color", content: "#070809" },
     ],
     links: [
@@ -25,7 +26,6 @@ export const Route = createRootRoute({
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
     ],
-    scripts: [{ src: "https://telegram.org/js/telegram-web-app.js" }],
   }),
   component: () => (
     <html lang="en" suppressHydrationWarning>

@@ -1,7 +1,8 @@
-import { getCookie, setCookie } from "@tanstack/react-start/server";
+import { getCookie, getRequest, setCookie } from "@tanstack/react-start/server";
+import { assertSameSiteRequest } from "@/lib/auth/isolation.server";
+import { limited } from "./guard";
 
 const COOKIE = "vg_session";
-const OWNER = "admin@gmail.com";
 
 export function sheetsConfigured(): boolean {
   return Boolean(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim());
@@ -29,14 +30,9 @@ function rolesOf(raw: string): string[] {
   return list.length ? list : ["CLIENT"];
 }
 
-function withOwner(email: string, roles: string[]): string[] {
-  if (email !== OWNER) return roles;
-  return Array.from(new Set([...roles, "ADMIN", "MANAGER"]));
-}
-
 function publicUser(row: Record<string, string>) {
   const email = emailOf(row.email);
-  const roles = withOwner(email, rolesOf(row.roles));
+  const roles = rolesOf(row.roles);
   return {
     id: row.id,
     email,
@@ -75,7 +71,7 @@ export async function readSheetSessionToken(token: string | null | undefined) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (!/busy|unavailable|429/i.test(message)) throw err;
-    const roles = withOwner(session.email, session.roles);
+    const roles = session.roles.length ? session.roles : ["CLIENT"];
     return {
       id: session.userId,
       email: session.email,
@@ -94,7 +90,16 @@ export async function readSheetSessionUser() {
 type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };
 
 export async function runAccountAuth(data: AccountInput) {
+  assertSameSiteRequest();
   if (!sheetsConfigured()) return { mode: "local" as const };
+  const req = getRequest();
+  const ip = (req?.headers.get("x-forwarded-for") || "local").split(",")[0]?.trim().slice(0, 80) || "local";
+  const emailKey = emailOf(data.email).slice(0, 120);
+  if (data.action === "register") {
+    if (limited(`register:${ip}`, 5, 60 * 60 * 1000)) throw new Error("Try again later.");
+  } else if (limited(`login:${emailKey}`, 8, 15 * 60 * 1000) || limited(`login-ip:${ip}`, 30, 15 * 60 * 1000)) {
+    throw new Error("Try again later.");
+  }
   if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
   const { appendSheetRow, readSheetRows, updateSheetRowById } = await import("@/lib/google/sheets");
   const { createSessionToken, hashPassword, verifyPassword } = await import("@/lib/google/session");
@@ -112,8 +117,8 @@ export async function runAccountAuth(data: AccountInput) {
     if (sameEmail.length) throw new Error("This email is closed. Ask the office to open it again.");
     const live = rows.filter((row) => row.isActive !== "false");
     if (live.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
-    const hasAdmin = live.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));
-    const roles = withOwner(email, hasAdmin ? ["CLIENT"] : ["ADMIN"]);
+    const hasAdmin = live.some((row) => rolesOf(row.roles).includes("ADMIN"));
+    const roles = hasAdmin ? ["CLIENT"] : ["ADMIN"];
     const now = new Date().toISOString();
     const id = `USR-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
     const record = {

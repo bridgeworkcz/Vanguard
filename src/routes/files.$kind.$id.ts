@@ -22,11 +22,21 @@ export const Route = createFileRoute("/files/$kind/$id")({
         const row = rows.find((item) => item.id === decodeURIComponent(params.id));
         if (!row) return new Response(null, { status: 404 });
         const stored = (kind === "team" ? row.photoUrl || row.photo || "" : row.imageUrl || "").trim();
-        if (stored.startsWith("http://") || stored.startsWith("https://")) {
-          return new Response(null, { status: 302, headers: { location: stored } });
+        if (stored.startsWith("https://")) {
+          let dest: URL;
+          try {
+            dest = new URL(stored);
+          } catch {
+            return new Response(null, { status: 404 });
+          }
+          const host = dest.hostname.toLowerCase();
+          const google = host === "drive.google.com" || host.endsWith(".googleusercontent.com");
+          if (!google) return new Response(null, { status: 404 });
+          return new Response(null, { status: 302, headers: { location: dest.toString() } });
         }
         const fileId = storedDriveId(stored);
-        if (!fileId) return new Response(null, { status: 404 });
+        const publicDoc = fileId.startsWith("docs/team/") || fileId.startsWith("docs/gallery/");
+        if (!fileId || fileId.includes("..") || (fileId.startsWith("docs/") && !publicDoc)) return new Response(null, { status: 404 });
         try {
           if (fileId.startsWith("docs/")) {
             const { downloadPrivateDocument } = await import("@/lib/blob");

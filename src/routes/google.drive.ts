@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { allowedOrigin } from "@/lib/vanguard/hosts";
 
 function cookieValue(header: string, name: string) {
   for (const part of header.split(";")) {
@@ -17,9 +18,9 @@ function cookieValue(header: string, name: string) {
 
 function publicOrigin(request: Request) {
   const url = new URL(request.url);
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
-  const proto = (request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "https").split(",")[0].trim();
-  return `${proto}://${host}`;
+  const host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host).split(",")[0]?.trim() || url.host;
+  const proto = (request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "https").split(",")[0]?.trim() || "https";
+  return allowedOrigin(`${proto}://${host}`) || allowedOrigin(url.origin) || "https://vanguardmobility.site";
 }
 
 export const Route = createFileRoute("/google/drive")({

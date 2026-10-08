@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { allowedOrigin } from "@/lib/vanguard/hosts";
 
 function parsePrivateKey(rawKey: string | undefined): string {
   if (!rawKey) return '';
@@ -223,16 +224,16 @@ export function driveAuthUrl(clientId: string, redirectUri: string, state: strin
 }
 
 export function safeDriveRedirect(raw: string): string {
+  const origin = allowedOrigin(raw);
+  if (!origin) return "";
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
     return "";
   }
-  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (url.protocol !== "https:" && !local) return "";
   if (url.pathname.replace(/\/$/, "") !== "/google/drive") return "";
-  return `${url.origin}/google/drive`;
+  return `${origin}/google/drive`;
 }
 
 export async function exchangeDriveCode(clientId: string, clientSecret: string, code: string, redirectUri: string): Promise<string> {
