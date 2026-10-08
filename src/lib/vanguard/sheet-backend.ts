@@ -643,7 +643,7 @@ async function safeHistory() {
   }
 }
 
-const VACANCY_CATALOG = "3";
+const VACANCY_CATALOG = "4";
 
 async function ensureVacancyCatalog() {
   try {
@@ -674,6 +674,13 @@ async function ensureVacancyCatalog() {
       if (Array.isArray(stored)) partners = stored.filter((item) => item.country && item.name).map((item) => ({ country: item.country!, name: item.name! }));
     } catch {
       partners = [];
+    }
+    const seenPartner = new Set(partners.map((item) => seatKey(item.country, item.name)));
+    for (const extra of legacyRealPartners()) {
+      const key = seatKey(extra.country, extra.name);
+      if (seenPartner.has(key)) continue;
+      seenPartner.add(key);
+      partners.push({ country: extra.country, name: extra.name });
     }
     const byCountry = new Map<string, { country: string; name: string }[]>();
     for (const partner of partners) {
@@ -1024,21 +1031,44 @@ function present(app: ReturnType<typeof appFrom>) {
 }
 
 async function ensurePartnerCatalog() {
-  const map = await settingMap();
-  if (map.partners_catalog === "5") return;
-  const stored = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
-  const have = new Set<string>();
-  const kept: typeof stored = [];
-  for (const row of stored) {
-    const key = `${row.country}|${row.name}`.toLowerCase();
-    if (have.has(key)) continue;
-    have.add(key);
-    kept.push(row);
+  try {
+    const stored = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
+    if (!Array.isArray(stored) || stored.length < 40) {
+      console.error("[partners] refusing to rewrite a short list", Array.isArray(stored) ? stored.length : 0);
+      return;
+    }
+    const have = new Set<string>();
+    const kept: typeof stored = [];
+    for (const row of stored) {
+      const key = `${row.country}|${row.name}`.toLowerCase();
+      if (!row.country || !row.name || have.has(key)) continue;
+      have.add(key);
+      kept.push(row);
+    }
+    const ids = new Set(kept.map((row) => row.id));
+    const missing = legacyRealPartners()
+      .filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()))
+      .map((row) => {
+        let id = row.id;
+        let n = 1;
+        while (ids.has(id)) {
+          n += 1;
+          id = `${row.id.slice(0, 26)}${n}`;
+        }
+        ids.add(id);
+        return { ...row, id };
+      });
+    if (!missing.length && kept.length === stored.length) return;
+    const next = JSON.stringify([...kept, ...missing]);
+    if (next.length > 48000) {
+      console.error("[partners] list is too long to store", next.length);
+      return;
+    }
+    await putSetting("partners", next, "system", false);
+    await putSetting("partners_catalog", "6", "system", false);
+  } catch (err) {
+    console.error("[partners]", err);
   }
-  const source = map.partners_catalog === "4" ? legacyRealPartners() : [...partnerRows(), ...legacyRealPartners()];
-  const missing = source.filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()));
-  if (missing.length || kept.length !== stored.length) await putSetting("partners", JSON.stringify([...kept, ...missing]), "system", false);
-  await putSetting("partners_catalog", "5", "system", false);
 }
 
 const MEDIA_KINDS = new Set(["office", "license", "country", "vacancy", "logo", "banner"]);
@@ -1076,8 +1106,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v5.json";
-const SNAP_GEN = 5;
+const SNAP_PATH = "cache/public-site-v6.json";
+const SNAP_GEN = 6;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -1229,6 +1259,13 @@ async function buildPublicSite() {
     }
   } catch {
     partners = [];
+  }
+  const seenPartner = new Set(partners.map((item) => `${item.country}|${item.name}`.toLowerCase()));
+  for (const extra of legacyRealPartners()) {
+    const key = `${extra.country}|${extra.name}`.toLowerCase();
+    if (seenPartner.has(key)) continue;
+    seenPartner.add(key);
+    partners.push({ id: extra.id, country: extra.country, name: extra.name, sortOrder: extra.sort });
   }
   const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
   return { settings: toPublicSettings(settings), products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };

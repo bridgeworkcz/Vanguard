@@ -86,24 +86,30 @@ async function ensureSeed(sql: Sql) {
 
 async function ensurePartnerCatalog(sql: Sql) {
   const flag = await sql<{ value: string }>`select value from settings where key = 'partners_catalog'`;
-  if (flag[0]?.value === "5") return;
+  if (flag[0]?.value === "6") return;
   const existing = await sql<{ country: string; name: string }>`select country, name from partners`;
   const have = new Set(existing.map((row) => `${row.country}|${row.name}`.toLowerCase()));
-  const source = flag[0]?.value === "4" ? legacyRealPartners() : [...partnerRows(), ...legacyRealPartners()];
-  for (const row of source) {
+  for (const row of legacyRealPartners()) {
     if (have.has(`${row.country}|${row.name}`.toLowerCase())) continue;
     await sql`insert into partners (id, country, name, sort_order, active) values (${row.id}, ${row.country}, ${row.name}, ${row.sort}, true) on conflict (id) do nothing`;
-    have.add(`${row.country}|${row.name}`.toLowerCase());
   }
-  await sql`insert into settings (key, value) values ('partners_catalog', '5') on conflict (key) do update set value = '5'`;
+  await sql`insert into settings (key, value) values ('partners_catalog', '6') on conflict (key) do update set value = '6'`;
 }
 
 async function ensureEmployerSeats(sql: Sql) {
   const flag = await sql<{ value: string }>`select value from settings where key = 'vacancy_catalog'`;
-  if (flag[0]?.value === "3") return;
+  if (flag[0]?.value === "4") return;
   const partners = await sql<{ country: string; name: string }>`select country, name from partners where active = true order by country, sort_order`;
-  const existing = await sql<{ id: string; country: string; employer: string; title: string; active: boolean }>`select id, country, employer, title, active from vacancies`;
   const seatKey = (country: string, name: string) => `${country.trim()}|${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
+  const listed = new Set(partners.map((row) => seatKey(row.country, row.name)));
+  const all = [...partners];
+  for (const row of legacyRealPartners()) {
+    const key = seatKey(row.country, row.name);
+    if (listed.has(key)) continue;
+    listed.add(key);
+    all.push({ country: row.country, name: row.name });
+  }
+  const existing = await sql<{ id: string; country: string; employer: string; title: string; active: boolean }>`select id, country, employer, title, active from vacancies`;
   const titles = new Set(existing.map((row) => `${seatKey(row.country, row.employer)}|${row.title.trim().toLowerCase()}`));
   const perEmployer = new Map<string, number>();
   const ids = new Set(existing.map((row) => row.id));
@@ -113,7 +119,7 @@ async function ensureEmployerSeats(sql: Sql) {
     perEmployer.set(key, (perEmployer.get(key) || 0) + 1);
   }
   let extra = 1;
-  for (const vacancy of seatsForPartners(partners)) {
+  for (const vacancy of seatsForPartners(all)) {
     const employerKey = seatKey(vacancy.country, vacancy.employer);
     const titleKey = `${employerKey}|${vacancy.title.trim().toLowerCase()}`;
     if (titles.has(titleKey)) continue;
@@ -130,7 +136,7 @@ async function ensureEmployerSeats(sql: Sql) {
       values (${id}, ${vacancy.title}, ${vacancy.country}, ${vacancy.visaProductId}, ${vacancy.employer}, ${vacancy.salaryNet}, ${vacancy.accommodation}, ${vacancy.workingHours}, ${vacancy.description}, ${vacancy.requirements}, ${vacancy.quota}, true)
       on conflict (id) do nothing`;
   }
-  await sql`insert into settings (key, value) values ('vacancy_catalog', '3') on conflict (key) do update set value = '3'`;
+  await sql`insert into settings (key, value) values ('vacancy_catalog', '4') on conflict (key) do update set value = '4'`;
 }
 
 async function ensureDirector(sql: Sql) {
