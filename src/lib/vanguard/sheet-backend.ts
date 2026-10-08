@@ -975,23 +975,35 @@ function plainName(value: string) {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
+const EXTRA_DIRECTORS = new Set(["TM-LNY2GG", "TM-JCO0JT"]);
+
+function isExtraDirector(row: SheetRow) {
+  const id = row.id || rowCell(row, ["id"]);
+  if (!id || id === "TM-DIR" || teamHidden(row)) return false;
+  if (EXTRA_DIRECTORS.has(id)) return true;
+  return plainName(teamName(row)).replace(/[^a-z]/g, "").includes("klaranovak");
+}
+
 async function hideExtraDirectors(rows: SheetRow[]) {
   const map = await settingMap().catch(() => null);
-  if (!map || map.team_deduped === "1") return rows;
-  const named = rows.filter((row) => plainName(teamName(row)) === "klara novakova" && !teamHidden(row));
-  if (named.length > 1) {
-    const keep = named.find((row) => (row.id || rowCell(row, ["id"])) === "TM-DIR") || named[0];
-    const keepId = keep ? keep.id || rowCell(keep, ["id"]) : "";
-    for (const row of named) {
-      const id = row.id || rowCell(row, ["id"]);
-      if (!id || id === keepId) continue;
-      await updateSheetRowById("Team", id, writeAliased(row, [["isActive|active", "false"]]));
-    }
-    invalidateSheet("Team");
-    rows = await readSheetRows("Team");
+  if (!map || map.team_deduped === "2") return rows;
+  const extra = rows.filter(isExtraDirector);
+  if (!extra.length) {
+    await putSetting("team_deduped", "2", "system", false);
+    return rows;
   }
-  await putSetting("team_deduped", "1", "system", false);
-  return rows;
+  for (const row of extra) {
+    const id = row.id || rowCell(row, ["id"]);
+    if (!id) continue;
+    try {
+      await updateSheetRowById("Team", id, writeAliased(row, [["isActive|active", "false"]]));
+    } catch (err) {
+      console.error("[team-dedupe]", id, err);
+    }
+  }
+  invalidateSheet("Team");
+  const hidden = new Set(extra.map((row) => row.id || rowCell(row, ["id"])));
+  return rows.map((row) => (hidden.has(row.id || rowCell(row, ["id"])) ? writeAliased(row, [["isActive|active", "false"]]) : row));
 }
 
 async function teamRowsForSite(rows: SheetRow[]) {
@@ -1083,8 +1095,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v8.json";
-const SNAP_GEN = 8;
+const SNAP_PATH = "cache/public-site-v9.json";
+const SNAP_GEN = 9;
 
 function dropPublicCache() {
   publicGen += 1;
