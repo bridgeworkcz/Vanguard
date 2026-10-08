@@ -276,6 +276,10 @@ html.lang-ur .shot-name {
   letter-spacing: 0;
   text-transform: none;
 }
+.field.field-date {
+  width: 11rem;
+  max-width: 100%;
+}
 select.field option {
   background: #111;
   color: #fff;

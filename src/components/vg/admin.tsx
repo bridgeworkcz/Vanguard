@@ -1087,42 +1087,44 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               }}
             />
             {draft.id ? <WorkplacePhotos vacancyId={draft.id} readOnly={!isAdmin} /> : null}
-            <ul className="grid gap-2">
+            <ul className="grid min-w-0 gap-3">
               {data.vacancies.map((v) => (
-                <li key={v.id} className="grid items-center gap-2 border-t border-white/10 py-2 text-sm md:grid-cols-6">
-                  <span className="md:col-span-2">
+                <li key={v.id} className="grid min-w-0 gap-2 border-t border-white/10 py-3 text-sm">
+                  <span className="min-w-0">
                     {v.active ? "" : "— "}
                     {v.country} · {v.title}
                   </span>
                   <input
-                    className="field"
+                    className="field min-w-0"
                     defaultValue={v.salaryNet}
                     aria-label={t("salary")}
                     onBlur={(e) => {
                       if (e.target.value !== v.salaryNet) void adminSaveVacancy({ data: { ...v, salaryNet: e.target.value } }).then(reload);
                     }}
                   />
-                  <input
-                    className="field"
-                    type="number"
-                    defaultValue={v.quota}
-                    aria-label={t("quota")}
-                    onBlur={(e) => {
-                      const quota = Number(e.target.value);
-                      if (quota !== v.quota) void adminSaveVacancy({ data: { ...v, quota } }).then(reload);
-                    }}
-                  />
-                  <input
-                    className="field"
-                    defaultValue={v.blockedCitizenships || ""}
-                    placeholder={t("blocked")}
-                    onBlur={(e) => {
-                      if (e.target.value !== (v.blockedCitizenships || "")) {
-                        void adminSaveVacancy({ data: { ...v, blockedCitizenships: e.target.value } }).then(reload);
-                      }
-                    }}
-                  />
-                  <span className="flex gap-2">
+                  <div className="grid min-w-0 grid-cols-2 gap-2">
+                    <input
+                      className="field min-w-0"
+                      type="number"
+                      defaultValue={v.quota}
+                      aria-label={t("quota")}
+                      onBlur={(e) => {
+                        const quota = Number(e.target.value);
+                        if (quota !== v.quota) void adminSaveVacancy({ data: { ...v, quota } }).then(reload);
+                      }}
+                    />
+                    <input
+                      className="field min-w-0"
+                      defaultValue={v.blockedCitizenships || ""}
+                      placeholder={t("blocked")}
+                      onBlur={(e) => {
+                        if (e.target.value !== (v.blockedCitizenships || "")) {
+                          void adminSaveVacancy({ data: { ...v, blockedCitizenships: e.target.value } }).then(reload);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-end gap-2">
                     <label className="flex items-center gap-1 text-xs">
                       <input
                         type="checkbox"
@@ -1133,19 +1135,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     </label>
                     <button type="button" className="btn" onClick={() => setDraft(v)}>{t("edit")}</button>
                     <button type="button" className="btn" onClick={() => setDraft({ ...v, id: "" })}>{t("copy_vac")}</button>
-                    <label className="grid gap-1 text-xs text-mist">
-                      {t("hide_until")}
-                      <input
-                        className="field"
-                        type="date"
-                        onChange={(e) => {
-                          if (!e.target.value) return;
-                          void adminSaveVacancy({
-                            data: { ...v, active: false, pauseUntil: new Date(`${e.target.value}T23:59:59`).toISOString() },
-                          }).then(reload);
-                        }}
-                      />
-                    </label>
                     <button
                       type="button"
                       className="btn"
@@ -1158,7 +1147,20 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {t("pause_day")}
                     </button>
                     <button type="button" className="btn" onClick={() => void adminDeleteVacancy({ data: v.id }).then(reload)}>{t("remove")}</button>
-                  </span>
+                    <label className="grid gap-1 text-xs text-mist">
+                      {t("hide_until")}
+                      <input
+                        className="field field-date"
+                        type="date"
+                        onChange={(e) => {
+                          if (!e.target.value) return;
+                          void adminSaveVacancy({
+                            data: { ...v, active: false, pauseUntil: new Date(`${e.target.value}T23:59:59`).toISOString() },
+                          }).then(reload);
+                        }}
+                      />
+                    </label>
+                  </div>
                 </li>
               ))}
             </ul>
