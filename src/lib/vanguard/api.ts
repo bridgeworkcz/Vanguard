@@ -1413,7 +1413,7 @@ export const adminAllTeam = createServerFn({ method: "GET" })
       phone: string;
       photoData: string;
       active: boolean;
-    }>`select id, full_name as "fullName", position, phone, photo_data as "photoData", active from team_members order by sort_order, full_name`;
+    }>`select id, full_name as "fullName", position, phone, photo_data as "photoData", active from team_members where active = true order by sort_order, full_name`;
   });
 
 export const adminDriveStatus = createServerFn({ method: "GET" })

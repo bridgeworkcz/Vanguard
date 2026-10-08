@@ -1534,7 +1534,7 @@ function TeamEditor({
       <ul className="grid gap-3">
         {team.map((m) => (
           <li key={m.id} className="flex flex-wrap items-center gap-3 border-t border-white/10 py-3">
-            {m.photoData ? <img src={m.photoData} alt="" className="size-14 object-cover" /> : <span className="grid size-14 place-items-center bg-white/10">{m.fullName.slice(0, 1)}</span>}
+            {m.photoData ? <img key={m.photoData} src={m.photoData} alt="" className="size-14 object-cover" /> : <span className="grid size-14 place-items-center bg-white/10">{m.fullName.slice(0, 1)}</span>}
             <span className="min-w-40">
               {m.fullName}
               <span className="block text-sm text-mist">{m.position} · {m.phone}</span>

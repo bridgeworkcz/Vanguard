@@ -1,6 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { storedDriveId } from "@/lib/vanguard/files";
 
+function sheetCell(row: Record<string, string>, names: string[]) {
+  const folded = new Map(Object.entries(row).map(([key, value]) => [key.replace(/[\s_]/g, "").toLowerCase(), value]));
+  for (const name of names) {
+    const value = String(folded.get(name.replace(/[\s_]/g, "").toLowerCase()) ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
 function imageType(pathname: string, fallback: string) {
   const name = pathname.toLowerCase();
   if (name.endsWith(".png")) return "image/png";
@@ -19,9 +27,10 @@ export const Route = createFileRoute("/files/$kind/$id")({
         const { readSheetRows } = await import("@/lib/google/sheets");
         const { downloadFileFromDrive } = await import("@/lib/google/drive");
         const rows = await readSheetRows(kind === "team" ? "Team" : "Gallery");
-        const row = rows.find((item) => item.id === decodeURIComponent(params.id));
+        const wanted = decodeURIComponent(params.id);
+        const row = rows.find((item) => item.id === wanted || sheetCell(item, ["id"]) === wanted);
         if (!row) return new Response(null, { status: 404 });
-        const stored = (kind === "team" ? row.photoUrl || row.photo || "" : row.imageUrl || "").trim();
+        const stored = (kind === "team" ? sheetCell(row, ["photoUrl", "photo"]) : sheetCell(row, ["imageUrl", "image"])).trim();
         if (stored.startsWith("https://")) {
           let dest: URL;
           try {

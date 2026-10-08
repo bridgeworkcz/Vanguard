@@ -939,6 +939,21 @@ function teamName(row: SheetRow) {
   return rowCell(row, ["fullName", "name"]);
 }
 
+function writeAliased(row: SheetRow | undefined, groups: [string, string][]): SheetRow {
+  const next: SheetRow = { ...(row || {}) };
+  for (const [canonical, value] of groups) {
+    const aliases = canonical.split("|");
+    const folded = new Set(aliases.map((name) => name.replace(/[\s_]/g, "").toLowerCase()));
+    const keys = Object.keys(next).filter((key) => folded.has(key.replace(/[\s_]/g, "").toLowerCase()));
+    if (keys.length) {
+      for (const key of keys) next[key] = value;
+    } else {
+      next[aliases[0] || canonical] = value;
+    }
+  }
+  return next;
+}
+
 function teamHidden(row: SheetRow) {
   const flag = rowCell(row, ["isActive", "active"]).toLowerCase();
   return flag === "false" || flag === "0" || flag === "no";
@@ -946,83 +961,21 @@ function teamHidden(row: SheetRow) {
 
 function teamPerson(row: SheetRow) {
   return {
-    id: row.id || teamName(row),
+    id: row.id || rowCell(row, ["id"]) || teamName(row),
     fullName: teamName(row),
     position: rowCell(row, ["position", "role"]),
     phone: rowCell(row, ["contactPhone", "phone"]),
-    photoData: siteFileUrl("team", row.id, rowCell(row, ["photoUrl", "photo"])),
+    photoData: siteFileUrl("team", row.id || rowCell(row, ["id"]), rowCell(row, ["photoUrl", "photo"])),
     sortOrder: Number(rowCell(row, ["order", "sort"]) || row.order) || 0,
     active: !teamHidden(row),
   };
 }
 
-async function restoreTeamPortraits(rows: SheetRow[]) {
-  const hidden = rows.filter((row) => row.id && teamHidden(row) && rowCell(row, ["photoUrl", "photo"]));
-  if (!hidden.length) return rows;
-  for (const row of hidden) await updateSheetRowById("Team", row.id, { isActive: "true" });
-  invalidateSheet("Team");
-  return readSheetRows("Team");
-}
-
-function plainName(value: string) {
-  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-}
-
-async function ensureDirectorRow(rows: SheetRow[]) {
-  const director = TEAM[0];
-  const photo = director.photo || "/media/team/klara.jpg";
-  const found = rows.find((row) => plainName(teamName(row)) === plainName(director.name));
-  if (!found) {
-    const id = rows.some((row) => row.id === director.id) ? "TM-DIR" : director.id;
-    await appendSheetRow("Team", {
-      id,
-      fullName: director.name,
-      position: director.position,
-      photoUrl: photo,
-      contactPhone: director.phone,
-      languages: "[]",
-      bio: "",
-      order: "1",
-      isActive: "true",
-    });
-    invalidateSheet("Team");
-    return readSheetRows("Team");
-  }
-  if (found.id && !rowCell(found, ["photoUrl", "photo"])) {
-    await updateSheetRowById("Team", found.id, { photoUrl: photo });
-    invalidateSheet("Team");
-    return readSheetRows("Team");
-  }
-  return rows;
-}
-
-async function teamRowsForSite(rows: SheetRow[]) {
-  let current = await restoreTeamPortraits(rows);
-  current = await ensureDirectorRow(current);
-  if (!current.some((row) => teamName(row))) {
-    for (const member of TEAM) {
-      if (current.some((row) => row.id === member.id)) continue;
-      await appendSheetRow("Team", {
-        id: member.id,
-        fullName: member.name,
-        position: member.position,
-        photoUrl: member.photo || "",
-        contactPhone: member.phone,
-        languages: "[]",
-        bio: "",
-        order: String(member.sort),
-        isActive: "true",
-      });
-    }
-    invalidateSheet("Team");
-    current = await readSheetRows("Team");
-  }
-  const people = current.filter((row) => row.id && (teamName(row) || rowCell(row, ["photoUrl", "photo"]))).map(teamPerson);
-  const originals = people.filter((person) => person.id !== "TM-DIR");
-  const visibleOriginals = originals.filter((person) => person.active);
-  const base = visibleOriginals.length ? visibleOriginals : originals;
-  const added = people.filter((person) => person.id === "TM-DIR" && !base.some((item) => item.id === person.id));
-  return [...base, ...added].sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
+function teamRowsForSite(rows: SheetRow[]) {
+  return rows
+    .filter((row) => row.id && teamName(row) && !teamHidden(row))
+    .map(teamPerson)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
 }
 
 function present(app: ReturnType<typeof appFrom>) {
@@ -1106,8 +1059,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v6.json";
-const SNAP_GEN = 6;
+const SNAP_PATH = "cache/public-site-v7.json";
+const SNAP_GEN = 7;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -1826,8 +1779,9 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
   const fullName = data.fullName.trim();
   if (!fullName) throw new Error("Name");
   invalidateSheet("Team");
-  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
-  let photoUrl = raw?.photoUrl || "";
+  const rows = await readSheetRows("Team");
+  const raw = rows.find((row) => (row.id || rowCell(row, ["id"])) === id);
+  let photoUrl = raw ? rowCell(raw, ["photoUrl", "photo"]) : "";
   const photo = data.photoData || "";
   if (photo) {
     if (!photo.startsWith("data:image/")) throw new Error("File type");
@@ -1836,20 +1790,22 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
     if (!buffer.length) throw new Error("File type");
     const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "member";
     const uploaded = await uploadPrivateDocument(`docs/team/portraits/${safeId}.jpg`, buffer, "image/jpeg", true);
-    photoUrl = `file:${uploaded.pathname}`;
+    photoUrl = `file:${uploaded.pathname}#${Date.now().toString(36)}`;
   }
-  const base = {
-    id,
-    fullName,
-    position: data.position.trim(),
-    photoUrl,
-    contactPhone: data.phone.trim(),
-    languages: raw?.languages || "[]",
-    bio: raw?.bio || "",
-    order: raw?.order || "9",
-    isActive: String(data.active !== false),
-  };
-  if (raw) await updateSheetRowById("Team", id, base);
+  const sample = raw || rows.find((row) => Object.keys(row).length);
+  const template = raw || Object.fromEntries(Object.keys(sample || {}).map((key) => [key, ""]));
+  const base = writeAliased(template, [
+    ["id", id],
+    ["fullName|name", fullName],
+    ["position|role", data.position.trim()],
+    ["photoUrl|photo", photoUrl],
+    ["contactPhone|phone", data.phone.trim()],
+    ["languages", raw ? rowCell(raw, ["languages"]) || raw.languages || "[]" : "[]"],
+    ["bio", raw ? rowCell(raw, ["bio"]) || raw.bio || "" : ""],
+    ["order|sort", raw ? rowCell(raw, ["order", "sort"]) || "9" : "9"],
+    ["isActive|active", String(data.active !== false)],
+  ]);
+  if (raw) await updateSheetRowById("Team", raw.id || id, base);
   else await appendSheetRow("Team", base);
   await audit(userId, "TEAM", id, fullName);
   dropPublicCache();
@@ -1858,8 +1814,9 @@ export async function adminSaveTeam(userId: string, data: { id?: string; fullNam
 
 export async function adminDeleteTeam(userId: string, id: string) {
   await requireAdmin(userId);
-  const raw = (await readSheetRows("Team")).find((row) => row.id === id);
-  if (raw) await updateSheetRowById("Team", id, { ...raw, isActive: "false" });
+  invalidateSheet("Team");
+  const raw = (await readSheetRows("Team")).find((row) => (row.id || rowCell(row, ["id"])) === id);
+  if (raw) await updateSheetRowById("Team", raw.id || id, writeAliased(raw, [["isActive|active", "false"]]));
   await audit(userId, "TEAM_DELETE", id, "");
   dropPublicCache();
 }
@@ -2254,14 +2211,19 @@ export async function adminAudit(userId: string) {
 
 export async function adminAllTeam(userId: string) {
   await requireStaff(userId);
-  return (await readSheetRows("Team")).map((row) => ({
-    id: row.id,
-    fullName: row.fullName,
-    position: row.position,
-    phone: row.contactPhone,
-    photoData: siteFileUrl("team", row.id, row.photoUrl),
-    active: bool(row.isActive) || row.isActive === "",
-  }));
+  return (await readSheetRows("Team"))
+    .filter((row) => (row.id || rowCell(row, ["id"])) && teamName(row) && !teamHidden(row))
+    .map((row) => {
+      const id = row.id || rowCell(row, ["id"]);
+      return {
+        id,
+        fullName: teamName(row),
+        position: rowCell(row, ["position", "role"]),
+        phone: rowCell(row, ["contactPhone", "phone"]),
+        photoData: siteFileUrl("team", id, rowCell(row, ["photoUrl", "photo"])),
+        active: true,
+      };
+    });
 }
 
 export async function cancelMine(userId: string, id: string) {
