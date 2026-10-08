@@ -889,25 +889,42 @@ async function requireAdmin(userId: string) {
   return person;
 }
 
+function rowCell(row: SheetRow, names: string[]) {
+  const folded = new Map(Object.entries(row).map(([key, value]) => [key.replace(/[\s_]/g, "").toLowerCase(), value]));
+  for (const name of names) {
+    const value = String(folded.get(name.replace(/[\s_]/g, "").toLowerCase()) ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
 function teamName(row: SheetRow) {
-  return (row.fullName || row.name || "").trim();
+  return rowCell(row, ["fullName", "name"]);
 }
 
 function teamHidden(row: SheetRow) {
-  const flag = (row.isActive || row.active || "").trim().toLowerCase();
-  return flag === "false" || flag === "0";
+  const flag = rowCell(row, ["isActive", "active"]).toLowerCase();
+  return flag === "false" || flag === "0" || flag === "no";
 }
 
 function teamPerson(row: SheetRow) {
   return {
     id: row.id || teamName(row),
     fullName: teamName(row),
-    position: (row.position || row.role || "").trim(),
-    phone: (row.contactPhone || row.phone || "").trim(),
-    photoData: siteFileUrl("team", row.id, row.photoUrl || row.photo || ""),
-    sortOrder: Number(row.order) || 0,
+    position: rowCell(row, ["position", "role"]),
+    phone: rowCell(row, ["contactPhone", "phone"]),
+    photoData: siteFileUrl("team", row.id, rowCell(row, ["photoUrl", "photo"])),
+    sortOrder: Number(rowCell(row, ["order", "sort"]) || row.order) || 0,
     active: !teamHidden(row),
   };
+}
+
+async function restoreTeamPortraits(rows: SheetRow[]) {
+  const hidden = rows.filter((row) => row.id && teamHidden(row) && rowCell(row, ["photoUrl", "photo"]));
+  if (!hidden.length) return rows;
+  for (const row of hidden) await updateSheetRowById("Team", row.id, { isActive: "true" });
+  invalidateSheet("Team");
+  return readSheetRows("Team");
 }
 
 function plainName(value: string) {
@@ -934,7 +951,7 @@ async function ensureDirectorRow(rows: SheetRow[]) {
     invalidateSheet("Team");
     return readSheetRows("Team");
   }
-  if (found.id && !(found.photoUrl || found.photo || "").trim()) {
+  if (found.id && !rowCell(found, ["photoUrl", "photo"])) {
     await updateSheetRowById("Team", found.id, { photoUrl: photo });
     invalidateSheet("Team");
     return readSheetRows("Team");
@@ -943,7 +960,8 @@ async function ensureDirectorRow(rows: SheetRow[]) {
 }
 
 async function teamRowsForSite(rows: SheetRow[]) {
-  let current = await ensureDirectorRow(rows);
+  let current = await restoreTeamPortraits(rows);
+  current = await ensureDirectorRow(current);
   if (!current.some((row) => teamName(row))) {
     for (const member of TEAM) {
       if (current.some((row) => row.id === member.id)) continue;
@@ -962,9 +980,12 @@ async function teamRowsForSite(rows: SheetRow[]) {
     invalidateSheet("Team");
     current = await readSheetRows("Team");
   }
-  const people = current.filter((row) => teamName(row)).map(teamPerson);
-  const visible = people.filter((person) => person.active);
-  return (visible.length ? visible : people).sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
+  const people = current.filter((row) => row.id && (teamName(row) || rowCell(row, ["photoUrl", "photo"]))).map(teamPerson);
+  const originals = people.filter((person) => person.id !== "TM-DIR");
+  const visibleOriginals = originals.filter((person) => person.active);
+  const base = visibleOriginals.length ? visibleOriginals : originals;
+  const added = people.filter((person) => person.id === "TM-DIR" && !base.some((item) => item.id === person.id));
+  return [...base, ...added].sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
 }
 
 function present(app: ReturnType<typeof appFrom>) {
