@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
-import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
+import { VISA_PRODUCTS, DEFAULT_SETTINGS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { CountryStill, CountLine, EmployerMark, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
@@ -84,8 +84,17 @@ export function HomePage() {
   }, [catalog]);
   const settings = data?.settings ?? {};
   const fromPrice = catalog.filter((p) => p.active).reduce((min, p) => Math.min(min, p.basePrice), Number.POSITIVE_INFINITY);
-  const title = settings[storyKey(lang, "hero_title")] || settings.hero_title_en;
-  const body = settings[storyKey(lang, "hero_body")] || settings.hero_body_en;
+  const title =
+    settings[storyKey(lang, "hero_title")] ||
+    settings.hero_title_en ||
+    DEFAULT_SETTINGS[storyKey(lang, "hero_title")] ||
+    DEFAULT_SETTINGS.hero_title_en;
+  const heroSteps = [
+    ["hero_1t", "hero_1b"],
+    ["hero_2t", "hero_2b"],
+    ["hero_3t", "hero_3b"],
+    ["hero_4t", "hero_4b"],
+  ] as const;
 
   function search() {
     if (!citizenship || !country || !product || !speed) {
@@ -114,7 +123,18 @@ export function HomePage() {
           <div className="lg:col-span-6">
             <p className="kicker">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-4xl sm:text-6xl">{title}</h1>
-            <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">{body}</p>
+            <ol className="hero-chain" dir={lang === "ur" ? "rtl" : undefined}>
+              {heroSteps.map(([head, line], index) => (
+                <li key={head} className="hero-step">
+                  <span className="hero-tick" aria-hidden="true" />
+                  <p>
+                    <span className="hero-no latin">0{index + 1}</span>
+                    <b>{t(head)}</b>
+                    <span>{t(line)}</span>
+                  </p>
+                </li>
+              ))}
+            </ol>
             {restored && product && speed ? (
               <button type="button" className="btn-solid mt-6" onClick={() => search()}>
                 {t("calc_continue")}

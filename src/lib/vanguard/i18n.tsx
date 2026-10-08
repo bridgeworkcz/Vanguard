@@ -645,6 +645,14 @@ const en = {
   share_case: "Copy the case line",
   phone_same: "Same phone as another open case",
   calc_hold: "The fee stays in this box. Opening a list does not change it.",
+  hero_1t: "Choose",
+  hero_1b: "Citizenship, the country, the permit, and how fast the file should move.",
+  hero_2t: "We show",
+  hero_2b: "The fee, and the openings that match.",
+  hero_3t: "A ministry",
+  hero_3b: "Still decides.",
+  hero_4t: "The case",
+  hero_4b: "We make it complete.",
 };
 
 const cs: Record<keyof typeof en, string> = {
@@ -1290,6 +1298,14 @@ const cs: Record<keyof typeof en, string> = {
   share_case: "Zkopírovat řádek spisu",
   phone_same: "Stejný telefon jako jiný otevřený spis",
   calc_hold: "Honorář zůstává v tomto poli. Otevření seznamu ho nemění.",
+  hero_1t: "Zvolte",
+  hero_1b: "Občanství, zemi, typ povolení a tempo přípravy spisu.",
+  hero_2t: "Ukážeme",
+  hero_2b: "Honorář a volná místa, která sedí.",
+  hero_3t: "Ministerstvo",
+  hero_3b: "Rozhoduje.",
+  hero_4t: "Spis",
+  hero_4b: "Dodáme ho úplný.",
 };
 
 const ur: Record<keyof typeof en, string> = {
@@ -1935,6 +1951,14 @@ const ur: Record<keyof typeof en, string> = {
   share_case: "کیس کی سطر نقل کریں",
   phone_same: "وہی فون جو کسی اور کھلے کیس کا ہے",
   calc_hold: "فیس اسی خانے میں رہتی ہے۔ فہرست کھولنے سے نہیں بدلتی۔",
+  hero_1t: "منتخب کریں",
+  hero_1b: "شہریت، ملک، اجازت نامے کی قسم اور فائل کی رفتار۔",
+  hero_2t: "ہم دکھائیں",
+  hero_2b: "فیس اور موزوں اسامیاں۔",
+  hero_3t: "وزارت",
+  hero_3b: "فیصلہ وہی کرتی ہے۔",
+  hero_4t: "فائل",
+  hero_4b: "ہم اسے مکمل بناتے ہیں۔",
 };
 
 const DICTS = { en, cs, ur };

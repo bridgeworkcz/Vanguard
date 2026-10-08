@@ -127,6 +127,82 @@
   text-transform: uppercase;
   color: #aaa;
 }
+.hero-chain {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  max-width: 26rem;
+  position: relative;
+}
+.hero-chain::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.4rem;
+  bottom: 1rem;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.hero-step {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  column-gap: 0.85rem;
+  align-items: start;
+  padding-bottom: 0.85rem;
+}
+.hero-tick {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin-top: 0.28rem;
+  background: #f4f5f7;
+  position: relative;
+  z-index: 1;
+}
+.hero-step p { margin: 0; }
+.hero-no {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: #aaa;
+}
+.hero-step b {
+  display: block;
+  margin-top: 0.1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #f4f5f7;
+}
+.hero-step p > span:not(.hero-no) {
+  display: block;
+  margin-top: 0.12rem;
+  color: #aaa;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+html.lang-ur .hero-chain { direction: rtl; }
+html.lang-ur .hero-chain::before { left: auto; right: 4px; }
+html.lang-ur .hero-step b,
+html.lang-ur .hero-step p > span:not(.hero-no) {
+  font-family: "Noto Nastaliq Urdu", var(--font-sans);
+  letter-spacing: 0;
+  line-height: 1.75;
+}
+html.lang-ur .hero-step p > span:not(.hero-no) { font-weight: 400; line-height: 1.85; }
+html.lang-ur .hero-no,
+.hero-chain[dir="rtl"] .hero-no {
+  font-family: var(--font-sans);
+  letter-spacing: 0.16em;
+  line-height: 1.2;
+}
+.hero-chain[dir="rtl"]::before { left: auto; right: 4px; }
+.hero-chain[dir="rtl"] .hero-step b,
+.hero-chain[dir="rtl"] .hero-step p > span:not(.hero-no) {
+  font-family: "Noto Nastaliq Urdu", var(--font-sans);
+  letter-spacing: 0;
+  line-height: 1.75;
+}
+.hero-chain[dir="rtl"] .hero-step p > span:not(.hero-no) { font-weight: 400; line-height: 1.85; }
 .ember { color: #ff6a1a; }
 .stage-wait { color: #9aa4b2; }
 .stage-pay { color: #ff6a1a; }

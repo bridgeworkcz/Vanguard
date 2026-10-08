@@ -1490,7 +1490,6 @@ function ContentEditor({
   const story = storyKey(lang, "about_story");
   const lead = storyKey(lang, "about_lead");
   const title = storyKey(lang, "hero_title");
-  const body = storyKey(lang, "hero_body");
   const [partner, setPartner] = useState({ country: countries[0] ?? "", name: "" });
   const [mediaErr, setMediaErr] = useState("");
   const [saveNote, setSaveNote] = useState("");
@@ -1594,7 +1593,6 @@ function ContentEditor({
         </label>
         <textarea className="field" disabled={readOnly} value={settings[lead] ?? ""} onChange={(e) => onSettings({ ...settings, [lead]: e.target.value })} />
         <input className="field" disabled={readOnly} value={settings[title] ?? ""} onChange={(e) => onSettings({ ...settings, [title]: e.target.value })} />
-        <textarea className="field" disabled={readOnly} value={settings[body] ?? ""} onChange={(e) => onSettings({ ...settings, [body]: e.target.value })} />
         <label className="flex items-center gap-2 text-sm text-mist">
           <input type="checkbox" disabled={readOnly} checked={settings.motion !== "0"} onChange={(e) => onSettings({ ...settings, motion: e.target.checked ? "1" : "0" })} />
           {t("admin_motion")}
