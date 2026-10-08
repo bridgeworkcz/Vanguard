@@ -96,9 +96,16 @@ let titleCache: { at: number; titles: Set<string> } | null = null;
 const headerCache = new Map<string, string[]>();
 const rowCache = new Map<string, { at: number; rows: SheetRow[] }>();
 const rowFlight = new Map<string, Promise<SheetRow[]>>();
+const rowEpoch = new Map<string, number>();
+const rowFlightEpoch = new Map<string, number>();
+
+function epochOf(name: string) {
+  return rowEpoch.get(name) || 0;
+}
 
 export function invalidateSheet(name: string) {
   rowCache.delete(name);
+  rowEpoch.set(name, epochOf(name) + 1);
 }
 
 async function titles(): Promise<Set<string>> {
@@ -166,8 +173,9 @@ export async function readSheetRows(name: string): Promise<SheetRow[]> {
   const hit = rowCache.get(name);
   const ttl = name === "Users" ? USER_TTL : ROW_TTL;
   if (hit && Date.now() - hit.at < ttl) return hit.rows;
+  const seen = epochOf(name);
   const flight = rowFlight.get(name);
-  if (flight) return flight;
+  if (flight && rowFlightEpoch.get(name) === seen) return flight;
   const job = (async () => {
     const schema = SHEET_SCHEMAS[name];
     if (!schema) throw new Error(`Unknown sheet schema: ${name}`);
@@ -175,15 +183,18 @@ export async function readSheetRows(name: string): Promise<SheetRow[]> {
     const values = result.values || [];
     const header = (values[0] || []).map(String);
     const rows = values.length ? rowsFrom(header.length ? header : [...schema], values) : [];
+    if (epochOf(name) !== seen) return readSheetRows(name);
     rowCache.set(name, { at: Date.now(), rows });
     return rows;
   })().catch((err) => {
+    if (epochOf(name) !== seen) return readSheetRows(name);
     if (hit) return hit.rows;
     const stale = rowCache.get(name);
     if (stale) return stale.rows;
     throw err;
   });
   rowFlight.set(name, job);
+  rowFlightEpoch.set(name, seen);
   try {
     return await job;
   } finally {
@@ -195,9 +206,11 @@ export async function readSheetRows(name: string): Promise<SheetRow[]> {
 export async function primeSheetRows(names: string[]): Promise<void> {
   const need = [...new Set(names)].filter((name) => {
     const hit = rowCache.get(name);
-    return !(hit && Date.now() - hit.at < ROW_TTL) && !rowFlight.has(name);
+    const flight = rowFlight.get(name);
+    return !(hit && Date.now() - hit.at < ROW_TTL) && !(flight && rowFlightEpoch.get(name) === epochOf(name));
   });
   if (!need.length) return;
+  const seen = new Map(need.map((name) => [name, epochOf(name)]));
   const job = (async () => {
     const grids = await batchValues(need.map((name) => `${name}!A:${col((SHEET_SCHEMAS[name] || []).length || 1)}`));
     const out = new Map<string, SheetRow[]>();
@@ -206,7 +219,7 @@ export async function primeSheetRows(names: string[]): Promise<void> {
       const header = (values[0] || []).map(String);
       const schema = SHEET_SCHEMAS[name] || [];
       const rows = values.length ? rowsFrom(header.length ? header : [...schema], values) : [];
-      rowCache.set(name, { at: Date.now(), rows });
+      if (epochOf(name) === seen.get(name)) rowCache.set(name, { at: Date.now(), rows });
       out.set(name, rows);
     });
     return out;
@@ -214,6 +227,7 @@ export async function primeSheetRows(names: string[]): Promise<void> {
   for (const name of need) {
     const one = job.then((map) => map.get(name) || []);
     rowFlight.set(name, one);
+    rowFlightEpoch.set(name, seen.get(name) || 0);
     void one.finally(() => {
       if (rowFlight.get(name) === one) rowFlight.delete(name);
     });

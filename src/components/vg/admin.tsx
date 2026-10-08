@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import {
@@ -158,7 +158,7 @@ function CaseFiles({
               <button
                 type="button"
                 className="btn"
-                onClick={() => void reviewDocument({ data: { id: doc.id, status: "APPROVED", reason: "" } }).then(onChanged)}
+                onClick={() => void reviewDocument({ data: { id: doc.id, status: "APPROVED", reason: "" } }).then(onChanged).catch(() => setFileErr(t("admin_unsaved")))}
               >
                 {t("admin_doc_ok")}
               </button>
@@ -169,7 +169,7 @@ function CaseFiles({
                   const code = docReason.split("|")[0] || "other";
                   const extra = docReason.split("|").slice(1).join("|");
                   const reason = ["blur", "name", "page", "other"].includes(code) ? `${code}|${extra}` : `other|${docReason}`;
-                  void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason } }).then(onChanged);
+                  void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason } }).then(onChanged).catch(() => setFileErr(t("admin_unsaved")));
                 }}
               >
                 {t("admin_doc_no")}
@@ -530,6 +530,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
       const listed = await adminListApplications({ data: { includeIncomplete: showAll } });
       setApps(listed.map((row) => (row.id === detail.app.id && moved > row.stage ? { ...row, stage: moved } : row)));
       setStageNote(t("admin_stage_ok"));
+      void reload();
     } catch (e) {
       const text = stageFail(errorMessage(e), t);
       setStageNote(text);
@@ -588,7 +589,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                   {overview.closed.map((row) => (
                     <li key={row.userId} className="flex flex-wrap items-center gap-2 text-sm">
                       <span>{row.email || row.fullName}</span>
-                      <button type="button" className="btn" onClick={() => void adminRestoreAccount({ data: { userId: row.userId } }).then(() => adminOverview().then(setOverview))}>
+                      <button type="button" className="btn" onClick={() => void adminRestoreAccount({ data: { userId: row.userId } }).then(() => adminOverview().then(setOverview)).catch(() => setErr(t("admin_unsaved")))}>
                         {t("account_restore")}
                       </button>
                     </li>
@@ -610,7 +611,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       <select
                         className="field max-w-40"
                         defaultValue={u.role}
-                        onChange={(e) => void adminSetRole({ data: { userId: u.userId, role: e.target.value } }).then(() => adminOverview().then(setOverview))}
+                        onChange={(e) => void adminSetRole({ data: { userId: u.userId, role: e.target.value } }).then(() => adminOverview().then(setOverview)).catch((err: unknown) => {
+                          const text = err instanceof Error ? err.message : "";
+                          setErr(text === "Last admin" ? t("admin_last_admin") : t("admin_unsaved"));
+                        })}
                       >
                         <option>CLIENT</option>
                         <option>SUBAGENT</option>
@@ -739,7 +743,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               className="glass grid gap-2 p-4 md:grid-cols-4"
               onSubmit={(e) => {
                 e.preventDefault();
-                void adminCreateApplication({ data: newApp }).then(() => adminListApplications({ data: { includeIncomplete: true } }).then(setApps));
+                setErr("");
+                void adminCreateApplication({ data: newApp })
+                  .then(() => adminListApplications({ data: { includeIncomplete: true } }).then(setApps))
+                  .then(() => reload())
+                  .catch(() => setErr(t("admin_unsaved")));
               }}
             >
               <p className="md:col-span-4 text-sm text-mist">{t("admin_new_app")}</p>
@@ -904,7 +912,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <button
                       type="button"
                       className="btn"
-                      onClick={() => void adminMarkCommission({ data: { id: detail.app.id, paid: true } }).then(() => setStageNote(t("agent_pay_paid")))}
+                      onClick={() => void adminMarkCommission({ data: { id: detail.app.id, paid: true } }).then(() => setStageNote(t("agent_pay_paid"))).catch(() => setStageNote(t("admin_unsaved")))}
                     >
                       {t("agent_comm")} · {t("agent_pay_paid")}
                     </button>
@@ -932,9 +940,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     className="field"
                     value={detail.app.referrerUserId || ""}
                     onChange={(e) =>
-                      void adminSetReferrer({ data: { id: detail.app.id, referrerUserId: e.target.value } }).then(() =>
-                        adminGetApplication({ data: detail.app.id }).then(setDetail),
-                      )
+                      void adminSetReferrer({ data: { id: detail.app.id, referrerUserId: e.target.value } })
+                        .then(() => adminGetApplication({ data: detail.app.id }).then(setDetail))
+                        .catch(() => setStageNote(t("admin_unsaved")))
                     }
                   >
                     <option value="">{t("admin_referrer_none")}</option>
@@ -1001,9 +1009,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       className="field"
                       value={detail.app.processStage}
                       onChange={(e) =>
-                        void adminSetProcess({ data: { id: detail.app.id, processStage: e.target.value } }).then(() =>
-                          adminGetApplication({ data: detail.app.id }).then(setDetail),
-                        )
+                        void adminSetProcess({ data: { id: detail.app.id, processStage: e.target.value } })
+                          .then(() => adminGetApplication({ data: detail.app.id }).then(setDetail))
+                          .catch(() => setStageNote(t("admin_unsaved")))
                       }
                     >
                       {PROCESS_STAGES.map((s) => (
@@ -1026,7 +1034,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                         void asData(file).then((packed) =>
                           adminUploadFinal({
                             data: { applicationId: detail.app.id, category: "FINAL", ...packed },
-                          }).then(() => adminGetApplication({ data: detail.app.id }).then(setDetail)),
+                          })
+                            .then(() => adminGetApplication({ data: detail.app.id }).then(setDetail))
+                            .catch(() => setStageNote(t("admin_unsaved"))),
                         );
                       }}
                     />
@@ -1035,7 +1045,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <label className="mt-4 grid gap-1 text-sm">
                   {t("admin_dispatch")}
                   <textarea className="field" value={dispatch} onChange={(e) => setDispatch(e.target.value)} />
-                  <button type="button" className="btn w-fit" onClick={() => void adminSaveDispatch({ data: { id: detail.app.id, note: dispatch } })}>
+                  <button type="button" className="btn w-fit" onClick={() => void adminSaveDispatch({ data: { id: detail.app.id, note: dispatch } }).then(() => setStageNote(t("admin_saved"))).catch(() => setStageNote(t("admin_unsaved")))}>
                     {t("save")}
                   </button>
                 </label>
@@ -1047,7 +1057,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     void postMessage({ data: { applicationId: detail.app.id, body: note } }).then(() => {
                       setNote("");
                       return adminGetApplication({ data: detail.app.id }).then(setDetail);
-                    });
+                    }).catch(() => setStageNote(t("admin_unsaved")));
                   }}
                 >
                   <input className="field min-w-0 flex-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("messages")} />
@@ -1081,9 +1091,14 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               products={data.products}
               initial={draft}
               onSave={async (v) => {
-                await adminSaveVacancy({ data: v });
-                setDraft({});
-                reload();
+                try {
+                  await adminSaveVacancy({ data: v });
+                  setDraft({});
+                  setErr("");
+                  await reload();
+                } catch {
+                  setErr(t("admin_unsaved"));
+                }
               }}
             />
             {draft.id ? <WorkplacePhotos vacancyId={draft.id} readOnly={!isAdmin} /> : null}
@@ -1099,7 +1114,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     defaultValue={v.salaryNet}
                     aria-label={t("salary")}
                     onBlur={(e) => {
-                      if (e.target.value !== v.salaryNet) void adminSaveVacancy({ data: { ...v, salaryNet: e.target.value } }).then(reload);
+                      if (e.target.value !== v.salaryNet) void adminSaveVacancy({ data: { ...v, salaryNet: e.target.value } }).then(reload).catch(() => setErr(t("admin_unsaved")));
                     }}
                   />
                   <div className="grid min-w-0 grid-cols-2 gap-2">
@@ -1110,7 +1125,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       aria-label={t("quota")}
                       onBlur={(e) => {
                         const quota = Number(e.target.value);
-                        if (quota !== v.quota) void adminSaveVacancy({ data: { ...v, quota } }).then(reload);
+                        if (quota !== v.quota) void adminSaveVacancy({ data: { ...v, quota } }).then(reload).catch(() => setErr(t("admin_unsaved")));
                       }}
                     />
                     <input
@@ -1119,7 +1134,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       placeholder={t("blocked")}
                       onBlur={(e) => {
                         if (e.target.value !== (v.blockedCitizenships || "")) {
-                          void adminSaveVacancy({ data: { ...v, blockedCitizenships: e.target.value } }).then(reload);
+                          void adminSaveVacancy({ data: { ...v, blockedCitizenships: e.target.value } }).then(reload).catch(() => setErr(t("admin_unsaved")));
                         }
                       }}
                     />
@@ -1129,7 +1144,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       <input
                         type="checkbox"
                         checked={v.active}
-                        onChange={(e) => void adminSaveVacancy({ data: { ...v, active: e.target.checked } }).then(reload)}
+                        onChange={(e) => void adminSaveVacancy({ data: { ...v, active: e.target.checked } }).then(reload).catch(() => setErr(t("admin_unsaved")))}
                       />
                       {t("active")}
                     </label>
@@ -1141,12 +1156,12 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       onClick={() =>
                         void adminSaveVacancy({
                           data: { ...v, active: false, pauseUntil: new Date(Date.now() + 86400000).toISOString() },
-                        }).then(reload)
+                        }).then(reload).catch(() => setErr(t("admin_unsaved")))
                       }
                     >
                       {t("pause_day")}
                     </button>
-                    <button type="button" className="btn" onClick={() => void adminDeleteVacancy({ data: v.id }).then(reload)}>{t("remove")}</button>
+                    <button type="button" className="btn" onClick={() => void adminDeleteVacancy({ data: v.id }).then(reload).catch(() => setErr(t("admin_unsaved")))}>{t("remove")}</button>
                     <label className="grid gap-1 text-xs text-mist">
                       {t("hide_until")}
                       <input
@@ -1156,7 +1171,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                           if (!e.target.value) return;
                           void adminSaveVacancy({
                             data: { ...v, active: false, pauseUntil: new Date(`${e.target.value}T23:59:59`).toISOString() },
-                          }).then(reload);
+                          }).then(reload).catch(() => setErr(t("admin_unsaved")));
                         }}
                       />
                     </label>
@@ -1418,7 +1433,7 @@ function TeamEditor({
                   .catch((e: unknown) => setErr(photoError(e, t)));
               }}
             />
-            <button type="button" className="btn" onClick={() => void adminDeleteTeam({ data: m.id }).then(onChange)}>{t("remove")}</button>
+            <button type="button" className="btn" onClick={() => void adminDeleteTeam({ data: m.id }).then(onChange).catch((e: unknown) => setErr(photoError(e, t)))}>{t("remove")}</button>
               </>
             )}
           </li>
@@ -1678,7 +1693,7 @@ function ContentEditor({
                 {m.active === false ? (
                   <button type="button" className="btn" onClick={() => patchMedia(m, { active: true })}>{t("admin_show")}</button>
                 ) : (
-                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(saved)}>{t("admin_hide")}</button>
+                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: m.id }).then(saved).catch((e: unknown) => setMediaErr(photoError(e, t)))}>{t("admin_hide")}</button>
                 )}
               </>
             )}
@@ -1690,10 +1705,12 @@ function ContentEditor({
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void adminSavePartner({ data: partner }).then(() => {
-            setPartner({ ...partner, name: "" });
-            onSaved();
-          });
+          void adminSavePartner({ data: partner })
+            .then(() => {
+              setPartner({ ...partner, name: "" });
+              onSaved();
+            })
+            .catch(() => setMediaErr(t("admin_unsaved")));
         }}
       >
         <select className="field max-w-48" value={partner.country} onChange={(e) => setPartner({ ...partner, country: e.target.value })}>
@@ -1711,7 +1728,7 @@ function ContentEditor({
             <span>
               {p.country} · {p.name}
             </span>
-            {readOnly ? null : <button type="button" onClick={() => void adminDeletePartner({ data: p.id }).then(onSaved)}>{t("remove")}</button>}
+            {readOnly ? null : <button type="button" onClick={() => void adminDeletePartner({ data: p.id }).then(onSaved).catch(() => setMediaErr(t("admin_unsaved")))}>{t("remove")}</button>}
           </li>
         ))}
       </ul>
@@ -1760,13 +1777,13 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
               <>
                 <input className="field max-w-xs" defaultValue={shot.caption} placeholder={t("admin_caption")} onBlur={(e) => {
                   if (e.target.value === shot.caption) return;
-                  void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: e.target.value, vacancyId, cover: shot.cover, active: shot.active } }).then(load);
+                  void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: e.target.value, vacancyId, cover: shot.cover, active: shot.active } }).then(load).catch(fail);
                 }} />
-                <button type="button" className="btn" onClick={() => void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: shot.caption, vacancyId, cover: true, active: true } }).then(load)}>{t("admin_cover")}</button>
+                <button type="button" className="btn" onClick={() => void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: shot.caption, vacancyId, cover: true, active: true } }).then(load).catch(fail)}>{t("admin_cover")}</button>
                 {shot.active === false ? (
                   <button type="button" className="btn" onClick={() => void adminSaveMedia({ data: { id: shot.id, kind: "vacancy", title: shot.title, caption: shot.caption, vacancyId, active: true, cover: shot.cover } }).then(load).catch(fail)}>{t("admin_show")}</button>
                 ) : (
-                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: shot.id }).then(load)}>{t("admin_hide")}</button>
+                  <button type="button" className="btn" onClick={() => void adminDeleteMedia({ data: shot.id }).then(load).catch(fail)}>{t("admin_hide")}</button>
                 )}
               </>
             )}
@@ -1780,7 +1797,14 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
 function PriceRow({ product, readOnly, onSaved, log }: { product: VisaProduct; readOnly: boolean; onSaved: () => void; log?: { at: string; by: string; amount: string } }) {
   const t = useAdminT();
   const [p, setP] = useState(product);
-  useEffect(() => setP(product), [product.id, product.basePrice, product.active]);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const held = useRef<number | null>(null);
+  useEffect(() => {
+    if (held.current !== null && product.basePrice !== held.current) return;
+    held.current = null;
+    setP(product);
+  }, [product.id, product.basePrice, product.active]);
   const toggle = (lane: Processing) => {
     if (readOnly) return;
     const has = p.allowedProcessing.includes(lane);
@@ -1795,24 +1819,43 @@ function PriceRow({ product, readOnly, onSaved, log }: { product: VisaProduct; r
           {p.name} · {p.duration}
         </p>
       </div>
-      <input className="field" type="number" disabled={readOnly} value={p.basePrice} onChange={(e) => setP({ ...p, basePrice: Number(e.target.value) })} />
+      <input className="field" type="number" disabled={readOnly || busy} value={p.basePrice} onChange={(e) => setP({ ...p, basePrice: Number(e.target.value) })} />
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" disabled={readOnly} checked={p.active} onChange={(e) => setP({ ...p, active: e.target.checked })} />
+        <input type="checkbox" disabled={readOnly || busy} checked={p.active} onChange={(e) => setP({ ...p, active: e.target.checked })} />
         {t("admin_offered")}
       </label>
       <div className="flex flex-wrap gap-2 text-xs">
         {(["STANDARD", "PRIORITY", "EXPRESS"] as Processing[]).map((lane) => (
           <label key={lane} className="flex items-center gap-1">
-            <input type="checkbox" disabled={readOnly} checked={p.allowedProcessing.includes(lane)} onChange={() => toggle(lane)} />
+            <input type="checkbox" disabled={readOnly || busy} checked={p.allowedProcessing.includes(lane)} onChange={() => toggle(lane)} />
             {lane}
           </label>
         ))}
       </div>
       {readOnly ? null : (
-        <button type="button" className="btn w-fit" onClick={() => void adminSaveProduct({ data: p }).then(onSaved)}>
+        <button
+          type="button"
+          className="btn w-fit"
+          disabled={busy}
+          onClick={() => {
+            const next = { ...p, basePrice: Math.max(0, Math.round(Number(p.basePrice) || 0)) };
+            setBusy(true);
+            setNote("");
+            void adminSaveProduct({ data: next })
+              .then(() => {
+                held.current = next.basePrice;
+                setP(next);
+                setNote(t("admin_saved"));
+                onSaved();
+              })
+              .catch(() => setNote(t("admin_unsaved")))
+              .finally(() => setBusy(false));
+          }}
+        >
           {t("save")}
         </button>
       )}
+      {note ? <p className="text-sm text-mist md:col-span-4">{note}</p> : null}
       <p className="text-sm text-mist md:col-span-4">{t("price_kept")}</p>
       {log ? <p className="text-xs text-mist md:col-span-4">{t("price_who")}: {log.at.slice(0, 16)} · {log.amount} · {log.by}</p> : null}
     </li>

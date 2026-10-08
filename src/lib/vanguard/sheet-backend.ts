@@ -194,9 +194,9 @@ async function loadProducts(): Promise<VisaProduct[]> {
   const base = parsed.length ? parsed : VISA_PRODUCTS;
   const pricing = await readSheetRows("Pricing");
   return base.map((product) => {
-    const row = pricing.find((item) => item.id === product.id || item.name === product.id);
-    if (!row || row.active === "false") return product;
-    const amount = Number(row.amount);
+    const rows = pricing.filter((item) => (item.id === product.id || item.name === product.id) && item.active !== "false");
+    rows.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    const amount = Number(rows[0]?.amount);
     return Number.isFinite(amount) && amount > 0 ? { ...product, basePrice: Math.round(amount) } : product;
   });
 }
@@ -471,6 +471,7 @@ async function restoreQuota(vacancyId: string) {
   if (!raw) return;
   const vacancy = vacancyFrom(raw);
   await updateSheetRowById("Vacancies", vacancyId, vacancyTo({ ...vacancy, quota: vacancy.quota + 1 }, raw));
+  dropPublicCache();
 }
 
 async function writeDossier(userId: string, app: ReturnType<typeof appFrom>, fullName: string, citizenship: string) {
@@ -964,13 +965,14 @@ function mediaFrom(row: SheetRow) {
 let publicCache: { at: number; value: Awaited<ReturnType<typeof buildPublicSite>> } | null = null;
 let filingsCache: { at: number; value: { id: string; citizenship: string; country: string; createdAt: string; status: string; stage: number }[] } | null = null;
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
+let publicGen = 0;
 const PUBLIC_TTL = 90_000;
 const SNAP_PATH = "cache/public-site.json";
 
 function dropPublicCache() {
-  if (publicCache) publicCache = { at: 0, value: publicCache.value };
+  publicGen += 1;
   filingsCache = null;
-  void refreshPublic();
+  if (publicCache) publicCache = { at: 0, value: publicCache.value };
 }
 
 async function readSnap() {
@@ -994,22 +996,58 @@ async function writeSnap(value: Awaited<ReturnType<typeof buildPublicSite>>) {
   }
 }
 
-function refreshPublic() {
-  if (publicFlight) return publicFlight;
-  publicFlight = buildPublicSite()
-    .then((value) => {
+function refreshPublic(depth = 0): Promise<Awaited<ReturnType<typeof buildPublicSite>>> {
+  const gen = publicGen;
+  if (publicFlight) {
+    return publicFlight.then((value) => {
+      if (gen === publicGen || depth >= 2) return value;
+      return refreshPublic(depth + 1);
+    });
+  }
+  let flight!: Promise<Awaited<ReturnType<typeof buildPublicSite>>>;
+  flight = buildPublicSite()
+    .then(async (value) => {
+      if (publicFlight === flight) publicFlight = null;
+      if (gen !== publicGen) {
+        if (depth < 2) return refreshPublic(depth + 1);
+        if (publicCache && publicCache.at > 0) return publicCache.value;
+        return value;
+      }
       publicCache = { at: Date.now(), value };
-      void writeSnap(value);
+      await writeSnap(value);
       return value;
     })
     .catch((err) => {
-      if (publicCache) return publicCache.value;
+      if (publicFlight === flight) publicFlight = null;
+      console.error("[site]", err);
+      if (gen !== publicGen && depth < 2) return refreshPublic(depth + 1);
+      if (publicCache?.value) return publicCache.value;
       throw err;
-    })
-    .finally(() => {
-      publicFlight = null;
     });
-  return publicFlight;
+  publicFlight = flight;
+  return flight;
+}
+
+async function publishProductList(products: VisaProduct[], priceLog: string) {
+  try {
+    const visible = products.filter((item) => item.active);
+    let base = publicCache?.value;
+    if (!base) base = (await readSnap())?.value;
+    if (!base) {
+      await refreshPublic();
+      return;
+    }
+    const value = {
+      ...base,
+      products: visible,
+      settings: { ...base.settings, visa_products: JSON.stringify(products), price_log: priceLog },
+    };
+    publicCache = { at: Date.now(), value };
+    await writeSnap(value);
+  } catch (err) {
+    console.error("[price-publish]", err);
+    dropPublicCache();
+  }
 }
 
 /** A saved copy is served while the table is busy. The table is read about once a minute. */
@@ -1025,13 +1063,14 @@ async function readyForPublicRead() {
 }
 
 export async function publicSite() {
-  if (publicCache && Date.now() - publicCache.at < PUBLIC_TTL) return publicCache.value;
+  if (publicCache && publicCache.at > 0 && Date.now() - publicCache.at < PUBLIC_TTL) return publicCache.value;
   if (!publicCache) {
     const snap = await readSnap();
-    if (snap) publicCache = snap;
+    if (snap?.value && snap.at > 0) publicCache = snap;
   }
-  if (publicCache) {
-    if (Date.now() - publicCache.at >= PUBLIC_TTL) void refreshPublic();
+  if (publicCache && publicCache.at > 0 && Date.now() - publicCache.at < PUBLIC_TTL) return publicCache.value;
+  if (publicCache && publicCache.at > 0) {
+    void refreshPublic();
     return publicCache.value;
   }
   return refreshPublic();
@@ -1591,6 +1630,7 @@ export async function adminCreateApplication(userId: string, data: { email: stri
   const raw = (await readSheetRows("Vacancies")).find((row) => row.id === vacancy.id);
   if (raw) await updateSheetRowById("Vacancies", vacancy.id, vacancyTo({ ...vacancy, quota: Math.max(0, vacancy.quota - 1) }, raw));
   await audit(userId, "APPLICATION_CREATED", id, data.email);
+  dropPublicCache();
   return { id };
 }
 
@@ -1667,6 +1707,7 @@ export async function adminSaveSettings(userId: string, data: Record<string, str
     await putSetting(key, value.slice(0, 8000), userId);
   }
   await audit(userId, "SETTINGS", "site", Object.keys(data ?? {}).join(","));
+  await refreshPublic();
 }
 
 export async function adminDriveStatus(userId: string) {
@@ -1756,19 +1797,24 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
   await saveProducts(next, userId);
   const stamp = nowIso();
   const pricing = await readSheetRows("Pricing");
-  const priceRow = {
-    id: data.id,
-    name: data.id,
-    description: data.name,
-    amount: String(Math.max(0, Math.round(Number(data.basePrice) || 0))),
+  const amount = String(Math.max(0, Math.round(Number(data.basePrice) || 0)));
+  const matches = pricing.filter((row) => row.id && (row.id === data.id || row.name === data.id));
+  const pricePatch = {
+    amount,
     currency: "EUR",
     active: String(Boolean(data.active)),
     updatedAt: stamp,
     updatedBy: userId,
+    description: data.name,
   };
-  if (pricing.some((row) => row.id === data.id)) await updateSheetRowById("Pricing", data.id, priceRow);
-  else await appendSheetRow("Pricing", priceRow);
-  await audit(userId, "PRICING", data.id, String(data.basePrice));
+  if (!matches.length) {
+    await appendSheetRow("Pricing", { id: data.id, name: data.id, ...pricePatch });
+  } else {
+    for (const row of matches) {
+      await updateSheetRowById("Pricing", row.id, { ...row, ...pricePatch });
+    }
+  }
+  await audit(userId, "PRICING", data.id, amount);
   const logMap = await settingMap();
   let priceLog: Record<string, { at: string; by: string; amount: string }> = {};
   try {
@@ -1776,9 +1822,10 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
   } catch {
     priceLog = {};
   }
-  priceLog[data.id] = { at: stamp, by: userId, amount: String(data.basePrice) };
-  await putSetting("price_log", JSON.stringify(priceLog), userId);
-  dropPublicCache();
+  priceLog[data.id] = { at: stamp, by: userId, amount };
+  const encoded = JSON.stringify(priceLog);
+  await putSetting("price_log", encoded, userId);
+  await publishProductList(next, encoded);
 }
 
 export async function adminSaveMedia(

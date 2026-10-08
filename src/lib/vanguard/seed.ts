@@ -419,4 +419,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   banner_start: "",
   banner_end: "",
   step_copy: "",
+  desk_hours: "",
+  review_1_name: "",
+  review_1_country: "",
+  review_1_date: "",
+  review_1_text: "",
+  review_2_name: "",
+  review_2_country: "",
+  review_2_date: "",
+  review_2_text: "",
 };

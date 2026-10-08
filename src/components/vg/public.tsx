@@ -84,7 +84,6 @@ export function HomePage() {
   }, [catalog]);
   const settings = data?.settings ?? {};
   const fromPrice = catalog.filter((p) => p.active).reduce((min, p) => Math.min(min, p.basePrice), Number.POSITIVE_INFINITY);
-  const samples = (data?.vacancies ?? []).filter((v) => v.active && v.quota > 0 && !(v.pauseUntil && Date.parse(v.pauseUntil) > Date.now())).slice(0, 3);
   const title = settings[storyKey(lang, "hero_title")] || settings.hero_title_en;
   const body = settings[storyKey(lang, "hero_body")] || settings.hero_body_en;
 
@@ -220,24 +219,6 @@ export function HomePage() {
           </form>
         </div>
       </section>
-      {samples.length ? (
-        <section className="mx-auto max-w-6xl px-4 pb-4">
-          <h2 className="display text-3xl">{t("sample_openings")}</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {samples.map((job) => (
-              <article key={job.id} className="glass p-4">
-                <p className="inline-flex items-center gap-2 text-sm text-mist"><MiniFlag country={job.country} /> {job.country}</p>
-                <h3 className="display mt-2 text-2xl">{job.title}</h3>
-                <p className="mt-1 text-sm text-mist">{job.employer}</p>
-                <p className="mt-2 text-sm text-paper">{job.salaryNet}</p>
-                <p className="text-sm">{job.workingHours}</p>
-                <p className="text-sm text-mist">{job.accommodation}</p>
-                <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
       <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 md:grid-cols-2">
         <article className="glass p-5">
           <h2 className="display text-3xl">{t("fee_includes_t")}</h2>
