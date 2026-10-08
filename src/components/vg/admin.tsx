@@ -47,9 +47,9 @@ import { isOverdue } from "@/lib/vanguard/ops";
 import { DocScreen } from "./doc-view";
 import { Pager } from "./pages";
 
-type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit" | "clip";
+type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
 
-const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit", "clip"];
+const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit"];
 
 function errorMessage(err: unknown) {
   if (err instanceof Error && err.message) return err.message;
@@ -592,43 +592,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           ))}
         </div>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
-
-        {current === "clip" ? (
-          <div className="mt-8 max-w-xl">
-            <h1 className="display text-3xl">{t("admin_clip")}</h1>
-            <p className="mt-3 text-sm text-mist">{t("admin_clip_hint")}</p>
-            <video className="mt-4 w-full bg-black" controls playsInline preload="metadata" src="/clip/vanguard-how-to.mp4" />
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn-solid"
-                onClick={() => {
-                  void (async () => {
-                    try {
-                      const res = await fetch("/clip/vanguard-how-to.mp4");
-                      if (!res.ok) throw new Error("File");
-                      const blob = await res.blob();
-                      const file = new File([blob], "vanguard-how-to.mp4", { type: "video/mp4" });
-                      const share = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
-                      if (share.canShare?.({ files: [file] })) {
-                        await navigator.share({ files: [file], title: "Vanguard" });
-                        return;
-                      }
-                    } catch (e) {
-                      if (e instanceof Error && e.name === "AbortError") return;
-                    }
-                    window.location.assign("/clip/vanguard-how-to.mp4");
-                  })();
-                }}
-              >
-                {t("admin_clip_save")}
-              </button>
-              <a className="btn" href="/clip/vanguard-how-to.mp4" target="_blank" rel="noopener noreferrer">
-                {t("admin_clip_open")}
-              </a>
-            </div>
-          </div>
-        ) : null}
 
         {current === "overview" && overview ? (
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
