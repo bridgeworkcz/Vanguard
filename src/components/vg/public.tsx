@@ -112,7 +112,7 @@ export function HomePage() {
     window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId: product.id, speed }));
     void navigate({
       to: "/search",
-      search: { citizenship, country, product: product.id, speed },
+      search: { citizenship, country, product: product.id, speed, employer: "" },
     });
   }
 
@@ -302,11 +302,13 @@ export function SearchPage({
   country,
   product,
   speed,
+  employer,
 }: {
   citizenship: string;
   country: string;
   product: string;
   speed: string;
+  employer: string;
 }) {
   const { t } = useI18n();
   const { signedIn } = useDesk();
@@ -349,6 +351,54 @@ export function SearchPage({
   const compared = jobs.filter((job) => pick.includes(job.id));
   function toggleCompare(id: string) {
     setPick((cur) => (cur.includes(id) ? cur.filter((item) => item !== id) : cur.length >= 2 ? [cur[1]!, id] : [...cur, id]));
+  }
+  const employerName = employer.trim();
+  if (employerName) {
+    const wanted = employerName.toLowerCase().replace(/\s+/g, " ");
+    const seats = (data?.vacancies ?? []).filter((job) => {
+      const name = job.employer.trim().toLowerCase().replace(/\s+/g, " ");
+      return job.active && job.quota > 0 && name === wanted && (!country || job.country === country);
+    });
+    return (
+      <Shell>
+        <div className="mx-auto max-w-3xl px-4 py-12">
+          <Link to="/about" className="text-sm text-mist underline-offset-4 hover:underline">{t("search_back")}</Link>
+          <p className="kicker mt-6 inline-flex items-center gap-2">{country ? <MiniFlag country={country} /> : null}{country}</p>
+          <h1 className="display mt-3 text-4xl">{employerName}</h1>
+          {seats.length === 0 ? <p className="mt-6 text-mist">{t("employer_empty")}</p> : null}
+          <ul className="mt-6 grid gap-3">
+            {seats.map((job) => {
+              const visa = data?.products.find((item) => item.id === job.visaProductId);
+              return (
+                <li key={job.id} className="border-t border-white/10 py-4">
+                  <Link
+                    to="/vacancies/$id"
+                    params={{ id: job.id }}
+                    search={{ citizenship: "", product: job.visaProductId, speed: "STANDARD" }}
+                    className="display text-3xl"
+                  >
+                    {job.title}
+                  </Link>
+                  <p className="mt-2 text-sm text-mist">{visa ? `${visa.name} · ${visa.duration}` : job.country}</p>
+                  <p className="mt-1 text-sm text-paper">{job.salaryNet}</p>
+                  <p className="text-sm">{job.workingHours}</p>
+                  <p className="text-sm text-mist">{job.accommodation}</p>
+                  <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
+                  <Link
+                    to="/vacancies/$id"
+                    params={{ id: job.id }}
+                    search={{ citizenship: "", product: job.visaProductId, speed: "STANDARD" }}
+                    className="btn-solid mt-3 inline-flex"
+                  >
+                    {t("search_apply")}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </Shell>
+    );
   }
   return (
     <Shell>
@@ -545,6 +595,7 @@ export function VacancyPage({
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [citizen, setCitizen] = useState(citizenship);
   const [agentCode, setAgentCode] = useState("");
   useEffect(() => {
     setAgentCode(sessionStorage.getItem("vg-agent") || "");
@@ -556,7 +607,7 @@ export function VacancyPage({
     if (!job) return;
     if (!signedIn) {
       sessionStorage.setItem("vg-agent", agentCode.trim());
-      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() }));
+      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim() }));
       void navigate({ to: "/login" });
       return;
     }
@@ -564,7 +615,7 @@ export function VacancyPage({
     setErr("");
     try {
       void noteFunnel({ data: { kind: "apply" } }).catch(() => undefined);
-      const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim(), lang } });
+      const res = await createApplication({ data: { vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim(), lang } });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
       setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
@@ -631,8 +682,19 @@ export function VacancyPage({
           />
         </label>
         {!signedIn ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
+        {!citizenship ? (
+          <label className="mt-6 grid max-w-sm gap-1 text-sm">
+            {t("calc_citizenship")}
+            <select className="field" value={citizen} onChange={(e) => setCitizen(e.target.value)}>
+              <option value="">{t("calc_pick")}</option>
+              {CITIZENSHIPS.filter((item) => !sameCountry(item, job.country)).map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
-          <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizenship} onClick={() => void apply()}>
+          <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizen} onClick={() => void apply()}>
             {busy ? t("applying") : t("search_apply")}
           </button>
         </div>
@@ -811,8 +873,14 @@ export function AboutPage() {
                   {open ? (
                     <ul className="grid gap-x-6 gap-y-1 pb-4 sm:grid-cols-2 lg:grid-cols-3">
                       {list.map((p) => (
-                        <li key={p.id} className="text-[12px] leading-snug text-mist">
-                          {p.name}
+                        <li key={p.id}>
+                          <Link
+                            to="/search"
+                            search={{ citizenship: "", country: c, product: "", speed: "", employer: p.name }}
+                            className="block min-h-11 py-2 text-sm text-paper"
+                          >
+                            {p.name}
+                          </Link>
                         </li>
                       ))}
                     </ul>
