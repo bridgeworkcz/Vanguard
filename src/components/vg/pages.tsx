@@ -106,6 +106,34 @@ export function QuestionsPage() {
           </ul>
         </section>
       ) : null}
+      {!needle || `${t("sample_case_t")} ${t("sample_case_b")}`.toLowerCase().includes(needle) ? (
+        <section id="case" className="grid gap-3 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("sample_case_t")}</h2>
+          <p className="text-mist">{t("sample_case_b")}</p>
+          <ol className="grid gap-2 text-sm">
+            {[t("stage_1"), t("stage_2"), t("stage_3"), t("stage_4"), t("status_issued"), t("status_rejected"), t("status_cancelled")].map((line) => (
+              <li key={line} className="border-t border-white/10 py-2">{line}</li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+      {!needle || `${t("family_t")} ${t("family_can")} ${t("family_cant")}`.toLowerCase().includes(needle) ? (
+        <section id="family" className="grid gap-3 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("family_t")}</h2>
+          <p>{t("family_can")}</p>
+          <p className="text-mist">{t("family_cant")}</p>
+        </section>
+      ) : null}
+      {!needle || t("share_cards").toLowerCase().includes(needle) ? (
+        <section id="cards" className="grid gap-3 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("share_cards")}</h2>
+          <ul className="grid gap-3">
+            <li className="glass p-4"><p className="ember text-sm">01</p><h3 className="display text-2xl">{t("card_steps")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
+            <li className="glass p-4"><p className="ember text-sm">02</p><h3 className="display text-2xl">{t("card_status")}</h3><p className="mt-2 text-sm text-mist">{t("sample_case_b")}</p></li>
+            <li className="glass p-4"><p className="ember text-sm">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist">www.vanguardmobility.site/#calc</p></li>
+          </ul>
+        </section>
+      ) : null}
       {groups.map((group) => (
         <section key={group.title} className="grid gap-5 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{group.title}</h2>
@@ -127,12 +155,13 @@ export function AgentsPage() {
     <Article kicker={t("agents_kicker")} title={t("agents_title")}>
       <p>{t("agents_body")}</p>
       <ul className="grid gap-3">
-        {[t("agents_1"), t("agents_2"), t("agents_3")].map((line) => (
+        {[t("agent_direct"), t("agent_sees"), t("agent_when"), t("agents_1"), t("agents_2"), t("agents_3")].map((line) => (
           <li key={line} className="border-t border-white/10 pt-3">
             {line}
           </li>
         ))}
       </ul>
+      <p className="text-sm text-mist">www.vanguardmobility.site/r/your-code</p>
       <p>
         <Link to="/contact" className="btn-solid">
           {t("agents_write")}

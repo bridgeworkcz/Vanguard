@@ -340,12 +340,22 @@ function PhotoPick({ label, onFile }: { label: string; onFile: (file: File) => v
   );
 }
 
+function phoneOf(raw: string) {
+  try {
+    const q = JSON.parse(raw || "{}") as { phone?: string };
+    return q.phone || "";
+  } catch {
+    return "";
+  }
+}
+
 function photoError(err: unknown, t: (key: CopyKey) => string) {
   const text = err instanceof Error ? err.message : "";
   if (text === "heic") return t("admin_photo_heic");
   if (text === "Three") return t("admin_three");
   if (/Drive|stored|403|404|401|busy|register/i.test(text)) return t("admin_drive");
   if (text === "File" || text === "File size" || text === "File type") return t("admin_file_big");
+  if (text) return `${t("admin_unsaved")} ${text}`;
   return t("admin_unsaved");
 }
 
@@ -376,6 +386,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [qStage, setQStage] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(false);
+  const [auditQuery, setAuditQuery] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [managerId, setManagerId] = useState("");
   const [exportNote, setExportNote] = useState("");
@@ -427,9 +439,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   }, [current, role, showAll, data]);
 
   useEffect(() => {
-    if (current !== "applications") return;
-    window.scrollTo(0, 0);
-  }, [id, current]);
+    if (current !== "applications" || !id || !detail) return;
+    document.getElementById("case-detail")?.scrollIntoView({ block: "start" });
+  }, [id, current, detail]);
 
   useEffect(() => {
     if (!id || (role !== "ADMIN" && role !== "MANAGER")) return;
@@ -524,6 +536,14 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <p className="mt-2 text-mist">{label}</p>
               </article>
             ))}
+            {"funnel" in overview && overview.funnel ? (
+              <article className="glass p-5 sm:col-span-3">
+                <p className="kicker">{t("funnel_t")}</p>
+                <p className="mt-2 text-sm text-mist">{t("funnel_calc")}: {overview.funnel.calc}</p>
+                <p className="text-sm text-mist">{t("funnel_apply")}: {overview.funnel.apply}</p>
+                <p className="text-sm text-mist">{t("funnel_q")}: {overview.funnel.question}</p>
+              </article>
+            ) : null}
             {isAdmin ? (
               <div className="sm:col-span-3">
                 <h2 className="mt-6 text-lg">{t("admin_users")}</h2>
@@ -574,7 +594,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
         {current === "applications" && staff ? (
           <div className="mt-8 grid gap-4">
-            {!id ? (<>
+            <>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
               {t("admin_show_all")}
@@ -603,17 +623,26 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 {t("admin_overdue")}
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={unassignedOnly} onChange={(e) => setUnassignedOnly(e.target.checked)} />
-                {t("admin_unassigned")}
+                <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} />
+                {t("mine_only")}
               </label>
               <button
                 type="button"
                 className="btn"
-                onClick={() =>
-                  void exportOpenCases()
-                    .then((r) => setExportNote(`${t("admin_exported")}: ${r.count}`))
-                    .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
-                }
+                onClick={() => {
+                  const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
+                  for (const row of apps.filter((item) => item.status === "OPEN")) {
+                    const phone = row.clientPhone || phoneOf(row.questionnaire);
+                    lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
+                  }
+                  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = "open-cases.csv";
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
               >
                 {t("admin_export")}
               </button>
@@ -681,7 +710,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 .filter((a) => !qStage || String(a.stage) === qStage)
                 .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
                 .filter((a) => !unassignedOnly || !a.assignedManagerId)
-                .filter((a) => !caseQuery.trim() || a.id.toLowerCase().includes(caseQuery.trim().toLowerCase()));
+                .filter((a) => !mineOnly || a.assignedManagerId === me)
+                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)}`.toLowerCase().includes(caseQuery.trim().toLowerCase()));
               const pages = Math.max(1, Math.ceil(filtered.length / 15));
               const currentPage = Math.min(casePage, pages);
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
@@ -719,7 +749,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               </button>
                             </td>
                             <td className="latin" data-label={t("filings_date")}>{a.createdAt?.slice(0, 10)}</td>
-                            <td className="latin" data-label={t("name")}>{a.clientEmail || "—"}</td>
+                            <td className="latin" data-label={t("name")}>
+                              {a.clientEmail || "—"}
+                              {a.accountClosed ? <span className="mt-1 block text-xs text-mist">{t("account_closed")}</span> : null}
+                            </td>
                             <td data-label={t("admin_country")}>{a.country}</td>
                             <td data-label={t("seat")}>
                               {a.vacancyTitle}
@@ -757,7 +790,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </>
               );
             })()}
-            </>) : null}
+            </>
             {id && !detail ? <p className="mt-4">{t("loading")}</p> : null}
             {detail && id ? (
               <article id="case-detail" className="glass w-full min-w-0 max-w-full overflow-x-clip p-5">
@@ -992,6 +1025,17 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {t("active")}
                     </label>
                     <button type="button" className="btn" onClick={() => setDraft(v)}>{t("edit")}</button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        void adminSaveVacancy({
+                          data: { ...v, active: false, pauseUntil: new Date(Date.now() + 86400000).toISOString() },
+                        }).then(reload)
+                      }
+                    >
+                      {t("pause_day")}
+                    </button>
                     <button type="button" className="btn" onClick={() => void adminDeleteVacancy({ data: v.id }).then(reload)}>{t("remove")}</button>
                   </span>
                 </li>
@@ -1036,13 +1080,18 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         ) : null}
 
         {current === "audit" ? (
-          <ul className="mt-8 grid gap-2 text-sm">
-            {audit.map((row) => (
+          <div className="mt-8 grid gap-2">
+            <input className="field max-w-xs" value={auditQuery} placeholder={t("filings_id")} onChange={(e) => setAuditQuery(e.target.value)} />
+          <ul className="grid gap-2 text-sm">
+            {audit
+              .filter((row) => !auditQuery.trim() || `${row.target} ${row.details} ${row.action}`.toLowerCase().includes(auditQuery.trim().toLowerCase()))
+              .map((row) => (
               <li key={row.id} className="border-t border-white/10 py-2">
                 {row.createdAt?.slice(0, 19)} · {row.action} · {row.target} · {row.details}
               </li>
             ))}
           </ul>
+          </div>
         ) : null}
         </div>
       </div>
@@ -1274,6 +1323,14 @@ function ContentEditor({
     { key: "telegram_owner_chat", label: "admin_field_tg_owner" },
     { key: "telegram_staff_chat", label: "admin_field_tg_staff" },
     { key: "subagent_rate", label: "admin_field_rate" },
+    { key: "review_1_name", label: "name" },
+    { key: "review_1_country", label: "admin_country" },
+    { key: "review_1_date", label: "filings_date" },
+    { key: "review_1_text", label: "admin_review_line" },
+    { key: "review_2_name", label: "name" },
+    { key: "review_2_country", label: "admin_country" },
+    { key: "review_2_date", label: "filings_date" },
+    { key: "review_2_text", label: "admin_review_line" },
   ];
   const story = storyKey(lang, "about_story");
   const lead = storyKey(lang, "about_lead");

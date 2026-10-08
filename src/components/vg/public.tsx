@@ -1,12 +1,39 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
-import { createApplication, joinWaitlist } from "@/lib/vanguard/api";
+import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { CountryStill, CountLine, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
+import { MiniFlag } from "./flags";
+
+function Reviews({ settings }: { settings: Record<string, string> }) {
+  const { t } = useI18n();
+  const rows = [1, 2]
+    .map((n) => ({
+      name: settings[`review_${n}_name`] || "",
+      country: settings[`review_${n}_country`] || "",
+      date: settings[`review_${n}_date`] || "",
+      text: settings[`review_${n}_text`] || "",
+    }))
+    .filter((row) => row.name && row.country && row.date && row.text);
+  if (!rows.length) return null;
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-12">
+      <h2 className="display text-3xl">{t("review_t")}</h2>
+      <ul className="mt-4 grid gap-3">
+        {rows.map((row) => (
+          <li key={`${row.name}-${row.date}`} className="border-t border-white/10 py-3">
+            <p>{row.text}</p>
+            <p className="mt-2 text-sm text-mist">{row.name} · {row.country} · {row.date}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS" | "weeks" | "week") => string, p: Processing, min: number, max: number) {
   const n = productionWeeks(min, max, p);
@@ -39,6 +66,16 @@ export function HomePage() {
       /* ignore a broken local note */
     }
   }, []);
+  useEffect(() => {
+    if (!citizenship && !country && !productId && !speed) return;
+    window.localStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId, speed }));
+    if (citizenship || country) sessionStorage.setItem("vg-route", [citizenship, country].filter(Boolean).join(" → "));
+  }, [citizenship, country, productId, speed]);
+  useEffect(() => {
+    if (sessionStorage.getItem("vg-funnel-calc")) return;
+    sessionStorage.setItem("vg-funnel-calc", "1");
+    void noteFunnel({ data: { kind: "calc" } }).catch(() => undefined);
+  }, []);
   const catalog = data ? data.products : VISA_PRODUCTS;
   const products = catalog.filter((p) => p.active && p.country === country);
   const product = products.find((p) => p.id === productId);
@@ -46,6 +83,8 @@ export function HomePage() {
     return Array.from(new Set(catalog.filter((p) => p.active && p.country).map((p) => p.country))).sort((a, b) => a.localeCompare(b));
   }, [catalog]);
   const settings = data?.settings ?? {};
+  const fromPrice = catalog.filter((p) => p.active).reduce((min, p) => Math.min(min, p.basePrice), Number.POSITIVE_INFINITY);
+  const samples = (data?.vacancies ?? []).filter((v) => v.active && v.quota > 0 && !(v.pauseUntil && Date.parse(v.pauseUntil) > Date.now())).slice(0, 3);
   const title = settings[storyKey(lang, "hero_title")] || settings.hero_title_en;
   const body = settings[storyKey(lang, "hero_body")] || settings.hero_body_en;
 
@@ -85,6 +124,7 @@ export function HomePage() {
             {agentNote ? <p className="mt-3 text-sm text-mist">{t("agent_kept")}</p> : null}
           </div>
           <form
+            id="calc"
             className="glass lg:col-span-6 p-5 sm:p-7"
             onSubmit={(e) => {
               e.preventDefault();
@@ -120,9 +160,12 @@ export function HomePage() {
                   ))}
                 </select>
                 {country ? (
-                  <Link to="/country/$code" params={{ code: countrySlug(country) }} className="text-xs text-mist underline-offset-4 hover:underline">
-                    {t("country_openings")}
-                  </Link>
+                  <span className="mt-1 inline-flex items-center gap-2 text-xs text-mist">
+                    <MiniFlag country={country} />
+                    <Link to="/country/$code" params={{ code: countrySlug(country) }} className="underline-offset-4 hover:underline">
+                      {t("country_openings")}
+                    </Link>
+                  </span>
                 ) : null}
               </label>
               <label className="grid gap-1 text-sm text-mist">
@@ -157,6 +200,8 @@ export function HomePage() {
               </label>
               {product && speed ? (
                 <p className="display ember text-5xl sm:col-span-2">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
+              ) : Number.isFinite(fromPrice) ? (
+                <p className="display ember text-4xl sm:col-span-2">{t("fee_from")} {fromPrice} <span className="text-2xl text-mist">EUR</span></p>
               ) : null}
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}
@@ -166,6 +211,38 @@ export function HomePage() {
             </div>
           </form>
         </div>
+      </section>
+      {samples.length ? (
+        <section className="mx-auto max-w-6xl px-4 pb-4">
+          <h2 className="display text-3xl">{t("sample_openings")}</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {samples.map((job) => (
+              <article key={job.id} className="glass p-4">
+                <p className="inline-flex items-center gap-2 text-sm text-mist"><MiniFlag country={job.country} /> {job.country}</p>
+                <h3 className="display mt-2 text-2xl">{job.title}</h3>
+                <p className="mt-1 text-sm text-mist">{job.employer}</p>
+                <p className="mt-2 text-sm ember">{job.salaryNet}</p>
+                <p className="text-sm">{job.workingHours}</p>
+                <p className="text-sm text-mist">{job.accommodation}</p>
+                <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 md:grid-cols-2">
+        <article className="glass p-5">
+          <h2 className="display text-3xl">{t("fee_includes_t")}</h2>
+          <p className="mt-3 text-sm leading-relaxed text-mist">{t("fee_includes_b")}</p>
+        </article>
+        <article className="glass p-5">
+          <h2 className="display text-3xl">{t("speed_table_t")}</h2>
+          <ul className="mt-3 grid gap-2 text-sm text-mist">
+            <li>{t("speed_row_standard")}</li>
+            <li>{t("speed_row_priority")}</li>
+            <li>{t("speed_row_express")}</li>
+          </ul>
+        </article>
       </section>
       <section className="banner-row">
         <article className="banner banner-orange">
@@ -208,8 +285,12 @@ export function SearchPage({
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
   const weeks = visa && pace ? productionWeeks(visa.productionMinWeeks, visa.productionMaxWeeks, pace) : 0;
   const fee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
-  const jobs = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
-  const full = data?.vacancies.filter((v) => v.active && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
+  const openSeat = (v: { active: boolean; pauseUntil?: string }) => {
+    if (v.pauseUntil && Date.parse(v.pauseUntil) > Date.now()) return false;
+    return v.active || Boolean(v.pauseUntil);
+  };
+  const jobs = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
+  const full = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const compared = jobs.filter((job) => pick.includes(job.id));
   function toggleCompare(id: string) {
     setPick((cur) => (cur.includes(id) ? cur.filter((item) => item !== id) : cur.length >= 2 ? [cur[1]!, id] : [...cur, id]));
@@ -274,6 +355,8 @@ export function SearchPage({
                     <h2 className="display text-3xl">{job.title}</h2>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
                     <p className="mt-2 text-sm text-mist">{visa.country} · {visa.duration}</p>
+                    <p className="mt-1 text-sm">{job.workingHours}</p>
+                    <p className="text-sm text-mist">{job.accommodation}</p>
                     <p className="mt-1 text-sm text-mist">{t("search_wait")}</p>
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
@@ -297,6 +380,24 @@ export function SearchPage({
                 </div>
               ))}
               {waitNote ? <p className="text-sm text-metal">{waitNote}</p> : null}
+              {jobs.length === 0 && visa ? (
+                <div className="grid gap-3">
+                  <h2 className="display text-3xl">{t("similar_openings")}</h2>
+                  {(data?.vacancies ?? [])
+                    .filter((v) => openSeat(v) && v.country === visa.country && v.quota > 0 && v.visaProductId !== product && !citizenshipBlocked(v.blockedCitizenships, citizenship))
+                    .slice(0, 4)
+                    .map((job) => (
+                      <article key={job.id} className="glass p-4">
+                        <p className="inline-flex items-center gap-2 text-sm text-mist"><MiniFlag country={job.country} /> {job.country}</p>
+                        <h3 className="display mt-1 text-2xl">{job.title}</h3>
+                        <p className="text-sm text-mist">{job.employer}</p>
+                        <p className="mt-1 text-sm">{job.workingHours}</p>
+                        <p className="text-sm text-mist">{job.accommodation}</p>
+                        <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
+                      </article>
+                    ))}
+                </div>
+              ) : null}
               {jobs.map((job) => (
                 <article key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
@@ -308,7 +409,9 @@ export function SearchPage({
                       {job.title}
                     </Link>
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
-                    <p className="mt-2 text-sm">{visa.country} · {visa.duration}</p>
+                    <p className="mt-2 inline-flex items-center gap-2 text-sm"><MiniFlag country={visa.country} /> {visa.country} · {visa.duration}</p>
+                    <p className="mt-1 text-sm">{job.workingHours}</p>
+                    <p className="text-sm text-mist">{job.accommodation}</p>
                   </div>
                   <p className="text-sm ember">{job.salaryNet}</p>
                   <p className="text-sm text-metal">
@@ -335,7 +438,7 @@ export function VacancyPage({
   product: string;
   speed: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { data } = useSite();
   const { signedIn } = useDesk();
   const navigate = useNavigate();
@@ -359,7 +462,8 @@ export function VacancyPage({
     setBusy(true);
     setErr("");
     try {
-      const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim() } });
+      void noteFunnel({ data: { kind: "apply" } }).catch(() => undefined);
+      const res = await createApplication({ data: { vacancyId: job.id, citizenship, processing: pace, agentCode: agentCode.trim(), lang } });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
       setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
@@ -412,9 +516,11 @@ export function VacancyPage({
           />
         </label>
         {!signedIn ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
-        <button type="button" className="btn-solid mt-6" disabled={busy || !citizenship} onClick={() => void apply()}>
-          {busy ? t("applying") : t("search_apply")}
-        </button>
+        <div className="fixed inset-x-0 bottom-16 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
+          <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizenship} onClick={() => void apply()}>
+            {busy ? t("applying") : t("search_apply")}
+          </button>
+        </div>
       </article>
     </Shell>
   );
@@ -433,6 +539,10 @@ export function AboutPage() {
   const [openCountry, setOpenCountry] = useState<string | null>(null);
   const [openMember, setOpenMember] = useState<string | null>(null);
   const team = data?.team ?? [];
+  useEffect(() => {
+    if (openMember || !team[0]) return;
+    setOpenMember(team[0].id);
+  }, [team, openMember]);
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-16">
@@ -469,6 +579,11 @@ export function AboutPage() {
               <div>
                 {t("legal_id")} {s.registration_number} · {t("legal_vat")} {s.vat_number}
               </div>
+              <div>
+                <a className="underline-offset-4 hover:underline" href={`https://or.justice.cz/ias/ui/rejstrik-firma.vysledky?ic=${encodeURIComponent(s.registration_number || "")}`} target="_blank" rel="noopener noreferrer">
+                  {t("registry")}
+                </a>
+              </div>
               <div>{s.court_record}</div>
               <div>
                 {t("legal_trade")}: {s.regulator}
@@ -484,7 +599,10 @@ export function AboutPage() {
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="overflow-hidden border border-white/15 bg-[#101114]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-            <p className="text-sm">{s.legal_address}</p>
+            <div>
+              <p className="text-sm">{s.legal_address}</p>
+              <p className="text-sm text-mist">{t("desk_hours")}</p>
+            </div>
             <a
               className="ember text-sm"
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.legal_address || "Rybná 716/24, Praha 1")}`}
@@ -547,6 +665,7 @@ export function AboutPage() {
           </div>
         </section>
       ) : null}
+      <Reviews settings={s} />
       <LogoStrip />
       <section className="border-t border-white/10 px-4 py-12">
         <div className="mx-auto max-w-6xl">
@@ -606,6 +725,15 @@ export function ContactPage() {
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_address")}</dt>
             <dd className="mt-2">{s?.legal_address}</dd>
+            <p className="mt-2 text-sm text-mist">{t("desk_hours")}</p>
+            <div className="map-night mt-4 overflow-hidden border border-white/15">
+              <iframe
+                title={s?.legal_address || "Praha"}
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(s?.legal_address || "Rybná 716/24, Staré Město, 110 00 Praha 1")}&z=16&output=embed`}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>

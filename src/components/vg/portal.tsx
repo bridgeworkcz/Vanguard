@@ -14,6 +14,7 @@ import {
   resubmitApplication,
   saveQuestionnaire,
   takeInvoiceNumber,
+  noteFunnel,
   updateMyContact,
   changeMyPassword,
   uploadMyDocument,
@@ -409,6 +410,7 @@ export function PortalPage({ id }: { id: string }) {
       setMsg(res.error);
       return;
     }
+    void noteFunnel({ data: { kind: "question" } }).catch(() => undefined);
     await refreshDetail(app.id);
     await refreshList();
   }
@@ -614,6 +616,7 @@ export function PortalPage({ id }: { id: string }) {
                 <Link to="/portal" search={{ id: row.id }} className="glass grid gap-2 p-4 sm:grid-cols-4">
                   <span className="display text-2xl sm:col-span-2">{row.vacancyTitle || row.country}</span>
                   <span className="text-sm text-mist">{row.country}</span>
+                  <span className="text-sm text-paper">{nextAction(row, false, false, t)}</span>
                   <span className={`text-sm ${stageTone(row.status, row.stage)}`}>{statusLabel(row, t)}</span>
                 </Link>
               </li>
@@ -641,7 +644,7 @@ export function PortalPage({ id }: { id: string }) {
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
-              <p className={`mt-4 text-lg ${stageTone(app.status, app.stage)}`}>{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
+              <p className={`mt-4 text-2xl ${stageTone(app.status, app.stage)}`}>{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
               {(soon(app.cancelDeadlineAt, now) || soon(app.docDeadlineAt, now)) && app.status === "OPEN" ? (
                 <p className="mt-2 text-sm ember">
                   {t("portal_remind")}
@@ -770,12 +773,36 @@ export function PortalPage({ id }: { id: string }) {
               </form>
             ) : null}
 
+            {app.status === "ISSUED" ? (
+              <div className="glass p-5">
+                <p className="kicker ember">{t("status_issued")}</p>
+                <p className="mt-3 text-lg">{t("issued_keep")}</p>
+              </div>
+            ) : null}
+            {parts && app.status === "OPEN" && app.stage >= 2 ? (
+              <div className="glass p-5">
+                <p className="kicker">{t("pay_bar")}</p>
+                <ol className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {[
+                    ["30%", parts.first, app.stage2At, app.stage >= 2],
+                    ["40%", parts.second, app.stage3At, app.stage >= 3],
+                    ["30%", parts.final, app.stage4At, app.stage >= 4],
+                  ].map(([label, amount, date, on]) => (
+                    <li key={String(label)} className={`border-t pt-2 ${on ? "border-[#ff6a1a]" : "border-white/10"}`}>
+                      <p className="ember">{label}</p>
+                      <p>{amount} EUR</p>
+                      <p className="text-sm text-mist">{typeof date === "string" && date ? date.slice(0, 10) : t("portal_due")}</p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
             {app.status === "OPEN" && app.stage === 1 && app.profileComplete ? (
               <div className="grid gap-3">
                 <p>{t("status_wait")}</p>
                 <p>{t("contact_ask")}</p>
                 {site?.settings.support_phone ? (
-                  <a className="btn-solid w-fit" href={whatsAppHref(site.settings.support_phone)} target="_blank" rel="noopener noreferrer">
+                  <a className="btn-solid w-fit" href={whatsAppHref(site.settings.support_phone, `${app.citizenship} → ${app.country}`)} target="_blank" rel="noopener noreferrer">
                     WhatsApp · {site.settings.support_phone}
                   </a>
                 ) : null}
@@ -805,6 +832,7 @@ export function PortalPage({ id }: { id: string }) {
             {app.status === "OPEN" && app.stage >= 2 ? (
               <div className="flex flex-wrap gap-3">
                 <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
+                <p className="w-full text-sm text-mist">{t("open_here")}</p>
                 <button type="button" className="btn" onClick={() => void invoice(1)}>{t("invoice_1")}</button>
                 <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
                 <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
@@ -858,8 +886,11 @@ export function PortalPage({ id }: { id: string }) {
                     const latest = files[0];
                     const label = !latest ? t("checklist_miss") : latest.status === "REJECTED" ? t("checklist_no") : latest.status === "APPROVED" ? t("checklist_ok") : t("checklist_wait");
                     return (
-                      <li key={cat} className="flex items-baseline justify-between gap-3 border-t border-white/10 py-2">
-                        <span>{t(`cat_${cat}`)}</span>
+                      <li key={cat} className={`flex items-baseline justify-between gap-3 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a] bg-[#ff6a1a]/10 px-2" : "border-white/10"}`}>
+                        <span>
+                          {t(`cat_${cat}`)}
+                          {latest?.status === "REJECTED" && latest.rejectionReason ? <span className="mt-1 block text-lg text-paper">{latest.rejectionReason}</span> : null}
+                        </span>
                         <span className={latest?.status === "REJECTED" ? "ember" : "text-mist"}>{label}</span>
                       </li>
                     );
@@ -878,12 +909,12 @@ export function PortalPage({ id }: { id: string }) {
                         </div>
                         <div className="mt-2 grid gap-2">
                           {files.map((doc) => (
-                            <article key={doc.id} className="bg-white/5 p-3 text-sm">
+                            <article key={doc.id} className={`p-3 text-sm ${doc.status === "REJECTED" ? "bg-[#ff6a1a]/15" : "bg-white/5"}`}>
                               <p>{doc.fileName}</p>
                               <p className="text-mist">
                                 {doc.createdAt?.slice(0, 16)} · {doc.status === "REJECTED" ? t("admin_doc_no") : doc.status === "APPROVED" ? t("admin_doc_ok") : t("uploaded")}
                               </p>
-                              {doc.rejectionReason ? <p className="mt-1">{doc.rejectionReason}</p> : null}
+                              {doc.rejectionReason ? <p className="mt-2 text-lg">{doc.rejectionReason}</p> : null}
                             </article>
                           ))}
                         </div>
@@ -892,7 +923,8 @@ export function PortalPage({ id }: { id: string }) {
                           <input
                             className="absolute inset-0 z-10 cursor-pointer opacity-0"
                             type="file"
-                            accept="image/*,application/pdf"
+                            accept={cat === "PASSPORT" ? "image/*" : "image/*,application/pdf"}
+                            capture={cat === "PASSPORT" ? "environment" : undefined}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               e.target.value = "";

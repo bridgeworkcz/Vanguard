@@ -91,6 +91,7 @@ async function metadata(): Promise<{ sheets?: { properties?: { title?: string } 
 
 const TITLE_TTL = 10 * 60 * 1000;
 const ROW_TTL = 3 * 60 * 1000;
+const USER_TTL = 15 * 60 * 1000;
 let titleCache: { at: number; titles: Set<string> } | null = null;
 const headerCache = new Map<string, string[]>();
 const rowCache = new Map<string, { at: number; rows: SheetRow[] }>();
@@ -163,7 +164,8 @@ async function ensureSchema(name: string): Promise<string[]> {
 
 export async function readSheetRows(name: string): Promise<SheetRow[]> {
   const hit = rowCache.get(name);
-  if (hit && Date.now() - hit.at < ROW_TTL) return hit.rows;
+  const ttl = name === "Users" ? USER_TTL : ROW_TTL;
+  if (hit && Date.now() - hit.at < ttl) return hit.rows;
   const flight = rowFlight.get(name);
   if (flight) return flight;
   const job = (async () => {

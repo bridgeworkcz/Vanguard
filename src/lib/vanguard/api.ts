@@ -212,6 +212,8 @@ export type AppRow = {
   assignedManagerId: string;
   referrerUserId: string;
   stage4At: string | null;
+  clientPhone?: string;
+  accountClosed?: boolean;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -469,7 +471,7 @@ export const getMyApplication = createServerFn({ method: "POST" })
     return { app, documents, messages };
   });
 
-type CreateInput = { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string };
+type CreateInput = { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; lang?: string };
 
 async function resolveReferrer(sql: Sql, code: string): Promise<string> {
   const trimmed = code.trim();
@@ -480,6 +482,17 @@ async function resolveReferrer(sql: Sql, code: string): Promise<string> {
   return rows[0].userId;
 }
 
+export const noteFunnel = createServerFn({ method: "POST" })
+  .validator((input: { kind?: string }) => ({
+    kind: input?.kind === "apply" || input?.kind === "question" ? input.kind : ("calc" as const),
+  }))
+  .handler(async ({ data }) => {
+    if (!(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim())) return { ok: true };
+    const mod = await import("./sheet-backend");
+    const kind = data.kind === "apply" || data.kind === "question" ? data.kind : "calc";
+    return mod.noteFunnel(kind);
+  });
+
 export const createApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: CreateInput) => ({
@@ -487,6 +500,7 @@ export const createApplication = createServerFn({ method: "POST" })
     citizenship: clean(input?.citizenship, 80),
     processing: input?.processing,
     agentCode: clean(input?.agentCode, 120),
+    lang: clean(input?.lang, 8),
   }))
   .handler(async ({ context, data }) => {
     if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {

@@ -314,8 +314,8 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/contact", t("nav_contact"))}
           {signedIn && role && !staff ? item("/portal", t("nav_portal")) : null}
           {staff ? item("/admin", t("nav_console")) : null}
-          <button type="button" className="min-h-11 shrink-0 text-sm text-mist" onClick={() => toggleDesktop()}>
-            {desk ? t("view_phone") : t("view_desktop")}
+          <button type="button" className="min-h-11 shrink-0 px-1 text-sm text-mist" onClick={() => toggleDesktop()}>
+            {desk ? "Tel" : "PC"}
           </button>
         </nav>
       </header>
@@ -327,13 +327,21 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <div>
             <p className="latin text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
             <p className={`mt-2 max-w-md text-sm ${tone === "light" ? "text-ink/60" : "text-mist"}`}>{t("footer_note")}</p>
+            {site?.settings.registration_number ? (
+              <p className={`mt-2 text-xs ${tone === "light" ? "text-ink/50" : "text-mist"}`}>
+                {t("legal_id")} {site.settings.registration_number} · {t("legal_vat")} {site.settings.vat_number}
+                <a className="ml-2 underline-offset-4 hover:underline" href={`https://or.justice.cz/ias/ui/rejstrik-firma.vysledky?ic=${encodeURIComponent(site.settings.registration_number)}`} target="_blank" rel="noopener noreferrer">
+                  {t("registry")}
+                </a>
+              </p>
+            ) : null}
           </div>
           <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© 2024 Vanguard Global Mobility s.r.o.</p>
         </div>
       </footer>
       {site?.settings.support_phone ? (
         <a
-          href={whatsAppHref(site.settings.support_phone)}
+          href={whatsAppHref(site.settings.support_phone, typeof window !== "undefined" ? sessionStorage.getItem("vg-route") || "" : "")}
           target="_blank"
           rel="noopener noreferrer"
           className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 inline-flex min-h-12 items-center rounded-full bg-[#ff6a1a] px-4 text-sm font-bold text-[#1a0b04] shadow-lg"

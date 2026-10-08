@@ -56,6 +56,8 @@ export type Vacancy = {
   quota: number;
   active: boolean;
   blockedCitizenships?: string;
+  /** ISO time. While this is in the future the opening stays off the public list. */
+  pauseUntil?: string;
 };
 
 export type Questionnaire = {

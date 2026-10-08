@@ -94,7 +94,7 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   admin_photo_ready: "Нове фото готове. Збережіть, щоб опублікувати.",
   admin_file_big: "Візьміть менше зображення.",
   admin_saved: "Збережено. Сайт уже показує цю зміну.",
-  admin_unsaved: "Не збережено. Спробуйте ще раз.",
+  admin_unsaved: "Не збережено. Напишіть, що саме написала помилка, і спробуйте ще раз.",
   admin_drive: "Google Drive не прийняв фото. Папка сховища має бути відкрита для облікового запису практики як редактор.",
   admin_photo_wait: "Завантажую фото…",
   admin_photo_heic: "Цей файл не вдалося відкрити як фото. Підійде JPEG, PNG, WEBP, GIF, HEIC з айфона.",

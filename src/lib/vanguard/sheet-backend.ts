@@ -44,6 +44,8 @@ type Extra = {
   docReminded: boolean;
   referrerUserId: string;
   history: boolean;
+  lang: string;
+  accountClosed: boolean;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -123,6 +125,7 @@ function vacancyFrom(row: SheetRow): Vacancy {
     quota: Number(row.quotaRemaining) || 0,
     active: bool(row.isActive),
     blockedCitizenships: row.blockedCitizenships || "",
+    pauseUntil: /^\d{4}-\d{2}-\d{2}T/.test(row.salaryGross || "") ? row.salaryGross : "",
   };
 }
 
@@ -134,7 +137,6 @@ function vacancyTo(v: Vacancy, previous?: SheetRow): SheetRow {
     category: previous?.category ?? "",
     country: v.country,
     salaryNet: v.salaryNet,
-    salaryGross: previous?.salaryGross ?? "",
     accommodation: v.accommodation,
     workingHours: v.workingHours,
     description: v.description,
@@ -148,6 +150,7 @@ function vacancyTo(v: Vacancy, previous?: SheetRow): SheetRow {
     createdAt: previous?.createdAt || stamp,
     updatedAt: stamp,
     blockedCitizenships: v.blockedCitizenships || previous?.blockedCitizenships || "",
+    salaryGross: v.pauseUntil || (/^\d{4}-\d{2}-\d{2}T/.test(previous?.salaryGross || "") ? "" : previous?.salaryGross || ""),
   };
 }
 
@@ -217,6 +220,8 @@ function emptyExtra(): Extra {
     docReminded: false,
     referrerUserId: "",
     history: false,
+    lang: "en",
+    accountClosed: false,
   };
 }
 
@@ -282,6 +287,9 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     employer: vacancy?.employer ?? "",
     assignedManagerId: row.assignedManagerId || "",
     referrerUserId: extra.referrerUserId || "",
+    clientPhone: extra.questionnaire.phone || "",
+    accountClosed: extra.accountClosed === true,
+    lang: extra.lang || "en",
     extra,
     row,
   };
@@ -709,6 +717,7 @@ async function housekeeping() {
     if (now - Date.parse(map.last_backup_at || "0") > 20 * 3600 * 1000) await writeBackup();
     if (now - Date.parse(map.last_digest_at || "0") > 20 * 3600 * 1000) await writeDigest();
     await remindDeadlines();
+    await sendWeeklyFunnel();
   } catch (err) {
     housekeepingAt = Date.now();
     console.error("[housekeeping]", err);
@@ -736,6 +745,62 @@ async function writeBackup() {
 
 async function writeDigest() {
   await putSetting("last_digest_at", nowIso(), "system");
+}
+
+type Funnel = { week: string; calc: number; apply: number; question: number };
+
+function weekKey() {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((now.getTime() - start.getTime()) / 86400000 + start.getUTCDay() + 1) / 7);
+  return `${now.getUTCFullYear()}-W${week}`;
+}
+
+async function readFunnel(): Promise<Funnel> {
+  const empty: Funnel = { week: weekKey(), calc: 0, apply: 0, question: 0 };
+  try {
+    const { downloadPrivateDocument } = await import("@/lib/blob");
+    const file = await downloadPrivateDocument("cache/funnel.json");
+    const parsed = JSON.parse(file.buffer.toString("utf8")) as Funnel;
+    if (!parsed || typeof parsed.calc !== "number") return empty;
+    return { week: String(parsed.week || empty.week), calc: Number(parsed.calc) || 0, apply: Number(parsed.apply) || 0, question: Number(parsed.question) || 0 };
+  } catch {
+    return empty;
+  }
+}
+
+async function writeFunnel(data: Funnel) {
+  const { uploadPrivateDocument } = await import("@/lib/blob");
+  await uploadPrivateDocument("cache/funnel.json", JSON.stringify(data), "application/json", true);
+}
+
+async function sendWeeklyFunnel() {
+  const map = await settingMap().catch(() => ({}) as Record<string, string>);
+  const current = weekKey();
+  if (map.funnel_week === current) return;
+  const stats = await readFunnel();
+  if (stats.week === current && stats.calc + stats.apply + stats.question === 0) {
+    await putSetting("funnel_week", current, "system");
+    return;
+  }
+  if (stats.week !== current || map.funnel_week) {
+    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    await sendSafeTelegramAlert(`Тиждень ${stats.week}\nКалькулятор: ${stats.calc}\nЗаявки: ${stats.apply}\nАнкети: ${stats.question}`);
+    await writeFunnel({ week: current, calc: 0, apply: 0, question: 0 });
+  }
+  await putSetting("funnel_week", current, "system");
+}
+
+export async function noteFunnel(kind: "calc" | "apply" | "question") {
+  const current = weekKey();
+  let stats = await readFunnel();
+  if (stats.week !== current) {
+    await sendWeeklyFunnel();
+    stats = { week: current, calc: 0, apply: 0, question: 0 };
+  }
+  stats[kind] += 1;
+  await writeFunnel(stats);
+  return stats;
 }
 
 async function remindDeadlines() {
@@ -1059,7 +1124,7 @@ async function resolveReferrer(code: string): Promise<string> {
   return row.id;
 }
 
-export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string }) {
+export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string; lang?: string }) {
   const person = await profile(userId);
   if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
   const vacancies = await loadVacancies();
@@ -1082,7 +1147,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   const referrerUserId = await resolveReferrer(data.referrerUserId || data.agentCode || "");
   const id = newId("VG");
   const stamp = nowIso();
-  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
+  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, lang: data.lang === "cs" || data.lang === "ur" ? data.lang : "en", productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
   await appendSheetRow("Applications", {
     id,
     userId,
@@ -1265,6 +1330,7 @@ export async function adminOverview(userId: string) {
     proofs: apps.filter((app) => app.status === "OPEN" && app.stage === 2 && docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status === "UPLOADED")).length,
     live: apps.filter((app) => app.status === "OPEN").length,
     users,
+    funnel: await readFunnel().catch(() => ({ week: "", calc: 0, apply: 0, question: 0 })),
   };
 }
 
@@ -1283,6 +1349,33 @@ export async function adminGet(userId: string, id: string) {
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || isHistoryApp(app)) throw new Error("Not found");
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
+}
+
+function stageNote(lang: string, action: string): string {
+  const copy: Record<string, Record<string, string>> = {
+    en: {
+      accept: "The practice accepted the file. The first 30% is now due in your case.",
+      "confirm-payment": "The first payment is in. Send the papers the case still lists.",
+      stage4: "The last 30% is due. After it is paid, the permit can be sent.",
+      reject: "The file was declined. You can open it again from your case.",
+      cancel: "The file was cancelled. The seat is free.",
+    },
+    cs: {
+      accept: "Praxe spis přijala. V kauze je splatných prvních 30 %.",
+      "confirm-payment": "První platba je přijatá. Doplňte doklady, které kauza ještě žádá.",
+      stage4: "Splatných je posledních 30 %. Po zaplacení lze povolení odeslat.",
+      reject: "Spis byl odmítnut. Z kabinetu ho lze otevřít znovu.",
+      cancel: "Spis byl zrušen. Místo je volné.",
+    },
+    ur: {
+      accept: "دفتر نے فائل قبول کر لی۔ پہلے 30% اب آپ کے کیس میں واجب ہیں۔",
+      "confirm-payment": "پہلی ادائیگی آ گئی۔ جو کاغذات کیس اب بھی مانگے، وہ بھیجیں۔",
+      stage4: "آخری 30% واجب ہیں۔ اس کے بعد اجازت نامہ بھیجا جا سکتا ہے۔",
+      reject: "فائل مسترد ہوئی۔ کیس سے اسے دوبارہ کھولا جا سکتا ہے۔",
+      cancel: "فائل منسوخ ہوئی۔ جگہ خالی ہے۔",
+    },
+  };
+  return (copy[lang] || copy.en)?.[action] || "";
 }
 
 export async function adminSetStage(userId: string, data: { id: string; action: string; reason: string }) {
@@ -1340,6 +1433,14 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     }
   } else throw new Error("Action");
   await audit(person.userId, data.action, app.id, data.reason);
+  const note = stageNote(app.extra.lang || "en", data.action);
+  if (note) {
+    try {
+      await postMessage(person.userId, { applicationId: app.id, body: note });
+    } catch (err) {
+      console.error("[stage-note]", err);
+    }
+  }
   return { ok: true as const, stage };
 }
 
@@ -1725,6 +1826,11 @@ export async function adminDeleteAccount(userId: string, targetId: string) {
     roles: JSON.stringify(["CLIENT"]),
     isActive: "false",
   });
+  const apps = await loadApps();
+  for (const app of apps) {
+    if (app.userId !== target.id || isHistoryApp(app)) continue;
+    await saveApp(app, { ...app.extra, accountClosed: true });
+  }
   await audit(userId, "ACCOUNT_DELETE", target.id, target.email);
 }
 
