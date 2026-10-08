@@ -602,7 +602,7 @@ async function ensureSeed() {
         id: member.id,
         fullName: member.name,
         position: member.position,
-        photoUrl: "",
+        photoUrl: member.photo || "",
         contactPhone: member.phone,
         languages: "[]",
         bio: "",
@@ -910,8 +910,40 @@ function teamPerson(row: SheetRow) {
   };
 }
 
+function plainName(value: string) {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+async function ensureDirectorRow(rows: SheetRow[]) {
+  const director = TEAM[0];
+  const photo = director.photo || "/media/team/klara.jpg";
+  const found = rows.find((row) => plainName(teamName(row)) === plainName(director.name));
+  if (!found) {
+    const id = rows.some((row) => row.id === director.id) ? "TM-DIR" : director.id;
+    await appendSheetRow("Team", {
+      id,
+      fullName: director.name,
+      position: director.position,
+      photoUrl: photo,
+      contactPhone: director.phone,
+      languages: "[]",
+      bio: "",
+      order: "1",
+      isActive: "true",
+    });
+    invalidateSheet("Team");
+    return readSheetRows("Team");
+  }
+  if (found.id && !(found.photoUrl || found.photo || "").trim()) {
+    await updateSheetRowById("Team", found.id, { photoUrl: photo });
+    invalidateSheet("Team");
+    return readSheetRows("Team");
+  }
+  return rows;
+}
+
 async function teamRowsForSite(rows: SheetRow[]) {
-  let current = rows;
+  let current = await ensureDirectorRow(rows);
   if (!current.some((row) => teamName(row))) {
     for (const member of TEAM) {
       if (current.some((row) => row.id === member.id)) continue;
@@ -919,7 +951,7 @@ async function teamRowsForSite(rows: SheetRow[]) {
         id: member.id,
         fullName: member.name,
         position: member.position,
-        photoUrl: "",
+        photoUrl: member.photo || "",
         contactPhone: member.phone,
         languages: "[]",
         bio: "",

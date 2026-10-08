@@ -341,10 +341,10 @@ export const OFFICE = [
 ];
 
 export const TEAM = [
-  { id: "TM-1", name: "Klára Nováková", position: "Client director", phone: "+420 770 347 160", sort: 1 },
-  { id: "TM-2", name: "Marek Svoboda", position: "Legal coordinator", phone: "+420 770 347 161", sort: 2 },
-  { id: "TM-3", name: "Elena Horváth", position: "Case operations", phone: "+420 770 347 162", sort: 3 },
-  { id: "TM-4", name: "Daniel Okonkwo", position: "Employer relations", phone: "+420 770 347 163", sort: 4 },
+  { id: "TM-1", name: "Klára Nováková", position: "Client director", phone: "+420 770 347 160", photo: "/media/team/klara.jpg", sort: 1 },
+  { id: "TM-2", name: "Marek Svoboda", position: "Legal coordinator", phone: "+420 770 347 161", photo: "", sort: 2 },
+  { id: "TM-3", name: "Elena Horváth", position: "Case operations", phone: "+420 770 347 162", photo: "", sort: 3 },
+  { id: "TM-4", name: "Daniel Okonkwo", position: "Employer relations", phone: "+420 770 347 163", photo: "", sort: 4 },
 ];
 
 /** Smaller sites that hire the people this practice files for. Partners only — not extra vacancies. */

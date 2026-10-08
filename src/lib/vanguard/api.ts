@@ -73,7 +73,7 @@ async function ensureSeed(sql: Sql) {
     await sql`insert into media_items (id, kind, title, caption, image_data, sort_order, active) values (${m.id}, ${m.kind}, ${m.title}, ${m.caption}, ${m.image}, ${m.sort}, true)`;
   }
   for (const t of TEAM) {
-    await sql`insert into team_members (id, full_name, position, phone, photo_data, sort_order, active) values (${t.id}, ${t.name}, ${t.position}, ${t.phone}, '', ${t.sort}, true)`;
+    await sql`insert into team_members (id, full_name, position, phone, photo_data, sort_order, active) values (${t.id}, ${t.name}, ${t.position}, ${t.phone}, ${t.photo ?? ""}, ${t.sort}, true)`;
   }
   for (const p of partnerRows()) {
     await sql`insert into partners (id, country, name, sort_order, active) values (${p.id}, ${p.country}, ${p.name}, ${p.sort}, true)`;
@@ -95,6 +95,20 @@ async function ensurePartnerCatalog(sql: Sql) {
     have.add(`${row.country}|${row.name}`.toLowerCase());
   }
   await sql`insert into settings (key, value) values ('partners_catalog', '4') on conflict (key) do update set value = '4'`;
+}
+
+async function ensureDirector(sql: Sql) {
+  const photo = "/media/team/klara.jpg";
+  const rows = await sql<{ id: string; photo: string }>`select id, photo_data as photo from team_members where id = 'TM-1' or full_name = 'Klára Nováková'`;
+  if (!rows.length) {
+    await sql`insert into team_members (id, full_name, position, phone, photo_data, sort_order, active)
+      values ('TM-1', 'Klára Nováková', 'Client director', '+420 770 347 160', ${photo}, 1, true)`;
+    return;
+  }
+  for (const row of rows) {
+    if (row.photo) continue;
+    await sql`update team_members set photo_data = ${photo} where id = ${row.id}`;
+  }
 }
 
 async function expireUnpaid(sql: Sql) {
@@ -282,6 +296,7 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     }
   const sql = await getSql();
   await ensureSeed(sql);
+  await ensureDirector(sql);
   try {
     await ensurePartnerCatalog(sql);
   } catch (err) {
