@@ -971,9 +971,33 @@ function teamPerson(row: SheetRow) {
   };
 }
 
-function teamRowsForSite(rows: SheetRow[]) {
-  return rows
-    .filter((row) => row.id && teamName(row) && !teamHidden(row))
+function plainName(value: string) {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+async function hideExtraDirectors(rows: SheetRow[]) {
+  const map = await settingMap().catch(() => null);
+  if (!map || map.team_deduped === "1") return rows;
+  const named = rows.filter((row) => plainName(teamName(row)) === "klara novakova" && !teamHidden(row));
+  if (named.length > 1) {
+    const keep = named.find((row) => (row.id || rowCell(row, ["id"])) === "TM-DIR") || named[0];
+    const keepId = keep ? keep.id || rowCell(keep, ["id"]) : "";
+    for (const row of named) {
+      const id = row.id || rowCell(row, ["id"]);
+      if (!id || id === keepId) continue;
+      await updateSheetRowById("Team", id, writeAliased(row, [["isActive|active", "false"]]));
+    }
+    invalidateSheet("Team");
+    rows = await readSheetRows("Team");
+  }
+  await putSetting("team_deduped", "1", "system", false);
+  return rows;
+}
+
+async function teamRowsForSite(rows: SheetRow[]) {
+  const current = await hideExtraDirectors(rows);
+  return current
+    .filter((row) => (row.id || rowCell(row, ["id"])) && teamName(row) && !teamHidden(row))
     .map(teamPerson)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.fullName.localeCompare(b.fullName));
 }
@@ -1059,8 +1083,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v7.json";
-const SNAP_GEN = 7;
+const SNAP_PATH = "cache/public-site-v8.json";
+const SNAP_GEN = 8;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -2211,7 +2235,8 @@ export async function adminAudit(userId: string) {
 
 export async function adminAllTeam(userId: string) {
   await requireStaff(userId);
-  return (await readSheetRows("Team"))
+  const rows = await hideExtraDirectors(await readSheetRows("Team"));
+  return rows
     .filter((row) => (row.id || rowCell(row, ["id"])) && teamName(row) && !teamHidden(row))
     .map((row) => {
       const id = row.id || rowCell(row, ["id"]);
