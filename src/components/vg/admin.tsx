@@ -9,6 +9,7 @@ import {
   adminDeleteMedia,
   adminDeletePartner,
   adminDeleteAccount,
+  adminDeleteApplication,
   adminRestoreAccount,
   adminMarkCommission,
   adminDeleteTeam,
@@ -37,7 +38,7 @@ import {
   reviewDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, DOC_CATEGORIES, PROCESS_STAGES, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, openedBeforeInvoice2Rule, stageIndex, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
 import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
@@ -59,6 +60,7 @@ function stageFail(message: string, t: (key: CopyKey) => string) {
   if (message.includes("No proof")) return t("admin_need_proof");
   if (message.includes("No finals")) return t("admin_need_final");
   if (message.includes("Not ready") || message.includes("Locked")) return t("admin_not_ready");
+  if (message === "Legacy") return t("admin_legacy_cap");
   if (/Drive|403|404|401/i.test(message)) return t("admin_drive");
   if (message === "File" || message.includes("File size") || message.includes("File type")) return t("admin_file_big");
   if (/busy|register|429/i.test(message)) return t("admin_busy");
@@ -1037,7 +1039,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       </label>
                     </>
                   ) : null}
-                  {detail.app.status === "OPEN" && detail.app.stage === 3 ? (
+                  {detail.app.status === "OPEN" && detail.app.stage === 3 && !openedBeforeInvoice2Rule(detail.app.createdAt) ? (
                     <button type="button" className="btn" onClick={() => void act("stage4")}>{t("admin_to4")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
@@ -1046,7 +1048,26 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                   {detail.app.status === "OPEN" ? (
                     <button type="button" className="btn" onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      if (!detail || !window.confirm(t("admin_delete_case_ask"))) return;
+                      const caseId = detail.app.id;
+                      void adminDeleteApplication({ data: caseId })
+                        .then(async () => {
+                          setDetail(null);
+                          const listed = await adminListApplications({ data: { includeIncomplete: current === "overview" || showAll } });
+                          setApps(listed.filter((row) => row.id !== caseId));
+                          go(current);
+                        })
+                        .catch(() => setStageNote(t("admin_unsaved")));
+                    }}
+                  >
+                    {t("admin_delete_case")}
+                  </button>
                 </div>
+                {openedBeforeInvoice2Rule(detail.app.createdAt) ? <p className="mt-3 text-sm text-mist">{t("admin_legacy_cap")}</p> : null}
                 {stageNote ? <p className="mt-3 text-sm text-metal">{stageNote}</p> : null}
                 <input className="field mt-3" placeholder={t("admin_reason")} value={reason} onChange={(e) => setReason(e.target.value)} />
                 {detail.app.stage >= 3 ? (
@@ -1061,7 +1082,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                           .catch(() => setStageNote(t("admin_unsaved")))
                       }
                     >
-                      {PROCESS_STAGES.map((s) => (
+                      {PROCESS_STAGES.filter((s) => !openedBeforeInvoice2Rule(detail.app.createdAt) || stageIndex(s) <= stageIndex(INVOICE2_STAGE)).map((s) => (
                         <option key={s} value={s}>
                           {t(`ps_${s}` as CopyKey)}
                         </option>

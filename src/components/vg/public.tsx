@@ -92,7 +92,6 @@ export function HomePage() {
   const heroSteps = [
     ["hero_1t", "hero_1b"],
     ["hero_2t", "hero_2b"],
-    ["hero_3t", "hero_3b"],
     ["hero_4t", "hero_4b"],
   ] as const;
 

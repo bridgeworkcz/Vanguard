@@ -271,6 +271,35 @@ export async function appendSheetRows(name: string, rows: SheetRow[], checkDup =
   invalidateSheet(name);
 }
 
+export async function deleteSheetRowsByIds(name: string, ids: string[]): Promise<number> {
+  const want = new Set(ids.filter(Boolean));
+  if (!want.size) return 0;
+  const schema = await ensureSchema(name);
+  const idIndex = Math.max(0, schema.indexOf("id"));
+  const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(schema.length)}`);
+  const values = result.values || [];
+  const indexes: number[] = [];
+  values.forEach((line, index) => {
+    if (index === 0) return;
+    if (want.has(String(line[idIndex] ?? ""))) indexes.push(index);
+  });
+  if (!indexes.length) return 0;
+  indexes.sort((a, b) => b - a);
+  const meta = await sheetsFetch<{ sheets?: { properties?: { title?: string; sheetId?: number } }[] }>("/?fields=sheets.properties(sheetId,title)");
+  const sheetId = meta.sheets?.find((sheet) => sheet.properties?.title === name)?.properties?.sheetId;
+  if (sheetId === undefined) throw new Error("Sheet");
+  await sheetsFetch(":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({
+      requests: indexes.map((start) => ({
+        deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: start, endIndex: start + 1 } },
+      })),
+    }),
+  });
+  invalidateSheet(name);
+  return indexes.length;
+}
+
 export async function updateSheetRowById(name:string,id:string,patch:SheetRow):Promise<void>{
   const schema=await ensureSchema(name);
   const idIndex=Math.max(0, schema.indexOf('id'));

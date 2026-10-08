@@ -150,6 +150,29 @@ export function stageIndex(stage: ProcessStage): number {
   return PROCESS_STAGES.indexOf(stage);
 }
 
+/** Invoice 2 opens at this document stage. Older files cannot go past it. */
+export const INVOICE2_STAGE: ProcessStage = "EMPLOYER_APPROVED_FOR_MINISTRY";
+export const LEGACY_CASE_BEFORE = "2026-09-16";
+
+export function openedBeforeInvoice2Rule(createdAt: string | null | undefined): boolean {
+  const day = (createdAt || "").slice(0, 10);
+  return day.length >= 10 && day < LEGACY_CASE_BEFORE;
+}
+
+export function capLegacyProgress(
+  createdAt: string | null | undefined,
+  stage: number,
+  processStage: string,
+): { stage: number; processStage: string } {
+  if (!openedBeforeInvoice2Rule(createdAt)) return { stage, processStage };
+  const cap = stageIndex(INVOICE2_STAGE);
+  const at = stageIndex(processStage as ProcessStage);
+  return {
+    stage: stage > 3 ? 3 : stage,
+    processStage: at > cap ? INVOICE2_STAGE : processStage,
+  };
+}
+
 export function invoice2Unlocked(processStage: string): boolean {
   return stageIndex(processStage as ProcessStage) >= stageIndex("EMPLOYER_APPROVED_FOR_MINISTRY");
 }

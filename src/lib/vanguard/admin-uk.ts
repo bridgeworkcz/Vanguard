@@ -188,4 +188,7 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   agent_pay_due: "До виплати",
   admin_user_cases: "Відкриті справи",
   admin_no_open: "Відкритих справ немає.",
+  admin_legacy_cap: "Справи, відкриті до 16 вересня 2026, не йдуть далі за момент, коли відкривається інвойс 2.",
+  admin_delete_case: "Видалити справу",
+  admin_delete_case_ask: "Видалити лише цю справу? Акаунт залишиться.",
 };

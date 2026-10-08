@@ -649,12 +649,13 @@ const en = {
   hero_1b: "Citizenship, the country, the permit, and how fast the file should move.",
   hero_2t: "We show",
   hero_2b: "The fee, and the openings that match.",
-  hero_3t: "A ministry",
-  hero_3b: "Still decides.",
   hero_4t: "The case",
   hero_4b: "We make it complete.",
   admin_user_cases: "Open cases",
   admin_no_open: "No open cases.",
+  admin_legacy_cap: "Files opened before 16 September 2026 stop when invoice 2 opens.",
+  admin_delete_case: "Delete this case",
+  admin_delete_case_ask: "Delete this case only? The account stays.",
 };
 
 const cs: Record<keyof typeof en, string> = {
@@ -1304,12 +1305,13 @@ const cs: Record<keyof typeof en, string> = {
   hero_1b: "Občanství, zemi, typ povolení a tempo přípravy spisu.",
   hero_2t: "Ukážeme",
   hero_2b: "Honorář a volná místa, která sedí.",
-  hero_3t: "Ministerstvo",
-  hero_3b: "Rozhoduje.",
   hero_4t: "Spis",
   hero_4b: "Dodáme ho úplný.",
   admin_user_cases: "Otevřené spisy",
   admin_no_open: "Žádný otevřený spis.",
+  admin_legacy_cap: "Spisy otevřené před 16. zářím 2026 nejdou dál než k otevření druhé faktury.",
+  admin_delete_case: "Smazat spis",
+  admin_delete_case_ask: "Smazat jen tento spis? Účet zůstane.",
 };
 
 const ur: Record<keyof typeof en, string> = {
@@ -1959,12 +1961,13 @@ const ur: Record<keyof typeof en, string> = {
   hero_1b: "شہریت، ملک، اجازت نامے کی قسم اور فائل کی رفتار۔",
   hero_2t: "ہم دکھائیں",
   hero_2b: "فیس اور موزوں اسامیاں۔",
-  hero_3t: "وزارت",
-  hero_3b: "فیصلہ وہی کرتی ہے۔",
   hero_4t: "فائل",
   hero_4b: "ہم اسے مکمل بناتے ہیں۔",
   admin_user_cases: "کھلے کیس",
   admin_no_open: "کوئی کھلا کیس نہیں۔",
+  admin_legacy_cap: "16 ستمبر 2026 سے پہلے کھلی فائلیں انوائس 2 کے کھلنے سے آگے نہیں جاتی۔",
+  admin_delete_case: "کیس حذف کریں",
+  admin_delete_case_ask: "صرف یہ کیس حذف کریں؟ اکاؤنٹ رہے گا۔",
 };
 
 const DICTS = { en, cs, ur };

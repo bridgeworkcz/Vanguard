@@ -4,7 +4,10 @@ import { vgMiddleware as authMiddleware } from "./vg-middleware";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
+  capLegacyProgress,
   clientName,
+  INVOICE2_STAGE,
+  openedBeforeInvoice2Rule,
   newId,
   normalizeUploadMime,
   parseQuestionnaire,
@@ -12,6 +15,7 @@ import {
   productionWeeks,
   questionnaireError,
   sameCountry,
+  stageIndex,
   type DocCategory,
   type Processing,
   type ProcessStage,
@@ -230,11 +234,13 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
+  const capped = capLegacyProgress(row.createdAt, Number(row.stage), row.processStage);
   return {
     ...row,
     totalCost: Number(row.totalCost),
     productionWeeks: Number(row.productionWeeks),
-    stage: Number(row.stage),
+    stage: capped.stage,
+    processStage: capped.processStage,
     profileComplete: Boolean(row.profileComplete),
   };
 }
@@ -447,13 +453,17 @@ export const listMyApplications = createServerFn({ method: "GET" })
       a.stage4_at::text as "stage4At"
       from applications a left join vacancies v on v.id = a.vacancy_id
       where a.user_id = ${context.userId} order by a.created_at desc`;
-    return rows.map((r) => ({
-      ...r,
-      totalCost: Number(r.totalCost),
-      stage: Number(r.stage),
-      productionWeeks: Number(r.productionWeeks),
-      profileComplete: Boolean(r.profileComplete),
-    }));
+    return rows.map((r) => {
+      const capped = capLegacyProgress(r.createdAt, Number(r.stage), r.processStage);
+      return {
+        ...r,
+        totalCost: Number(r.totalCost),
+        stage: capped.stage,
+        processStage: capped.processStage,
+        productionWeeks: Number(r.productionWeeks),
+        profileComplete: Boolean(r.profileComplete),
+      };
+    });
   });
 
 export const getMyApplication = createServerFn({ method: "POST" })
@@ -694,13 +704,17 @@ export const adminListApplications = createServerFn({ method: "POST" })
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
-      .map((r) => ({
-        ...r,
-        totalCost: Number(r.totalCost),
-        stage: Number(r.stage),
-        productionWeeks: Number(r.productionWeeks),
-        profileComplete: Boolean(r.profileComplete),
-      }))
+      .map((r) => {
+        const capped = capLegacyProgress(r.createdAt, Number(r.stage), r.processStage);
+        return {
+          ...r,
+          totalCost: Number(r.totalCost),
+          stage: capped.stage,
+          processStage: capped.processStage,
+          productionWeeks: Number(r.productionWeeks),
+          profileComplete: Boolean(r.profileComplete),
+        };
+      })
       .filter((r) => data.includeIncomplete || r.profileComplete || r.stage > 1);
   });
 
@@ -753,6 +767,7 @@ export const adminSetStage = createServerFn({ method: "POST" })
       return { ok: true as const, stage: 3 };
     } else if (data.action === "stage4") {
       if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
+      if (openedBeforeInvoice2Rule(app.createdAt)) throw new Error("Legacy");
       await sql`update applications set stage = 4, stage4_at = now(), updated_at = now() where id = ${app.id}`;
       await audit(sql, profile.userId, data.action, app.id, data.reason);
       return { ok: true as const, stage: 4 };
@@ -779,6 +794,7 @@ export const adminSetProcess = createServerFn({ method: "POST" })
     if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
     const app = await loadApp(sql, data.id);
     if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
+    if (openedBeforeInvoice2Rule(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
     await sql`update applications set process_stage = ${data.processStage}, updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "PROCESS", app.id, data.processStage);
   });
@@ -1185,6 +1201,26 @@ export const adminSetRole = createServerFn({ method: "POST" })
     }
     await sql`update profiles set role = ${data.role} where user_id = ${data.userId}`;
     await audit(sql, context.userId, "ROLE", data.userId, data.role);
+  });
+
+export const adminDeleteApplication = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+      const mod = await import("./sheet-backend");
+      await mod.adminDeleteApplication(context.userId, id);
+      return;
+    }
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app) throw new Error("Not found");
+    if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
+    await sql`delete from documents where application_id = ${id}`;
+    await sql`delete from messages where application_id = ${id}`;
+    await sql`delete from applications where id = ${id}`;
+    await audit(sql, context.userId, "APPLICATION_DELETE", id, app.clientEmail || "");
   });
 
 export const adminDeleteAccount = createServerFn({ method: "POST" })

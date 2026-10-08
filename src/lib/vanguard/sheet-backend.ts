@@ -1,10 +1,13 @@
 import { downloadFileFromDrive, resolveVaultFolder, safeDriveRedirect, uploadFileToDrive } from "@/lib/google/drive";
 import { documentPathname, downloadPrivateDocument, uploadPrivateDocument } from "@/lib/blob";
-import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, patchSheetCells, primeSheetRows, readSheetRows, sheetIdRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import { appendSheetRow, appendSheetRows, clearSheetBody, deleteSheetRowsByIds, invalidateSheet, patchSheetCells, primeSheetRows, readSheetRows, sheetIdRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
+  capLegacyProgress,
   clientName,
+  INVOICE2_STAGE,
+  openedBeforeInvoice2Rule,
   newId,
   normalizeUploadMime,
   parseQuestionnaire,
@@ -12,6 +15,7 @@ import {
   productionWeeks,
   questionnaireError,
   sameCountry,
+  stageIndex,
   type DocCategory,
   type Processing,
   type ProcessStage,
@@ -259,6 +263,7 @@ function extraOf(raw: string): Extra {
 function appFrom(row: SheetRow, vacancies: Vacancy[]) {
   const extra = extraOf(row.applicantData);
   const vacancy = vacancies.find((item) => item.id === row.vacancyId);
+  const capped = capLegacyProgress(row.createdAt, Number(row.stage) || 1, row.processStage || "IN_PROCESS");
   return {
     id: row.id,
     userId: row.userId || null,
@@ -271,9 +276,9 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     totalCost: Number(row.totalCost) || 0,
     currency: row.currency || "EUR",
     productionWeeks: extra.productionWeeks,
-    stage: Number(row.stage) || 1,
+    stage: capped.stage,
     status: row.status || "OPEN",
-    processStage: row.processStage || "IN_PROCESS",
+    processStage: capped.processStage,
     questionnaire: JSON.stringify(extra.questionnaire),
     profileComplete: Boolean(extra.profileComplete),
     rejectionReason: row.rejectedReason || "",
@@ -317,6 +322,17 @@ async function saveApp(app: ReturnType<typeof appFrom>, extra: Extra, patch: Par
   };
   await updateSheetRowById("Applications", app.id, row);
   dropPublicCache();
+}
+
+async function persistLegacyCap(app: ReturnType<typeof appFrom>) {
+  const rawStage = Number(app.row.stage) || 1;
+  const rawProcess = app.row.processStage || "IN_PROCESS";
+  if (rawStage === app.stage && rawProcess === app.processStage) return;
+  await saveApp(app, app.extra, { stage: String(app.stage), processStage: app.processStage });
+}
+
+function openedBefore(createdAt: string | null | undefined) {
+  return openedBeforeInvoice2Rule(createdAt);
 }
 
 async function docsFor(applicationId: string) {
@@ -1185,6 +1201,7 @@ export async function getMine(userId: string, id: string) {
   await profile(userId);
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || app.userId !== userId) throw new Error("Not found");
+  await persistLegacyCap(app);
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
 }
 
@@ -1431,6 +1448,7 @@ export async function adminGet(userId: string, id: string) {
   invalidateSheet("DossierDocuments");
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || isHistoryApp(app)) throw new Error("Not found");
+  await persistLegacyCap(app);
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
 }
 
@@ -1533,6 +1551,7 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     }
   } else if (data.action === "stage4") {
     if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
+    if (openedBefore(app.createdAt)) throw new Error("Legacy");
     await saveApp(app, { ...app.extra, stage4At: nowIso() }, { stage: "4" });
     stage = 4;
     try {
@@ -1558,6 +1577,7 @@ export async function adminSetProcess(userId: string, data: { id: string; proces
   if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
   const app = (await loadApps()).find((item) => item.id === data.id);
   if (!app || isHistoryApp(app) || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
+  if (openedBefore(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
   await saveApp(app, app.extra, { processStage: data.processStage });
   if (data.processStage === "EMPLOYER_APPROVED_FOR_MINISTRY" || PROCESS_STAGES.indexOf(data.processStage as ProcessStage) >= PROCESS_STAGES.indexOf("EMPLOYER_APPROVED_FOR_MINISTRY")) {
     await markTrancheDue(app.id, "T2");
@@ -1934,6 +1954,40 @@ export async function adminSetRole(userId: string, data: { userId: string; role:
   const roles = data.role === "ADMIN" ? ["ADMIN"] : data.role === "MANAGER" ? ["MANAGER"] : data.role === "SUBAGENT" ? ["SUBAGENT"] : ["CLIENT"];
   await updateSheetRowById("Users", target.id, { ...target, roles: JSON.stringify(roles) });
   await audit(userId, "ROLE", data.userId, data.role);
+}
+
+export async function adminDeleteApplication(userId: string, id: string) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
+  const [docs, pays, notes] = await Promise.all([
+    readSheetRows("DossierDocuments"),
+    readSheetRows("PaymentTransactions"),
+    readSheetRows("SupportTickets"),
+  ]);
+  const removed = await deleteSheetRowsByIds("Applications", [id]);
+  if (!removed) throw new Error("Not found");
+  if (app.status === "OPEN" && app.vacancyId) {
+    try {
+      await restoreQuota(app.vacancyId);
+    } catch (err) {
+      console.error("[delete-quota]", err);
+    }
+  }
+  await deleteSheetRowsByIds(
+    "DossierDocuments",
+    docs.filter((row) => row.dossierId === id || (row.fileName || "").startsWith(`${id} `)).map((row) => row.id),
+  ).catch((err) => console.error("[delete-docs]", err));
+  await deleteSheetRowsByIds(
+    "PaymentTransactions",
+    pays.filter((row) => row.dossierId === id).map((row) => row.id),
+  ).catch((err) => console.error("[delete-pay]", err));
+  await deleteSheetRowsByIds(
+    "SupportTickets",
+    notes.filter((row) => row.subject === id || row.dossierId === id).map((row) => row.id),
+  ).catch((err) => console.error("[delete-notes]", err));
+  await audit(userId, "APPLICATION_DELETE", id, app.clientEmail || "");
+  dropPublicCache();
 }
 
 export async function adminDeleteAccount(userId: string, targetId: string) {
