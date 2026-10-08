@@ -129,6 +129,37 @@ export function priceFor(base: number, processing: Processing): number {
   return base;
 }
 
+/** 0–90. Zero means no client discount. */
+export function clampCut(value: unknown): number {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(90, n);
+}
+
+export function parseCuts(raw: string | undefined | null): Record<string, number> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const n = clampCut(value);
+      if (key && n > 0) out[key] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Whole euros. A real discount never rounds a positive fee down to zero. */
+export function applyPercent(amount: number, percent: number): number {
+  const cut = clampCut(percent);
+  const base = Math.round(Number(amount) || 0);
+  if (cut <= 0 || base <= 0) return Math.max(0, base);
+  return Math.max(1, Math.round((base * (100 - cut)) / 100));
+}
+
 export function productionWeeks(
   min: number,
   max: number,

@@ -1,8 +1,8 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Shell, storyKey, useDesk, useSite } from "./chrome";
+import { Shell, rememberAgent, storyKey, useAgentCut, useDesk, useSite } from "./chrome";
 import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, applyPercent, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS, DEFAULT_SETTINGS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
@@ -52,6 +52,7 @@ export function HomePage() {
   const [restored, setRestored] = useState(false);
   const [countryOpen, setCountryOpen] = useState(false);
   const [agentNote, setAgentNote] = useState(false);
+  const cut = useAgentCut();
   useEffect(() => {
     setAgentNote(Boolean(sessionStorage.getItem("vg-agent")));
     const raw = window.sessionStorage.getItem("vg-last-calc");
@@ -84,7 +85,8 @@ export function HomePage() {
     return Array.from(new Set(catalog.filter((p) => p.active && p.country).map((p) => p.country))).sort((a, b) => a.localeCompare(b));
   }, [catalog]);
   const settings = data?.settings ?? {};
-  const fromPrice = catalog.filter((p) => p.active).reduce((min, p) => Math.min(min, p.basePrice), Number.POSITIVE_INFINITY);
+  const fromPrice = applyPercent(catalog.filter((p) => p.active).reduce((min, p) => Math.min(min, p.basePrice), Number.POSITIVE_INFINITY), cut);
+  const priced = (base: number, pace: Processing) => applyPercent(priceFor(base, pace), cut);
   const title =
     settings[storyKey(lang, "hero_title")] ||
     settings.hero_title_en ||
@@ -140,7 +142,7 @@ export function HomePage() {
                 {t("calc_continue")}
               </button>
             ) : null}
-            {agentNote ? <p className="mt-3 text-sm text-mist">{t("agent_kept")}</p> : null}
+            {cut > 0 ? <p className="mt-3 text-sm text-mist">{t("fee_cut")} −{cut}%</p> : agentNote ? <p className="mt-3 text-sm text-mist">{t("agent_kept")}</p> : null}
           </div>
           <form
             id="calc"
@@ -248,7 +250,7 @@ export function HomePage() {
                               : t(`speed_weeks_${pace}` as "speed_weeks_STANDARD")}
                           </td>
                           <td className="py-2">
-                            {product ? `${priceFor(product.basePrice, pace)} EUR` : t(`speed_fee_${pace}` as "speed_fee_STANDARD")}
+                            {product ? `${priced(product.basePrice, pace)} EUR` : t(`speed_fee_${pace}` as "speed_fee_STANDARD")}
                           </td>
                         </tr>
                       ))}
@@ -259,7 +261,7 @@ export function HomePage() {
                 <p className="display ember min-h-14 text-5xl">
                   {product && speed ? (
                     <>
-                      {priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
+                      {priced(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
                     </>
                   ) : Number.isFinite(fromPrice) ? (
                     <>
@@ -320,9 +322,11 @@ export function SearchPage({
   const [dayOnly, setDayOnly] = useState(false);
   const visa = data?.products.find((p) => p.id === product);
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : null;
+  const cut = useAgentCut();
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
   const weeks = visa && pace ? productionWeeks(visa.productionMinWeeks, visa.productionMaxWeeks, pace) : 0;
-  const fee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
+  const listFee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
+  const fee = applyPercent(listFee, cut);
   const openSeat = (v: { active: boolean; pauseUntil?: string }) => {
     if (v.pauseUntil && Date.parse(v.pauseUntil) > Date.now()) return false;
     return v.active || Boolean(v.pauseUntil);
@@ -414,6 +418,8 @@ export function SearchPage({
               <div>
                 <p className="kicker">{t("search_fee")}</p>
                 <p className="display ember mt-2 text-5xl">{fee}</p>
+                {cut > 0 && listFee !== fee ? <p className="text-sm text-mist line-through">{listFee} EUR</p> : null}
+                {cut > 0 ? <p className="text-sm text-mist">{t("fee_cut")} −{cut}%</p> : null}
                 <p className="text-mist">EUR</p>
               </div>
               <div>
@@ -597,16 +603,19 @@ export function VacancyPage({
   const [err, setErr] = useState("");
   const [citizen, setCitizen] = useState(citizenship);
   const [agentCode, setAgentCode] = useState("");
+  const cut = useAgentCut();
   useEffect(() => {
     setAgentCode(sessionStorage.getItem("vg-agent") || "");
   }, []);
   const job = data?.vacancies.find((v) => v.id === id);
   const visa = data?.products.find((p) => p.id === (product || job?.visaProductId));
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : "STANDARD";
+  const listFee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
+  const fee = applyPercent(listFee, cut);
   async function apply() {
     if (!job) return;
     if (!signedIn) {
-      sessionStorage.setItem("vg-agent", agentCode.trim());
+      rememberAgent(agentCode);
       sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim() }));
       void navigate({ to: "/login" });
       return;
@@ -615,6 +624,7 @@ export function VacancyPage({
     setErr("");
     try {
       void noteFunnel({ data: { kind: "apply" } }).catch(() => undefined);
+      rememberAgent(agentCode);
       const res = await createApplication({ data: { vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim(), lang } });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
@@ -647,11 +657,23 @@ export function VacancyPage({
             [t("field_hours"), job.workingHours],
             [t("field_housing"), job.accommodation],
             [t("permit"), `${visa.name}, ${visa.duration}`],
-            [t("fee"), visa && pace ? `${priceFor(visa.basePrice, pace)} EUR` : ""],
+            [t("fee"), "fee"],
           ].map(([k, v]) => (
             <div key={k} className="border-t border-white/15 pt-3">
               <dt className="text-xs uppercase tracking-widest text-mist">{k}</dt>
-              <dd className={`mt-1 ${k === t("fee") ? "ember" : ""}`}>{v}</dd>
+              <dd className={`mt-1 ${k === t("fee") ? "ember" : ""}`}>
+                {k === t("fee") ? (
+                  fee ? (
+                    <>
+                      {cut > 0 && listFee !== fee ? <span className="mr-2 text-mist line-through">{listFee}</span> : null}
+                      {fee} EUR
+                      {cut > 0 ? <span className="mt-1 block text-xs font-normal text-mist">{t("fee_cut")} −{cut}%</span> : null}
+                    </>
+                  ) : ""
+                ) : (
+                  v
+                )}
+              </dd>
             </div>
           ))}
         </dl>
@@ -677,7 +699,7 @@ export function VacancyPage({
             value={agentCode}
             onChange={(e) => {
               setAgentCode(e.target.value);
-              sessionStorage.setItem("vg-agent", e.target.value.trim());
+              rememberAgent(e.target.value);
             }}
           />
         </label>
@@ -965,6 +987,7 @@ export function ContactPage() {
 export function CountryPage({ code }: { code: string }) {
   const { t } = useI18n();
   const { data } = useSite();
+  const cut = useAgentCut();
   const products = (data?.products ?? VISA_PRODUCTS).filter((item) => item.active && countrySlug(item.country) === code);
   const country = products[0]?.country ?? "";
   const ids = new Set(products.map((item) => item.id));
@@ -984,7 +1007,8 @@ export function CountryPage({ code }: { code: string }) {
         <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
         {products.length ? (
           <p className="mt-3 text-sm text-mist">
-            {t("country_fee_range")} {Math.min(...products.map((item) => item.basePrice))}–{Math.max(...products.map((item) => item.basePrice))} EUR
+            {t("country_fee_range")} {applyPercent(Math.min(...products.map((item) => item.basePrice)), cut)}–{applyPercent(Math.max(...products.map((item) => item.basePrice)), cut)} EUR
+            {cut > 0 ? <span className="ml-2">{t("fee_cut")} −{cut}%</span> : null}
           </p>
         ) : null}
         {blocked ? <p className="mt-3 text-sm text-mist">{t("country_blocked")}: {blocked}</p> : null}
@@ -995,12 +1019,12 @@ export function CountryPage({ code }: { code: string }) {
             <section key={item.id} className="glass p-5">
               <h2 className="display text-3xl">{item.name}</h2>
               <p className="mt-2 text-mist">{item.duration}</p>
-              <p className="display ember mt-3 text-4xl">{item.basePrice} <span className="text-xl text-mist">EUR</span></p>
+              <p className="display ember mt-3 text-4xl">{applyPercent(item.basePrice, cut)} <span className="text-xl text-mist">EUR</span></p>
               <p className="mt-3 text-sm text-mist">{t("country_pace")}</p>
               <ul className="mt-2 grid gap-1 text-sm">
                 {item.allowedProcessing.map((pace) => (
                   <li key={pace}>
-                    {t(`speed_${pace}`)} · {productionWeeks(item.productionMinWeeks, item.productionMaxWeeks, pace)} {t("weeks")} · {priceFor(item.basePrice, pace)} EUR
+                    {t(`speed_${pace}`)} · {productionWeeks(item.productionMinWeeks, item.productionMaxWeeks, pace)} {t("weeks")} · {applyPercent(priceFor(item.basePrice, pace), cut)} EUR
                   </li>
                 ))}
               </ul>

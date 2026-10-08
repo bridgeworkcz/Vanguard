@@ -12,6 +12,9 @@ import {
   normalizeUploadMime,
   parseQuestionnaire,
   priceFor,
+  applyPercent,
+  clampCut,
+  parseCuts,
   productionWeeks,
   questionnaireError,
   sameCountry,
@@ -482,6 +485,7 @@ export const listAgentBook = createServerFn({ method: "GET" })
       locked: true,
       email: person.email,
       rate,
+      cut: await cutForSql(sql, context.userId),
       month: kyivMonth(),
       commission: monthCommission(cases, rate),
       cases: cases.map((app) => ({
@@ -578,6 +582,12 @@ async function resolveReferrer(sql: Sql, code: string): Promise<string> {
   return rows[0].userId;
 }
 
+async function cutForSql(sql: Sql, referrerUserId: string): Promise<number> {
+  if (!referrerUserId) return 0;
+  const rows = await sql<{ value: string }>`select value from settings where key = 'agent_discounts'`;
+  return clampCut(parseCuts(rows[0]?.value)[referrerUserId]);
+}
+
 export const noteFunnel = createServerFn({ method: "POST" })
   .validator((input: { kind?: string }) => ({
     kind: input?.kind === "apply" || input?.kind === "question" ? input.kind : ("calc" as const),
@@ -625,7 +635,11 @@ export const createApplication = createServerFn({ method: "POST" })
       if (data.agentCode) {
         const linked = await resolveReferrer(sql, data.agentCode);
         if (linked) {
-          await sql`update applications set referrer_user_id = ${linked}, updated_at = now()
+          const percent = await cutForSql(sql, linked);
+          const total = applyPercent(priceFor(product.basePrice, data.processing), percent);
+          await sql`update applications set referrer_user_id = ${linked},
+            total_cost = case when stage <= 1 and ${percent} > 0 then ${total} else total_cost end,
+            updated_at = now()
             where id = ${dup[0].id} and (referrer_user_id is null or referrer_user_id = '')`;
         }
       }
@@ -633,7 +647,7 @@ export const createApplication = createServerFn({ method: "POST" })
     }
     const referrerUserId = await resolveReferrer(sql, data.agentCode || "");
     const id = newId("VG");
-    const total = priceFor(product.basePrice, data.processing);
+    const total = applyPercent(priceFor(product.basePrice, data.processing), await cutForSql(sql, referrerUserId));
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
     const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: data.citizenship };
     await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id)
@@ -756,13 +770,15 @@ export const adminOverview = createServerFn({ method: "GET" })
       and exists (select 1 from documents d where d.application_id = a.id and d.category = 'PAYMENT_PROOF' and d.status = 'UPLOADED')`;
     const live = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
     const users = await sql<{ userId: string; email: string; fullName: string; phone: string; role: string }>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles order by email`;
+    const cutRows = await sql<{ value: string }>`select value from settings where key = 'agent_discounts'`;
+    const cuts = parseCuts(cutRows[0]?.value);
     return {
       role: profile.role,
       userId: profile.userId,
       waiting: Number(waiting[0]?.c ?? 0),
       proofs: Number(proofs[0]?.c ?? 0),
       live: Number(live[0]?.c ?? 0),
-      users,
+      users: users.map((user) => ({ ...user, clientDiscount: cuts[user.userId] || 0 })),
     };
   });
 
@@ -1074,6 +1090,9 @@ export const adminDeleteTeam = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
+    if (!id) throw new Error("Not found");
+    const existing = await sql<{ id: string }>`select id from team_members where id = ${id}`;
+    if (!existing[0]) throw new Error("Not found");
     await sql`delete from team_members where id = ${id}`;
     await audit(sql, context.userId, "TEAM_DELETE", id, "");
   });
@@ -1301,6 +1320,43 @@ export const adminSetRole = createServerFn({ method: "POST" })
     }
     await sql`update profiles set role = ${data.role} where user_id = ${data.userId}`;
     await audit(sql, context.userId, "ROLE", data.userId, data.role);
+  });
+
+export const adminSetClientDiscount = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; percent: number }) => ({
+    userId: clean(input?.userId, 80),
+    percent: clampCut(input?.percent),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).adminSetClientDiscount(context.userId, data);
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const target = await sql<{ role: string }>`select role from profiles where user_id = ${data.userId}`;
+    if (!target[0]) throw new Error("Not found");
+    if (data.percent > 0 && target[0].role !== "SUBAGENT") throw new Error("Role");
+    const rows = await sql<{ value: string }>`select value from settings where key = 'agent_discounts'`;
+    const book = parseCuts(rows[0]?.value);
+    if (data.percent > 0) book[data.userId] = data.percent;
+    else delete book[data.userId];
+    const value = JSON.stringify(book);
+    await sql`insert into settings (key, value, updated_at) values ('agent_discounts', ${value}, now())
+      on conflict (key) do update set value = ${value}, updated_at = now()`;
+    await audit(sql, context.userId, "CLIENT_DISCOUNT", data.userId, String(data.percent));
+    return { percent: data.percent };
+  });
+
+export const quoteAgent = createServerFn({ method: "POST" })
+  .validator((code: unknown) => clean(code, 80))
+  .handler(async ({ data: code }) => {
+    if (!code) return { percent: 0 };
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    if (limited(`cut:${ip.slice(0, 80)}`, 40, 60_000)) return { percent: 0 };
+    if (sheetsOn()) return { percent: await (await import("./sheet-backend")).publicCut(code) };
+    const sql = await getSql();
+    const id = await resolveReferrer(sql, code);
+    return { percent: id ? await cutForSql(sql, id) : 0 };
   });
 
 export const adminDeleteApplication = createServerFn({ method: "POST" })

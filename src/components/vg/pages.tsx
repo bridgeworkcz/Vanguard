@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { listAgentBook, listPublicFilings } from "@/lib/vanguard/api";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
-import { Shell, useDesk } from "./chrome";
+import { Shell, rememberAgent, useDesk } from "./chrome";
 
 function Article({ kicker, title, children }: { kicker: string; title: string; children: ReactNode }) {
   return (
@@ -149,7 +149,7 @@ export function AgentsPage() {
     if (!signedIn) return;
     void listAgentBook()
       .then((book) => {
-        if (book.code) sessionStorage.setItem("vg-agent", book.code);
+        if (book.code) rememberAgent(book.code);
       })
       .catch(() => undefined);
   }, [signedIn]);

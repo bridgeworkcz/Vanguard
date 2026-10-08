@@ -683,6 +683,7 @@ export function PortalPage({ id }: { id: string }) {
                 <p className="text-xs uppercase tracking-widest text-mist">{t("desk_month")}</p>
                 <p className="mt-1">{book.month}</p>
                 <p className="text-sm text-mist">{t("desk_rate")} {book.rate}%</p>
+                {"cut" in book && book.cut > 0 ? <p className="mt-2 text-sm">{t("desk_cut")} −{book.cut}%</p> : null}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-widest text-mist">{t("desk_commission")}</p>

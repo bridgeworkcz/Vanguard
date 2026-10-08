@@ -4,7 +4,7 @@ import { signOut } from "@/lib/auth/client";
 import { accountSession, accountSignOut } from "@/lib/vanguard/account";
 import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { getPublicSite, getSessionProfile, listMyApplications } from "@/lib/vanguard/api";
+import { getPublicSite, getSessionProfile, listMyApplications, quoteAgent } from "@/lib/vanguard/api";
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
 import { useI18n, softenError, type Lang } from "@/lib/vanguard/i18n";
 import { stageTone } from "@/lib/vanguard/ops";
@@ -25,6 +25,69 @@ export function Mark({ className = "size-9" }: { className?: string }) {
 }
 
 type PublicSite = Awaited<ReturnType<typeof getPublicSite>>;
+
+let agentCutCache = { code: "", percent: 0 };
+
+export function rememberAgent(code: string) {
+  if (typeof window === "undefined") return;
+  const next = code.trim().slice(0, 120);
+  try {
+    if (next) sessionStorage.setItem("vg-agent", next);
+    else sessionStorage.removeItem("vg-agent");
+  } catch {
+    /* storage unavailable */
+  }
+  if (!next) agentCutCache = { code: "", percent: 0 };
+  window.dispatchEvent(new Event("vg-agent"));
+}
+
+function storedAgent() {
+  try {
+    return sessionStorage.getItem("vg-agent")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Percent off the listed service fee for the agent code kept in this browser. */
+export function useAgentCut() {
+  const [percent, setPercent] = useState(agentCutCache.percent);
+  useEffect(() => {
+    let stop = false;
+    let timer = 0;
+    const load = () => {
+      const code = storedAgent();
+      window.clearTimeout(timer);
+      if (!code) {
+        agentCutCache = { code: "", percent: 0 };
+        if (!stop) setPercent(0);
+        return;
+      }
+      if (agentCutCache.code === code) setPercent(agentCutCache.percent);
+      timer = window.setTimeout(() => {
+        void quoteAgent({ data: code })
+          .then((row) => {
+            const next = Math.max(0, Math.min(90, Math.round(Number(row?.percent) || 0)));
+            agentCutCache = { code, percent: next };
+            if (!stop) setPercent(next);
+          })
+          .catch(() => {
+            if (!stop && agentCutCache.code !== code) setPercent(0);
+          });
+      }, 280);
+    };
+    load();
+    window.addEventListener("vg-agent", load);
+    window.addEventListener("storage", load);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("vg-agent", load);
+      window.removeEventListener("storage", load);
+    };
+  }, []);
+  return percent;
+}
 
 let siteCache: PublicSite | null = null;
 let roleCache: string | null = null;

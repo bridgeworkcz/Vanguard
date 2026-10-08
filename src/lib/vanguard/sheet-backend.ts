@@ -12,6 +12,9 @@ import {
   normalizeUploadMime,
   parseQuestionnaire,
   priceFor,
+  applyPercent,
+  clampCut,
+  parseCuts,
   productionWeeks,
   questionnaireError,
   sameCountry,
@@ -321,6 +324,7 @@ async function saveApp(app: ReturnType<typeof appFrom>, extra: Extra, patch: Par
     rejectedReason: patch.rejectedReason ?? app.rejectionReason,
     updatedAt: nowIso(),
     approvedAt: patch.approvedAt ?? app.row.approvedAt ?? "",
+    totalCost: patch.totalCost ?? app.row.totalCost,
   };
   await updateSheetRowById("Applications", app.id, row);
   dropPublicCache();
@@ -1356,6 +1360,18 @@ async function resolveReferrer(code: string): Promise<string> {
   return row.id;
 }
 
+async function cutFor(referrerUserId: string): Promise<number> {
+  if (!referrerUserId) return 0;
+  const map = await settingMap();
+  return clampCut(parseCuts(map.agent_discounts)[referrerUserId]);
+}
+
+export async function publicCut(code: string): Promise<number> {
+  const id = await resolveReferrer(code);
+  if (!id) return 0;
+  return cutFor(id);
+}
+
 export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string; lang?: string }) {
   const person = await profile(userId);
   if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
@@ -1372,11 +1388,19 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   if (existing) {
     if (!existing.referrerUserId && (data.agentCode || data.referrerUserId)) {
       const referrerUserId = await resolveReferrer(data.referrerUserId || data.agentCode || "");
-      if (referrerUserId) await saveApp(existing, { ...existing.extra, referrerUserId });
+      if (referrerUserId) {
+        const percent = await cutFor(referrerUserId);
+        const extra = { ...existing.extra, referrerUserId };
+        if (existing.stage <= 1 && percent > 0) {
+          const total = String(applyPercent(priceFor(product.basePrice, existing.processing), percent));
+          await saveApp(existing, extra, { totalCost: total });
+        } else await saveApp(existing, extra);
+      }
     }
     return { id: existing.id };
   }
   const referrerUserId = await resolveReferrer(data.referrerUserId || data.agentCode || "");
+  const percent = await cutFor(referrerUserId);
   const id = newId("VG");
   const stamp = nowIso();
   const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, lang: data.lang === "cs" || data.lang === "ur" ? data.lang : "en", productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
@@ -1390,7 +1414,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
     visaProductId: product.id,
     country: product.country,
     processingOption: data.processing,
-    totalCost: String(priceFor(product.basePrice, data.processing)),
+    totalCost: String(applyPercent(priceFor(product.basePrice, data.processing), percent)),
     currency: "EUR",
     processStage: "IN_PROCESS",
     paymentDeadlineAt: "",
@@ -1545,6 +1569,7 @@ export async function adminOverview(userId: string) {
   const person = await requireStaff(userId);
   const apps = (await loadApps()).filter((app) => !isHistoryApp(app));
   const docs = await readSheetRows("DossierDocuments");
+  const cuts = parseCuts((await settingMap()).agent_discounts);
   const users = (await readSheetRows("Users"))
     .filter((row) => row.isActive !== "false")
     .map((row) => ({
@@ -1553,6 +1578,7 @@ export async function adminOverview(userId: string) {
     fullName: row.fullName,
     phone: row.phone,
     role: roleOf(rolesOf(row.roles)),
+    clientDiscount: cuts[row.id] || 0,
   }));
   return {
     role: person.role,
@@ -2099,6 +2125,21 @@ export async function adminSetRole(userId: string, data: { userId: string; role:
   await audit(userId, "ROLE", data.userId, data.role);
 }
 
+export async function adminSetClientDiscount(userId: string, data: { userId: string; percent: number }) {
+  await requireAdmin(userId);
+  const percent = clampCut(data.percent);
+  const rows = await readSheetRows("Users");
+  const target = rows.find((row) => row.id === data.userId);
+  if (!target) throw new Error("Not found");
+  if (percent > 0 && roleOf(rolesOf(target.roles)) !== "SUBAGENT") throw new Error("Role");
+  const book = parseCuts((await settingMap()).agent_discounts);
+  if (percent > 0) book[target.id] = percent;
+  else delete book[target.id];
+  await putSetting("agent_discounts", JSON.stringify(book), userId, false);
+  await audit(userId, "CLIENT_DISCOUNT", target.id, String(percent));
+  return { percent };
+}
+
 export async function adminDeleteApplication(userId: string, id: string) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === id);
@@ -2220,6 +2261,7 @@ export async function agentBook(userId: string) {
     locked: Boolean(aliases[person.userId]?.locked),
     email: person.email,
     rate,
+    cut: clampCut(parseCuts(map.agent_discounts)[person.userId]),
     month: kyivMonth(),
     commission: monthCommission(cases, rate),
     cases: cases

@@ -28,6 +28,7 @@ import {
   adminSetProcess,
   adminSetReferrer,
   adminSetRole,
+  adminSetClientDiscount,
   adminSetStage,
   adminUploadFinal,
   adminUploadProof,
@@ -50,6 +51,21 @@ import { Pager } from "./pages";
 type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
 
 const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit"];
+
+function NavGlyph({ tab }: { tab: Tab }) {
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  return (
+    <svg viewBox="0 0 24 24" className="size-5 shrink-0" aria-hidden="true">
+      {tab === "overview" ? <path {...common} d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /> : null}
+      {tab === "applications" ? <path {...common} d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1zM14 3.5V8h4.5M8.5 12h7M8.5 16h5" /> : null}
+      {tab === "vacancies" ? <path {...common} d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M4.5 7h15v11.5a1.5 1.5 0 0 1-1.5 1.5h-12a1.5 1.5 0 0 1-1.5-1.5z" /> : null}
+      {tab === "team" ? <path {...common} d="M8 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM15.5 11.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM3.5 18.5v-1.2A3.3 3.3 0 0 1 6.8 14h2.4a3.3 3.3 0 0 1 3.3 3.3v1.2M13.5 14.2h2.2a3 3 0 0 1 3 3v1.3" /> : null}
+      {tab === "content" ? <path {...common} d="M5 6h14M5 12h14M5 18h9" /> : null}
+      {tab === "pricing" ? <path {...common} d="M12 3v18M16.5 7.5c0-1.6-2-2.5-4.5-2.5S7.5 5.9 7.5 7.5 9.5 10 12 10s4.5.9 4.5 2.5-2 2.5-4.5 2.5-4.5-.9-4.5-2.5" /> : null}
+      {tab === "audit" ? <path {...common} d="M8 4h8M7 4.5h10v15.5H7zM9.5 9h5M9.5 13h5M9.5 17h3" /> : null}
+    </svg>
+  );
+}
 
 function errorMessage(err: unknown) {
   if (err instanceof Error && err.message) return err.message;
@@ -443,6 +459,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [rejectCode, setRejectCode] = useState("other");
   const [focusUser, setFocusUser] = useState("");
   const [appsReady, setAppsReady] = useState(false);
+  const [rail, setRail] = useState<"off" | "icons" | "labels">("off");
+  const [cutUser, setCutUser] = useState("");
+  const [cutPct, setCutPct] = useState("0");
+  const [cutNote, setCutNote] = useState("");
   const staffUk = role === "ADMIN" || role === "MANAGER";
   const t = (key: CopyKey) => (staffUk ? (ADMIN_UK[key] ?? publicT(key)) : publicT(key));
 
@@ -460,6 +480,41 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
   function go(next: Tab, nextId = "") {
     void navigate({ to: "/admin", search: { tab: next, id: nextId } });
+  }
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("vg-admin-rail");
+      if (saved === "off" || saved === "icons" || saved === "labels") {
+        setRail(saved);
+        return;
+      }
+      setRail(window.matchMedia("(max-width: 767px)").matches ? "off" : "icons");
+    } catch {
+      /* keep the menu closed */
+    }
+  }, []);
+
+  function setRailMode(next: "off" | "icons" | "labels") {
+    setRail(next);
+    try {
+      localStorage.setItem("vg-admin-rail", next);
+      if (next !== "off") localStorage.setItem("vg-admin-rail-size", next);
+    } catch {
+      /* the choice simply will not stick */
+    }
+  }
+
+  function openRail() {
+    let size: "icons" | "labels" = "icons";
+    try {
+      const saved = localStorage.getItem("vg-admin-rail-size");
+      if (saved === "labels" || saved === "icons") size = saved;
+      else if (window.matchMedia("(max-width: 767px)").matches) size = "labels";
+    } catch {
+      size = "icons";
+    }
+    setRailMode(size);
   }
 
   useEffect(() => {
@@ -568,28 +623,62 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     }
   }
 
+  const tabLabel = (name: Tab) => t(`admin_${name === "applications" ? "apps" : name}` as CopyKey);
+
   return (
     <AdminLang.Provider value={staffUk}>
     <Shell>
-      <div className="mx-auto w-full min-w-0 max-w-6xl overflow-x-clip px-4 py-10 md:flex md:gap-6">
-        <aside className="hidden w-44 shrink-0 md:block">
-          <p className="kicker">{t("admin_kicker")}</p>
-          <nav className="mt-4 grid gap-1">
+      <div className="relative mx-auto flex w-full min-w-0 max-w-6xl items-start gap-3 overflow-x-clip px-4 py-6">
+        {rail !== "off" ? (
+          <button type="button" className="fixed inset-0 z-30 bg-black/55 md:hidden" aria-label={t("admin_nav_close")} onClick={() => setRailMode("off")} />
+        ) : null}
+        {rail !== "off" ? (
+          <aside className={`admin-rail${rail === "labels" ? " is-wide" : ""}`}>
+            <button type="button" className="admin-nav-btn" title={t("admin_nav_close")} aria-label={t("admin_nav_close")} onClick={() => setRailMode("off")}>
+              <svg viewBox="0 0 24 24" className="size-5 shrink-0" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+              {rail === "labels" ? <span>{t("admin_nav_close")}</span> : null}
+            </button>
+            <button
+              type="button"
+              className="admin-nav-btn"
+              title={rail === "labels" ? t("admin_nav_icons") : t("admin_nav_labels")}
+              aria-label={rail === "labels" ? t("admin_nav_icons") : t("admin_nav_labels")}
+              onClick={() => setRailMode(rail === "labels" ? "icons" : "labels")}
+            >
+              <svg viewBox="0 0 24 24" className="size-5 shrink-0" aria-hidden="true">
+                {rail === "labels" ? (
+                  <path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                ) : (
+                  <path d="M10 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                )}
+              </svg>
+              {rail === "labels" ? <span>{t("admin_nav_icons")}</span> : null}
+            </button>
             {TABS.map((name) => (
-              <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
-                {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
+              <button
+                key={name}
+                type="button"
+                title={tabLabel(name)}
+                aria-label={tabLabel(name)}
+                aria-current={current === name ? "page" : undefined}
+                className={`admin-nav-btn${current === name ? " is-on" : ""}`}
+                onClick={() => {
+                  go(name);
+                  if (window.matchMedia("(max-width: 767px)").matches) setRailMode("off");
+                }}
+              >
+                <NavGlyph tab={name} />
+                {rail === "labels" ? <span>{tabLabel(name)}</span> : null}
               </button>
             ))}
-          </nav>
-        </aside>
+          </aside>
+        ) : null}
         <div className="min-w-0 w-full max-w-full flex-1 overflow-x-clip">
-        <p className="kicker md:hidden">{t("admin_kicker")}</p>
-        <div className="mt-4 flex flex-wrap gap-2 md:hidden">
-          {TABS.map((name) => (
-            <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
-              {t(`admin_${name === "applications" ? "apps" : name === "vacancies" ? "vacancies" : name}` as CopyKey)}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <button type="button" className="admin-nav-btn" title={t("admin_nav_menu")} aria-label={t("admin_nav_menu")} aria-expanded={rail !== "off"} onClick={() => (rail === "off" ? openRail() : setRailMode("off"))}>
+            <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+          </button>
+          <p className="kicker">{t("admin_kicker")}</p>
         </div>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
 
@@ -632,6 +721,60 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             ) : null}
             {isAdmin ? (
               <div className="sm:col-span-3">
+                <h2 className="mt-6 text-lg">{t("admin_client_discount")}</h2>
+                <p className="mt-2 max-w-xl text-sm text-mist">{t("admin_client_discount_help")}</p>
+                {overview.users.some((u) => u.role === "SUBAGENT") ? (
+                  <form
+                    className="mt-3 flex flex-wrap items-end gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!cutUser) return;
+                      setCutNote("");
+                      setErr("");
+                      const percent = Math.max(0, Math.min(90, Math.round(Number(cutPct) || 0)));
+                      void adminSetClientDiscount({ data: { userId: cutUser, percent } })
+                        .then((saved) => {
+                          setCutPct(String(saved.percent));
+                          setCutNote(t("admin_client_discount_saved"));
+                          return adminOverview().then(setOverview);
+                        })
+                        .catch(() => setErr(t("admin_unsaved")));
+                    }}
+                  >
+                    <label className="grid gap-1 text-xs text-mist">
+                      {t("admin_client_discount_pick")}
+                      <select
+                        className="field max-w-xs"
+                        value={cutUser}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setCutUser(id);
+                          setCutNote("");
+                          const row = overview.users.find((u) => u.userId === id);
+                          setCutPct(String(row && "clientDiscount" in row ? row.clientDiscount || 0 : 0));
+                        }}
+                      >
+                        <option value="">{t("admin_client_discount_pick")}</option>
+                        {overview.users
+                          .filter((u) => u.role === "SUBAGENT")
+                          .map((u) => (
+                            <option key={u.userId} value={u.userId}>
+                              {u.email || u.fullName}
+                              {u.clientDiscount ? ` · −${u.clientDiscount}%` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-1 text-xs text-mist">
+                      %
+                      <input className="field w-24" type="number" min={0} max={90} value={cutPct} onChange={(e) => setCutPct(e.target.value)} />
+                    </label>
+                    <button className="btn-solid" type="submit" disabled={!cutUser}>{t("save")}</button>
+                    {cutNote ? <p className="text-sm text-mist">{cutNote}</p> : null}
+                  </form>
+                ) : (
+                  <p className="mt-3 text-sm text-mist">{t("admin_client_discount_none")}</p>
+                )}
                 <h2 className="mt-6 text-lg">{t("admin_users")}</h2>
                 <input className="field mt-3 max-w-sm" placeholder={t("admin_search")} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} />
                 <ul className="mt-3 grid gap-2">
@@ -653,7 +796,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       >
                         {u.email || u.fullName}
                       </button>
-                      <span className="text-metal">{u.role}</span>
+                      <span className="text-metal">{u.role}{u.role === "SUBAGENT" && u.clientDiscount ? ` · −${u.clientDiscount}%` : ""}</span>
                       {isAdmin ? (
                       <select
                         className="field max-w-40"
