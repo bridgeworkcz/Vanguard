@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import {
@@ -65,8 +65,12 @@ function stageFail(message: string, t: (key: CopyKey) => string) {
   return t("admin_unsaved");
 }
 
+const AdminLang = createContext(false);
+
 function useAdminT() {
-  return (key: CopyKey) => ADMIN_UK[key] ?? key;
+  const uk = useContext(AdminLang);
+  const { t } = useI18n();
+  return (key: CopyKey) => (uk ? (ADMIN_UK[key] ?? t(key)) : t(key));
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -395,8 +399,7 @@ function photoError(err: unknown, t: (key: CopyKey) => string) {
 }
 
 export function AdminPage({ tab, id }: { tab: string; id: string }) {
-  const { lang } = useI18n();
-  const t = useAdminT();
+  const { t: publicT, lang } = useI18n();
   const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data, reload } = useSite();
@@ -432,6 +435,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [casePage, setCasePage] = useState(1);
   const [hangOnly, setHangOnly] = useState(false);
   const [rejectCode, setRejectCode] = useState("other");
+  const [focusUser, setFocusUser] = useState("");
+  const [appsReady, setAppsReady] = useState(false);
+  const staffUk = role === "ADMIN" || role === "MANAGER";
+  const t = (key: CopyKey) => (staffUk ? (ADMIN_UK[key] ?? publicT(key)) : publicT(key));
 
   async function acceptCase(caseId: string) {
     setErr("");
@@ -465,10 +472,16 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
   useEffect(() => {
     if (role !== "ADMIN" && role !== "MANAGER") return;
-    if (current === "applications") {
-      adminListApplications({ data: { includeIncomplete: showAll } })
-        .then(setApps)
-        .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+    if (current === "applications" || current === "overview") {
+      adminListApplications({ data: { includeIncomplete: current === "overview" || showAll } })
+        .then((rows) => {
+          setApps(rows);
+          setAppsReady(true);
+        })
+        .catch((e: unknown) => {
+          setAppsReady(true);
+          setErr(e instanceof Error ? e.message : "Error");
+        });
     }
     if (current === "team" && (role === "ADMIN" || role === "MANAGER")) void adminAllTeam().then(setTeam);
     if (current === "audit") void adminAudit().then(setAudit);
@@ -476,7 +489,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   }, [current, role, showAll, data]);
 
   useEffect(() => {
-    if (current !== "applications" || !id || !detail) return;
+    if ((current !== "applications" && current !== "overview") || !id || !detail) return;
     document.getElementById("case-detail")?.scrollIntoView({ block: "start" });
   }, [id, current, detail]);
 
@@ -499,7 +512,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     );
   }
   if (!signedIn) return <RedirectToSignIn />;
-  if (role === "CLIENT") {
+  if (role === "CLIENT" || role === "SUBAGENT") {
     return (
       <Shell>
         <p className="px-4 py-16">{t("admin_denied")}</p>
@@ -539,6 +552,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   }
 
   return (
+    <AdminLang.Provider value={staffUk}>
     <Shell>
       <div className="mx-auto w-full min-w-0 max-w-6xl overflow-x-clip px-4 py-10 md:flex md:gap-6">
         <aside className="hidden w-44 shrink-0 md:block">
@@ -604,10 +618,24 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <ul className="mt-3 grid gap-2">
                   {overview.users
                     .filter((u) => `${u.email} ${u.fullName} ${u.phone ?? ""}`.toLowerCase().includes(userQuery.trim().toLowerCase()))
-                    .map((u) => (
-                    <li key={u.userId} className="flex flex-wrap items-center gap-3 border-t border-white/10 py-2 text-sm">
-                      <span className="min-w-40">{u.email || u.fullName}</span>
+                    .map((u) => {
+                      const email = u.email.trim().toLowerCase();
+                      const openCases = apps.filter((a) => a.status === "OPEN" && (a.userId === u.userId || (email !== "" && (a.clientEmail || "").trim().toLowerCase() === email)));
+                      return (
+                    <li key={u.userId} className="grid gap-2 border-t border-white/10 py-2 text-sm">
+                      <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        className="min-w-40 text-left underline-offset-4 hover:underline"
+                        onClick={() => {
+                          setFocusUser((cur) => (cur === u.userId ? "" : u.userId));
+                          if (id) go("overview");
+                        }}
+                      >
+                        {u.email || u.fullName}
+                      </button>
                       <span className="text-metal">{u.role}</span>
+                      {isAdmin ? (
                       <select
                         className="field max-w-40"
                         defaultValue={u.role}
@@ -621,6 +649,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                         <option>MANAGER</option>
                         <option>ADMIN</option>
                       </select>
+                      ) : null}
+                      {isAdmin ? (
                       <button
                         type="button"
                         className="btn"
@@ -640,8 +670,22 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       >
                         {t("admin_delete_user")}
                       </button>
+                      ) : null}
+                      </div>
+                      {focusUser === u.userId ? (
+                        <div className="grid gap-2 pb-1">
+                          <p className="text-xs uppercase tracking-widest text-mist">{t("admin_user_cases")}</p>
+                          {!appsReady ? <p className="text-mist">{t("loading")}</p> : openCases.length === 0 ? <p className="text-mist">{t("admin_no_open")}</p> : null}
+                          {openCases.map((a) => (
+                            <button key={a.id} type="button" className="btn w-fit" onClick={() => go("overview", a.id)}>
+                              {a.id} · {a.vacancyTitle || a.country} · {a.stage}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </li>
-                  ))}
+                      );
+                    })}
                 </ul>
               </div>
             ) : null}
@@ -878,10 +922,13 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               );
             })()}
             </>
-            {id && !detail ? <p className="mt-4">{t("loading")}</p> : null}
-            {detail && id ? (
-              <article id="case-detail" className="glass w-full min-w-0 max-w-full overflow-x-clip p-5">
-                <button type="button" className="btn mb-4" onClick={() => go("applications")}>{t("admin_back")}</button>
+          </div>
+        ) : null}
+
+        {(current === "applications" || current === "overview") && staff && id && !detail ? <p className="mt-4">{t("loading")}</p> : null}
+        {(current === "applications" || current === "overview") && staff && detail && id ? (
+              <article id="case-detail" className="glass mt-8 w-full min-w-0 max-w-full overflow-x-clip p-5">
+                <button type="button" className="btn mb-4" onClick={() => go(current)}>{t("admin_back")}</button>
                 <p className="kicker">{detail.app.id}</p>
                 <h2 className="display text-3xl">{detail.app.vacancyTitle}</h2>
                 <p className="text-mist">
@@ -1082,8 +1129,6 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </ul>
               </article>
             ) : null}
-          </div>
-        ) : null}
 
         {current === "vacancies" && data ? (
           <div className="mt-8 grid gap-4">
@@ -1241,6 +1286,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         </div>
       </div>
     </Shell>
+    </AdminLang.Provider>
   );
 }
 

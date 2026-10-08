@@ -653,6 +653,8 @@ const en = {
   hero_3b: "Still decides.",
   hero_4t: "The case",
   hero_4b: "We make it complete.",
+  admin_user_cases: "Open cases",
+  admin_no_open: "No open cases.",
 };
 
 const cs: Record<keyof typeof en, string> = {
@@ -1306,6 +1308,8 @@ const cs: Record<keyof typeof en, string> = {
   hero_3b: "Rozhoduje.",
   hero_4t: "Spis",
   hero_4b: "Dodáme ho úplný.",
+  admin_user_cases: "Otevřené spisy",
+  admin_no_open: "Žádný otevřený spis.",
 };
 
 const ur: Record<keyof typeof en, string> = {
@@ -1959,6 +1963,8 @@ const ur: Record<keyof typeof en, string> = {
   hero_3b: "فیصلہ وہی کرتی ہے۔",
   hero_4t: "فائل",
   hero_4b: "ہم اسے مکمل بناتے ہیں۔",
+  admin_user_cases: "کھلے کیس",
+  admin_no_open: "کوئی کھلا کیس نہیں۔",
 };
 
 const DICTS = { en, cs, ur };

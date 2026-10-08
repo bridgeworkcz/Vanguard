@@ -186,4 +186,6 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   agent_comm: "Комісія",
   agent_pay_paid: "Виплачено",
   agent_pay_due: "До виплати",
+  admin_user_cases: "Відкриті справи",
+  admin_no_open: "Відкритих справ немає.",
 };
