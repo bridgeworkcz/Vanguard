@@ -8,7 +8,7 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-14">
-        <p className="kicker ember">{kicker}</p>
+        <p className="kicker">{kicker}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{title}</h1>
         <div className="mt-8 grid gap-6 text-base leading-relaxed">{children}</div>
       </article>
@@ -88,7 +88,7 @@ export function QuestionsPage() {
           <ol className="grid gap-4">
             {steps.map(([title, body], index) => (
               <li key={title} className="glass p-5">
-                <p className="ember text-sm">0{index + 1}</p>
+                <p className="text-sm text-mist">0{index + 1}</p>
                 <h3 className="display mt-1 text-3xl">{title}</h3>
                 <p className="mt-2 text-mist">{body}</p>
               </li>
@@ -131,9 +131,9 @@ export function QuestionsPage() {
         <section id="cards" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("share_cards")}</h2>
           <ul className="grid gap-3">
-            <li className="glass p-4"><p className="ember text-sm">01</p><h3 className="display text-2xl">{t("card_steps")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
-            <li className="glass p-4"><p className="ember text-sm">02</p><h3 className="display text-2xl">{t("card_status")}</h3><p className="mt-2 text-sm text-mist">{t("sample_case_b")}</p></li>
-            <li className="glass p-4"><p className="ember text-sm">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist">www.vanguardmobility.site/#calc</p></li>
+            <li className="glass p-4"><p className="text-sm text-mist">01</p><h3 className="display text-2xl">{t("card_steps")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
+            <li className="glass p-4"><p className="text-sm text-mist">02</p><h3 className="display text-2xl">{t("card_status")}</h3><p className="mt-2 text-sm text-mist">{t("sample_case_b")}</p></li>
+            <li className="glass p-4"><p className="text-sm text-mist">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist">www.vanguardmobility.site/#calc</p></li>
           </ul>
         </section>
       ) : null}
@@ -219,7 +219,7 @@ export function FilingsPage() {
   return (
     <Shell>
       <div className="mx-auto max-w-5xl px-4 py-14">
-        <p className="kicker ember">{t("filings_kicker")}</p>
+        <p className="kicker">{t("filings_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{t("filings_title")}</h1>
         <p className="mt-3 max-w-2xl text-mist">{t("filings_hint")}</p>
         <input
@@ -252,7 +252,7 @@ export function FilingsPage() {
                   <td className="latin" data-label={t("filings_date")}>{row.createdAt?.slice(0, 10) || "—"}</td>
                   <td data-label={t("filings_status")}>
                     <span>
-                      <span className="ember block">{status(row)}</span>
+                      <span className="block">{status(row)}</span>
                       <span className="mt-1 block text-xs text-mist">{hint(row)}</span>
                     </span>
                   </td>

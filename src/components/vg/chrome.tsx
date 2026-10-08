@@ -242,7 +242,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const item = (to: "/" | "/about" | "/contact" | "/filings" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
     <Link
       to={to}
-      className={`min-h-11 inline-flex shrink-0 items-center border-b-2 text-sm ${path === to ? "border-[#ff6a1a] text-paper" : "border-transparent text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink" : ""}`}
+      className={`min-h-11 inline-flex shrink-0 items-center border-b-2 text-sm ${path === to ? "border-paper text-paper" : "border-transparent text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink border-ink" : ""}`}
       data-active={path === to ? "true" : "false"}
     >
       {label}
@@ -256,7 +256,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             <Mark className="size-8 shrink-0 sm:size-9" />
             <span className="min-w-0 leading-tight">
               <span className="wordmark block truncate">{t("brand")}</span>
-              <span className="ember mt-0.5 hidden text-[8px] tracking-[0.18em] uppercase sm:block">{t("brand_sub")}</span>
+              <span className="mt-0.5 hidden text-[8px] tracking-[0.18em] text-mist uppercase sm:block">{t("brand_sub")}</span>
             </span>
           </Link>
           <div className="ms-auto flex min-w-0 items-center justify-end gap-1 sm:gap-2">
@@ -344,7 +344,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           href={whatsAppHref(site.settings.support_phone, typeof window !== "undefined" ? sessionStorage.getItem("vg-route") || "" : "")}
           target="_blank"
           rel="noopener noreferrer"
-          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 inline-flex min-h-12 items-center rounded-full bg-[#ff6a1a] px-4 text-sm font-bold text-[#1a0b04] shadow-lg"
+          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 inline-flex min-h-12 items-center rounded-full bg-[#f4f5f7] px-4 text-sm font-bold text-[#070809]"
         >
           {t("wa_label")}
         </a>

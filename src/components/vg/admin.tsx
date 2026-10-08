@@ -541,7 +541,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     <Shell>
       <div className="mx-auto w-full min-w-0 max-w-6xl overflow-x-clip px-4 py-10 md:flex md:gap-6">
         <aside className="hidden w-44 shrink-0 md:block">
-          <p className="kicker ember">{t("admin_kicker")}</p>
+          <p className="kicker">{t("admin_kicker")}</p>
           <nav className="mt-4 grid gap-1">
             {TABS.map((name) => (
               <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
@@ -551,7 +551,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           </nav>
         </aside>
         <div className="min-w-0 w-full max-w-full flex-1 overflow-x-clip">
-        <p className="kicker ember md:hidden">{t("admin_kicker")}</p>
+        <p className="kicker md:hidden">{t("admin_kicker")}</p>
         <div className="mt-4 flex flex-wrap gap-2 md:hidden">
           {TABS.map((name) => (
             <button key={name} type="button" className={current === name ? "btn-solid" : "btn"} onClick={() => go(name)}>
@@ -569,7 +569,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               [overview.live, t("admin_live")],
             ].map(([n, label]) => (
               <article key={String(label)} className="glass p-5">
-                <p className="display ember text-5xl">{n}</p>
+                <p className="display text-5xl">{n}</p>
                 <p className="mt-2 text-mist">{label}</p>
               </article>
             ))}
@@ -811,7 +811,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                           const digits = (a.clientPhone || phoneOf(a.questionnaire)).replace(/\D/g, "");
                           const twin = digits.length >= 8 && (phones.get(digits) || 0) > 1;
                           return (
-                          <tr key={a.id} className={twin ? "border-t border-[#ff6a1a] bg-[#ff6a1a]/10" : "border-t border-white/10"}>
+                          <tr key={a.id} className="border-t border-white/10">
                             <td className="py-3" data-label="">
                               <input
                                 type="checkbox"
@@ -836,7 +836,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               {a.vacancyTitle}
                               {a.employer ? <span className="block text-mist">{a.employer}</span> : null}
                             </td>
-                            <td className="ember" data-label={t("admin_stage")}>
+                            <td data-label={t("admin_stage")}>
                               {a.stage}
                               {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) ? <span className="mt-1 block text-xs">{t("admin_overdue")}</span> : null}
                               {!a.assignedManagerId ? <span className="mt-1 block text-xs text-mist">{t("admin_unassigned")}</span> : null}

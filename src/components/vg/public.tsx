@@ -6,7 +6,7 @@ import { CITIZENSHIPS, countrySlug, hasHousing, isNightShift, netMark, priceFor,
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
-import { CountryStill, CountLine, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
+import { CountryStill, CountLine, EmployerMark, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
 import { MiniFlag } from "./flags";
 
 function Reviews({ settings }: { settings: Record<string, string> }) {
@@ -113,7 +113,7 @@ export function HomePage() {
       <section>
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-12 lg:py-14">
           <div className="lg:col-span-6">
-            <p className="kicker ember">{t("hero_kicker")}</p>
+            <p className="kicker">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-4xl sm:text-6xl">{title}</h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-paper/80">{body}</p>
             {restored && product && speed ? (
@@ -229,7 +229,7 @@ export function HomePage() {
                 <p className="inline-flex items-center gap-2 text-sm text-mist"><MiniFlag country={job.country} /> {job.country}</p>
                 <h3 className="display mt-2 text-2xl">{job.title}</h3>
                 <p className="mt-1 text-sm text-mist">{job.employer}</p>
-                <p className="mt-2 text-sm ember">{job.salaryNet}</p>
+                <p className="mt-2 text-sm text-paper">{job.salaryNet}</p>
                 <p className="text-sm">{job.workingHours}</p>
                 <p className="text-sm text-mist">{job.accommodation}</p>
                 <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
@@ -337,7 +337,7 @@ export function SearchPage({
           <>
             <div className="glass mt-6 grid gap-6 p-6 md:grid-cols-3">
               <div>
-                <p className="kicker ember">{t("search_fee")}</p>
+                <p className="kicker">{t("search_fee")}</p>
                 <p className="display ember mt-2 text-5xl">{fee}</p>
                 <p className="text-mist">EUR</p>
               </div>
@@ -386,7 +386,7 @@ export function SearchPage({
                       <h3 className="display text-2xl">{job.title}</h3>
                       <p className="mt-1 text-sm text-mist">{job.employer}</p>
                       <dl className="mt-4 grid gap-2 text-sm">
-                        <div><dt className="text-mist">{t("field_salary")}</dt><dd className="ember">{job.salaryNet}</dd></div>
+                        <div><dt className="text-mist">{t("field_salary")}</dt><dd>{job.salaryNet}</dd></div>
                         <div><dt className="text-mist">{t("field_hours")}</dt><dd>{job.workingHours}</dd></div>
                         <div><dt className="text-mist">{t("field_housing")}</dt><dd>{job.accommodation}</dd></div>
                       </dl>
@@ -408,7 +408,7 @@ export function SearchPage({
                     <p className="mt-1 text-sm text-mist">{t("search_wait")}</p>
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
-                  <p className="text-sm ember">{job.salaryNet}{payLine(job.salaryNet) ? ` · ${payLine(job.salaryNet)}` : ""}</p>
+                  <p className="text-sm text-paper">{job.salaryNet}{payLine(job.salaryNet) ? ` · ${payLine(job.salaryNet)}` : ""}</p>
                   <div>
                     {signedIn ? (
                       <button
@@ -463,7 +463,7 @@ export function SearchPage({
                     <p className="text-sm text-mist">{job.accommodation}</p>
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
-                  <p className="text-sm ember">
+                  <p className="text-sm text-paper">
                     {job.salaryNet}
                     {payLine(job.salaryNet) ? <span className="mt-1 block text-mist">{payLine(job.salaryNet)}</span> : <span className="mt-1 block text-xs text-mist">{t("pay_check")}</span>}
                   </p>
@@ -536,8 +536,9 @@ export function VacancyPage({
         <button type="button" className="text-sm text-mist" onClick={() => history.back()}>
           {t("search_back")}
         </button>
-        <p className="kicker ember mt-6">{job.country}</p>
+        <p className="kicker mt-6">{job.country}</p>
         <h1 className="display mt-3 text-5xl">{job.title}</h1>
+        <EmployerMark name={job.employer} />
         <p className="mt-3 text-lg text-metal">{job.employer}</p>
         <VacancyShots vacancyId={job.id} />
         <p className="mt-6 leading-relaxed text-paper/85">{job.description}</p>
@@ -599,7 +600,7 @@ export function AboutPage() {
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-16">
-        <p className="kicker ember">{t("nav_about")}</p>
+        <p className="kicker">{t("nav_about")}</p>
         <h1 className="display mt-4 text-5xl sm:text-6xl">{lead}</h1>
         <div className="mt-8 space-y-4 text-base leading-relaxed whitespace-pre-line">{story}</div>
       </article>
@@ -657,7 +658,7 @@ export function AboutPage() {
               <p className="text-sm text-mist">{s.desk_hours || t("desk_hours")}</p>
             </div>
             <a
-              className="ember text-sm"
+              className="text-sm"
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.legal_address || "Rybná 716/24, Praha 1")}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -692,24 +693,25 @@ export function AboutPage() {
                       onClick={() => setOpenMember(open ? null : m.id)}
                     >
                       <span>{m.fullName}</span>
-                      <span className="ember text-[11px] tracking-[0.14em] uppercase">{open ? "–" : "+"}</span>
+                      <span className="text-[11px] tracking-[0.14em] text-mist uppercase">{open ? "–" : "+"}</span>
                     </button>
                     {open ? (
-                      <div className="grid gap-4 pb-4 sm:grid-cols-[9rem_1fr] sm:items-center">
+                      <figure className="shot mb-4">
                         {m.photoData ? (
-                          <img src={m.photoData} alt="" className="aspect-square w-full max-w-[9rem] object-cover" />
+                          <img src={m.photoData} alt="" className="shot-img" />
                         ) : (
-                          <div className="grid aspect-square w-full max-w-[9rem] place-items-center bg-ivory text-3xl">{(m.fullName || " ").trim().slice(0, 1)}</div>
+                          <div className="shot-img grid place-items-center text-4xl">{(m.fullName || " ").trim().slice(0, 1)}</div>
                         )}
-                        <div>
-                          <p className="text-sm text-mist">{m.position}</p>
-                          {m.phone ? (
-                            <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="ember mt-2 inline-block text-sm">
-                              {m.phone}
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
+                        <figcaption className="shot-name">
+                          {m.fullName}
+                          {m.position ? <span className="mt-1 block text-sm normal-case tracking-normal text-white/70">{m.position}</span> : null}
+                        </figcaption>
+                      </figure>
+                    ) : null}
+                    {open && m.phone ? (
+                      <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="mb-4 inline-block text-sm">
+                        {m.phone}
+                      </a>
                     ) : null}
                   </div>
                 );
@@ -737,7 +739,7 @@ export function AboutPage() {
                     onClick={() => setOpenCountry(open ? null : c)}
                   >
                     <span>{c}</span>
-                    <span className="ember text-[11px] tracking-[0.14em] uppercase">{open ? "–" : "+"} {list.length}</span>
+                    <span className="text-[11px] tracking-[0.14em] text-mist uppercase">{open ? "–" : "+"} {list.length}</span>
                   </button>
                   {open ? (
                     <ul className="grid gap-x-6 gap-y-1 pb-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -766,7 +768,7 @@ export function ContactPage() {
     <Shell>
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2">
         <div>
-          <p className="kicker ember">{t("contact_kicker")}</p>
+          <p className="kicker">{t("contact_kicker")}</p>
           <h1 className="display mt-4 text-5xl">{t("contact_title")}</h1>
           {s?.support_phone ? (
             <a className="btn-solid mt-8 inline-flex w-fit" href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
@@ -781,7 +783,7 @@ export function ContactPage() {
             <p className="mt-2 text-sm text-mist">{s?.desk_hours || t("desk_hours")}</p>
             <p className="mt-2 text-sm">{s?.legal_address}</p>
             <a
-              className="ember mt-2 inline-block text-sm"
+              className="mt-2 inline-block text-sm"
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s?.legal_address || "Rybná 716/24, Praha 1")}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -799,7 +801,7 @@ export function ContactPage() {
           </div>
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>
-            <dd className="mt-2 ember">
+            <dd className="mt-2">
               {s?.support_phone ? (
                 <a href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
                   {s.support_phone}
@@ -839,7 +841,7 @@ export function CountryPage({ code }: { code: string }) {
   return (
     <Shell>
       <article className="mx-auto max-w-5xl px-4 py-14">
-        <p className="kicker ember">{t("country_kicker")}</p>
+        <p className="kicker">{t("country_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
         {country ? <CountryStill country={country} /> : null}
         {products.length === 0 ? <p className="mt-6 text-mist">{t("country_empty")}</p> : null}
@@ -868,7 +870,7 @@ export function CountryPage({ code }: { code: string }) {
               <p className="display text-2xl">{job.title}</p>
               <p className="text-sm text-mist">{job.employer}</p>
               <p className="mt-2 text-sm">{country} · {products.find((item) => item.id === job.visaProductId)?.duration}</p>
-              <p className="mt-1 text-sm ember">{job.salaryNet}</p>
+              <p className="mt-1 text-sm text-paper">{job.salaryNet}</p>
               <p className="text-sm">{job.workingHours}</p>
               <p className="text-sm text-mist">{job.accommodation}</p>
               <p className="mt-1 text-sm text-mist">{job.quota > 0 ? `${job.quota} ${t("search_quota")}` : t("search_wait")}</p>

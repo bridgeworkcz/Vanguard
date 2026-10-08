@@ -68,7 +68,7 @@ function LoginPage() {
     <Shell>
       <main className="mx-auto grid min-h-[70vh] max-w-md place-items-center px-4 py-16">
         <div className="glass w-full p-6">
-          <p className="kicker ember">{t("login_kicker")}</p>
+          <p className="kicker">{t("login_kicker")}</p>
           <h1 className="display mt-3 text-4xl">{t("login_title")}</h1>
           <form className="mt-6 grid gap-3" onSubmit={(e) => void submit(e)}>
             {mode === "up" ? (

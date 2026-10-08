@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { Shell, useDesk, useSite } from "./chrome";
 import {
@@ -638,12 +638,12 @@ export function PortalPage({ id }: { id: string }) {
   return (
     <Shell>
       <div className="mx-auto max-w-5xl px-4 py-12">
-        <p className="kicker ember">{t("portal_kicker")}</p>
+        <p className="kicker">{t("portal_kicker")}</p>
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
         {!id && role === "SUBAGENT" && book ? (
           <section className="mt-8 grid gap-4">
-            <p className="kicker ember">{t("desk_kicker")}</p>
+            <p className="kicker">{t("desk_kicker")}</p>
             <h2 className="display text-4xl">{t("desk_title")}</h2>
             <p className="max-w-2xl text-sm text-mist">{t("desk_only")}</p>
             <div className="glass grid gap-4 p-5 sm:grid-cols-3">
@@ -737,7 +737,7 @@ export function PortalPage({ id }: { id: string }) {
                     <tr key={row.id} className="border-t border-white/10">
                       <td className="latin py-3" data-label={t("filings_id")}>{row.id}</td>
                       <td data-label={t("filings_to")}>{row.country}</td>
-                      <td className="ember" data-label={t("admin_stage")}>{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
+                      <td data-label={t("admin_stage")}>{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
                       <td data-label={t("portal_paid")}>{row.pay === "paid" ? t("agent_pay_paid") : row.pay === "due" ? t("agent_pay_due") : t("agent_pay_wait")}</td>
                       <td className="latin" data-label={t("search_fee")}>{row.total}</td>
                       <td data-label={t("agent_comm")}>{row.commission === "paid" ? t("agent_pay_paid") : row.commission === "due" ? t("agent_pay_due") : t("agent_pay_wait")}</td>
@@ -801,9 +801,8 @@ export function PortalPage({ id }: { id: string }) {
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
-              <p className={`mt-4 text-2xl ${stageTone(app.status, app.stage)}`}>{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
               {(soon(app.cancelDeadlineAt, now) || soon(app.docDeadlineAt, now)) && app.status === "OPEN" ? (
-                <p className="mt-2 text-sm ember">
+                <p className="mt-2 text-sm text-mist">
                   {t("portal_remind")}
                   {site?.settings.support_phone ? (
                     <>
@@ -815,14 +814,25 @@ export function PortalPage({ id }: { id: string }) {
                   ) : null}
                 </p>
               ) : null}
-              <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <ol
+                className="stage-line"
+                style={{ "--stage": String(app.status === "CANCELLED" || app.status === "REJECTED" ? 1 : Math.min(4, Math.max(1, app.stage))) } as CSSProperties}
+              >
                 {[t("track_1"), t("track_2"), t("track_3"), t("track_4")].map((label, index) => {
-                  const tone = ["stage-wait", "stage-pay", "stage-move", "stage-go"][index] ?? "text-mist";
-                  const on = app.stage >= index + 1;
+                  const n = index + 1;
+                  const here = app.status === "CANCELLED" || app.status === "REJECTED" ? n === 1 : n === Math.min(4, Math.max(1, app.stage));
+                  const past = !here && n < app.stage && app.status !== "CANCELLED" && app.status !== "REJECTED";
                   return (
-                    <li key={label} className={on ? `border-t-2 pt-2 text-sm ${tone}` : "border-t border-white/20 pt-2 text-sm text-mist"}>
-                      <span className={on ? tone : "text-mist"}>0{index + 1}</span>
-                      <span className="mt-1 block">{label}</span>
+                    <li key={label} className={`stage-step ${here ? "stage-now" : past ? "stage-past" : "stage-next"}`}>
+                      <span className="stage-tick" />
+                      <span>
+                        <span className="stage-name">{label}</span>
+                        {here ? (
+                          <span className="stage-now-line">
+                            {nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
+                          </span>
+                        ) : null}
+                      </span>
                     </li>
                   );
                 })}
@@ -1008,7 +1018,7 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "ISSUED" ? (
               <div className="glass p-5">
-                <p className="kicker ember">{t("status_issued")}</p>
+                <p className="kicker">{t("status_issued")}</p>
                 <p className="mt-3 text-lg">{t("issued_keep")}</p>
               </div>
             ) : null}
@@ -1020,13 +1030,16 @@ export function PortalPage({ id }: { id: string }) {
                     ["30%", parts.first, app.stage2At, app.stage >= 2],
                     ["40%", parts.second, app.stage3At, app.stage >= 3],
                     ["30%", parts.final, app.stage4At, app.stage >= 4],
-                  ].map(([label, amount, date, on]) => (
-                    <li key={String(label)} className={`border-t pt-2 ${on ? "border-[#ff6a1a]" : "border-white/10"}`}>
-                      <p className="ember">{label}</p>
-                      <p>{amount} EUR</p>
+                  ].map(([label, amount, date], index) => {
+                    const due = !thirdPaid && ((app.stage === 2 && index === 0) || (app.stage === 3 && index === 1) || (app.stage >= 4 && index === 2));
+                    return (
+                    <li key={String(label)} className={`border-t pt-2 ${due ? "border-[#ff6a1a]" : "border-white/10"}`}>
+                      <p className={due ? "ember" : "text-mist"}>{label}</p>
+                      <p className={due ? "ember" : ""}>{amount} EUR</p>
                       <p className="text-sm text-mist">{typeof date === "string" && date ? date.slice(0, 10) : t("portal_due")}</p>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ol>
               </div>
             ) : null}
@@ -1102,7 +1115,7 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "OPEN" && app.stage >= 2 ? (
               <div className={app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? "" : proof || app.stage > 2 ? "step-live rounded-2xl p-4" : ""}>
-                {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : proof || app.stage > 2 ? <p className="kicker ember mb-3">{t("hint_here")}</p> : null}
+                {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : proof || app.stage > 2 ? <p className="kicker mb-3">{t("hint_here")}</p> : null}
                 <h3 className="display text-3xl">{t("checklist_title")}</h3>
                 <ul className="mt-3 grid gap-2 text-sm">
                   {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
@@ -1110,7 +1123,7 @@ export function PortalPage({ id }: { id: string }) {
                     const latest = files[0];
                     const label = !latest ? t("checklist_miss") : latest.status === "REJECTED" ? t("checklist_no") : latest.status === "APPROVED" ? t("checklist_ok") : t("checklist_wait");
                     return (
-                      <li key={cat} className={`flex items-baseline justify-between gap-3 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a] bg-[#ff6a1a]/10 px-2" : "border-white/10"}`}>
+                      <li key={cat} className={`flex items-baseline justify-between gap-3 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a]" : "border-white/10"}`}>
                         <span>
                           {t(`cat_${cat}`)}
                           {latest?.status === "REJECTED" && latest.rejectionReason ? <span className="mt-1 block text-lg text-paper">{shownReason(latest.rejectionReason, t)}</span> : null}
@@ -1164,7 +1177,7 @@ export function PortalPage({ id }: { id: string }) {
                         {cat === "PASSPORT" ? <p className="mt-1 text-sm text-mist">{t("pass_hint")}</p> : null}
                         <div className="mt-2 grid gap-2">
                           {files.map((doc) => (
-                            <article key={doc.id} className={`p-3 text-sm ${doc.status === "REJECTED" ? "bg-[#ff6a1a]/15" : "bg-white/5"}`}>
+                            <article key={doc.id} className={`p-3 text-sm ${doc.status === "REJECTED" ? "border-s-2 border-[#ff6a1a]" : "bg-white/5"}`}>
                               <p>{doc.fileName}</p>
                               {doc.id !== newest && doc.status === "REJECTED" ? <p className="text-mist">{t("pass_earlier")}</p> : null}
                               <p className="text-mist">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n, type Lang } from "@/lib/vanguard/i18n";
 import { useSite } from "./chrome";
 
@@ -34,32 +34,17 @@ const FALLBACK_B = ["process_1b", "process_2b", "process_3b", "process_4b"] as c
 export function StepRail() {
   const { t, lang } = useI18n();
   const { data } = useSite();
-  const motion = data?.settings.motion !== "0";
-  const ref = useRef<HTMLElement>(null);
-  const [play, setPlay] = useState(false);
-  useEffect(() => {
-    if (!motion) return;
-    const node = ref.current;
-    if (!node) return;
-    const seen = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) return;
-      setPlay(true);
-      seen.disconnect();
-    }, { threshold: 0.35 });
-    seen.observe(node);
-    return () => seen.disconnect();
-  }, [motion]);
   const copy = readSteps(data?.settings.step_copy || "");
   const steps = FALLBACK.map((key, index) => {
     const custom = copy[lang]?.[String(index + 1)];
     return [custom?.t?.trim() || t(key), custom?.b?.trim() || t(FALLBACK_B[index])] as const;
   });
   return (
-    <section ref={ref} className={`step-rail ${motion && play ? "play" : "still"}`}>
-      <p className="kicker ember md:col-span-4">{t("steps_kicker")}</p>
+    <section className="step-rail">
+      <p className="kicker md:col-span-4">{t("steps_kicker")}</p>
       {steps.map(([title, body], index) => (
         <article key={title} className="step-card">
-          <p className="ember">0{index + 1}</p>
+          <p className="text-mist">0{index + 1}</p>
           <h3 className="display mt-3 text-3xl">{title}</h3>
           <p className="mt-3 text-sm leading-relaxed text-mist">{body}</p>
         </article>
@@ -77,19 +62,18 @@ export function CountLine() {
   const filed = settings.count_filed !== "0";
   const issued = settings.count_issued !== "0";
   if (!filed && !issued) return null;
-  const motion = settings.motion !== "0";
   return (
     <section className="mx-auto flex max-w-6xl flex-wrap gap-10 px-4 pb-4">
-      <p className="kicker ember w-full">{t("counts_kicker")}</p>
+      <p className="kicker w-full">{t("counts_kicker")}</p>
       {filed ? (
         <p>
-          <span className="display ember block text-5xl"><CountUp n={counts.filed} run={motion} /></span>
+          <span className="display block text-5xl"><CountUp n={counts.filed} run={false} /></span>
           <span className="text-sm text-mist">{t("counts_filed")}</span>
         </p>
       ) : null}
       {issued ? (
         <p>
-          <span className="display block text-5xl"><CountUp n={counts.issued} run={motion} /></span>
+          <span className="display block text-5xl"><CountUp n={counts.issued} run={false} /></span>
           <span className="text-sm text-mist">{t("counts_issued")}</span>
         </p>
       ) : null}
@@ -122,9 +106,9 @@ export function CountryStill({ country, compact = false }: { country: string; co
   const shot = (data?.media ?? []).find((item) => item.kind === "country" && item.country === country && item.imageData);
   if (!shot) return null;
   return (
-    <figure className={compact ? "mt-3" : "mt-8"}>
-      <img src={shot.imageData} alt={shot.title || country} className={`${compact ? "aspect-[16/9]" : "aspect-[16/7]"} w-full object-cover`} />
-      {shot.caption ? <figcaption className="mt-2 text-sm text-mist">{shot.caption}</figcaption> : null}
+    <figure className={compact ? "shot shot-in mt-3" : "shot mt-8"}>
+      <img src={shot.imageData} alt="" className="shot-img" />
+      <figcaption className="shot-name">{shot.title || country}</figcaption>
     </figure>
   );
 }
@@ -136,15 +120,27 @@ export function VacancyShots({ vacancyId }: { vacancyId: string }) {
     .slice(0, 3);
   if (!shots.length) return null;
   return (
-    <div className="mt-6 grid gap-3 sm:grid-cols-3">
+    <div className="mt-6 grid gap-6">
       {shots.map((shot) => (
-        <figure key={shot.id}>
-          <img src={shot.imageData} alt={shot.caption || shot.title} className="aspect-[4/3] w-full object-cover" />
-          {shot.caption ? <figcaption className="mt-2 text-sm text-mist">{shot.caption}</figcaption> : null}
+        <figure key={shot.id} className="shot">
+          <img src={shot.imageData} alt="" className="shot-img" />
+          <figcaption className="shot-name">{shot.caption || shot.title}</figcaption>
         </figure>
       ))}
     </div>
   );
+}
+
+export function EmployerMark({ name }: { name: string }) {
+  const needle = name.trim().toLowerCase();
+  if (!needle) return null;
+  const logo = (useSite().data?.media ?? []).find((item) => {
+    if (item.kind !== "logo" || !item.imageData) return false;
+    const title = (item.title || "").trim().toLowerCase();
+    return Boolean(title) && (title === needle || needle.includes(title) || title.includes(needle));
+  });
+  if (!logo) return null;
+  return <img src={logo.imageData} alt={logo.title} className="logo-color mt-4" />;
 }
 
 export function LogoStrip() {
@@ -156,7 +152,7 @@ export function LogoStrip() {
   return (
     <section className="border-t border-white/10 px-4 py-10">
       <div className="mx-auto max-w-6xl">
-        <p className="kicker ember">{t("logos_kicker")}</p>
+        <p className="kicker">{t("logos_kicker")}</p>
         <ul className="mt-4 flex flex-wrap items-center gap-6">
           {logos.map((logo) => (
             <li key={logo.id} className="logo-mark" title={logo.title}>
