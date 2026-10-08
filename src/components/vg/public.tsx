@@ -654,10 +654,6 @@ export function AboutPage() {
   const [openCountry, setOpenCountry] = useState<string | null>(null);
   const [openMember, setOpenMember] = useState<string | null>(null);
   const team = data?.team ?? [];
-  useEffect(() => {
-    if (openMember || !team[0]) return;
-    setOpenMember(team[0].id);
-  }, [team, openMember]);
   return (
     <Shell>
       <article className="mx-auto max-w-3xl px-4 py-16">
