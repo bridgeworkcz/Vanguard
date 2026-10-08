@@ -260,11 +260,21 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const [signingOut, setSigningOut] = useState(false);
   const [desk, setDesk] = useState(false);
   const navRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const gate = typeof window !== "undefined" && hasGateSessionMarker();
   useLayoutEffect(() => {
     const on = desktopOn();
     setDesk(on);
     applyDesktop(on);
+  }, []);
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const apply = () => document.documentElement.style.setProperty("--vg-bar", `${el.offsetHeight}px`);
+    apply();
+    const watch = new ResizeObserver(apply);
+    watch.observe(el);
+    return () => watch.disconnect();
   }, []);
   useEffect(() => {
     const nav = navRef.current;
@@ -313,7 +323,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   );
   return (
     <div className={`relative z-[1] ${tone === "light" ? "paper min-h-screen" : "min-h-screen text-paper"}`}>
-      <header className="sticky top-0 z-30 overflow-x-clip border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
+      <header ref={headerRef} className="sticky top-0 z-30 overflow-x-clip border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl min-w-0 items-center gap-2 px-3 pt-3 sm:gap-3 sm:px-4">
           <Link to="/" className="inline-flex min-h-11 min-w-0 items-center gap-2">
             <Mark className="size-8 shrink-0 sm:size-9" />
@@ -368,7 +378,9 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             </div>
           </div>
         </div>
-        <nav ref={navRef} className="nav-scroll mx-auto flex max-w-6xl gap-x-4 overflow-x-auto px-4 pb-2 pt-1">
+        <div className="mx-auto flex max-w-6xl items-center">
+          <div id="vg-admin-burger" className="admin-menu-slot" />
+          <nav ref={navRef} className="nav-scroll flex min-w-0 flex-1 gap-x-4 overflow-x-auto px-4 pb-2 pt-1">
           {item("/", t("nav_home"))}
           {item("/about", t("nav_about"))}
           {item("/filings", t("nav_filings"))}
@@ -380,7 +392,8 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <button type="button" className="min-h-11 shrink-0 px-1 text-sm text-mist" onClick={() => toggleDesktop()}>
             {desk ? "Tel" : "PC"}
           </button>
-        </nav>
+          </nav>
+        </div>
       </header>
       <PromoBanner site={site} lang={lang} />
       <CaseNudge signedIn={signedIn} staff={staff} />

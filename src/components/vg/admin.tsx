@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import {
@@ -460,6 +461,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [focusUser, setFocusUser] = useState("");
   const [appsReady, setAppsReady] = useState(false);
   const [rail, setRail] = useState<"off" | "icons" | "labels">("off");
+  const [menuSlot, setMenuSlot] = useState<HTMLElement | null>(null);
   const [cutUser, setCutUser] = useState("");
   const [cutPct, setCutPct] = useState("0");
   const [cutNote, setCutNote] = useState("");
@@ -494,6 +496,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
       /* keep the menu closed */
     }
   }, []);
+
+  useLayoutEffect(() => {
+    setMenuSlot(document.getElementById("vg-admin-burger"));
+  });
 
   function setRailMode(next: "off" | "icons" | "labels") {
     setRail(next);
@@ -628,9 +634,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   return (
     <AdminLang.Provider value={staffUk}>
     <Shell>
-      <div className="relative mx-auto flex w-full min-w-0 max-w-6xl items-start gap-3 overflow-x-clip px-4 py-6">
+      <div className="relative mx-auto flex w-full min-w-0 max-w-6xl items-start gap-3 px-4 py-6">
         {rail !== "off" ? (
-          <button type="button" className="fixed inset-0 z-30 bg-black/55 md:hidden" aria-label={t("admin_nav_close")} onClick={() => setRailMode("off")} />
+          <button type="button" className="admin-scrim fixed inset-x-0 bottom-0 z-30 bg-black/55 md:hidden" aria-label={t("admin_nav_close")} onClick={() => setRailMode("off")} />
         ) : null}
         {rail !== "off" ? (
           <aside className={`admin-rail${rail === "labels" ? " is-wide" : ""}`}>
@@ -674,12 +680,15 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           </aside>
         ) : null}
         <div className="min-w-0 w-full max-w-full flex-1 overflow-x-clip">
-        <div className="flex items-center gap-3">
-          <button type="button" className="admin-nav-btn" title={t("admin_nav_menu")} aria-label={t("admin_nav_menu")} aria-expanded={rail !== "off"} onClick={() => (rail === "off" ? openRail() : setRailMode("off"))}>
-            <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
-          </button>
-          <p className="kicker">{t("admin_kicker")}</p>
-        </div>
+        {menuSlot
+          ? createPortal(
+              <button type="button" className="admin-nav-btn" title={t("admin_nav_menu")} aria-label={t("admin_nav_menu")} aria-expanded={rail !== "off"} onClick={() => (rail === "off" ? openRail() : setRailMode("off"))}>
+                <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+              </button>,
+              menuSlot,
+            )
+          : null}
+        <p className="kicker">{t("admin_kicker")}</p>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
 
         {current === "overview" && overview ? (
