@@ -381,6 +381,24 @@ export function partnerRows(): { id: string; country: string; name: string; sort
   return rows;
 }
 
+/** Real employers already used on older vacancies, and not already listed under a shorter name. */
+const LEGACY_REAL_EMPLOYERS: { country: string; name: string }[] = [
+  { country: "Czech Republic", name: "Drůbež Vodňany" },
+  { country: "Germany", name: "Zuckerfabrik Uelzen" },
+  { country: "Hungary", name: "Pick Szeged" },
+  { country: "Poland", name: "Animex Morliny, Ostróda" },
+  { country: "Poland", name: "Cukrownia Werbkowice" },
+  { country: "Serbia", name: "Mlekara Subotica" },
+  { country: "Serbia", name: "Šećerana Crvenka" },
+];
+
+export function legacyRealPartners(): { id: string; country: string; name: string; sort: number }[] {
+  return LEGACY_REAL_EMPLOYERS.map((row) => {
+    const slug = `${row.country}-${row.name}`.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 28);
+    return { id: `PT-${slug}`, country: row.country, name: row.name, sort: 80 };
+  });
+}
+
 type Seat = { title: string; description: string; hours: string; housing: string; requirements?: string; seasonal?: boolean };
 
 const FOOD = "Passport, police clearance issued within 6 months, a medical set, and a hygiene brief on the first day.";
@@ -482,7 +500,7 @@ function tradeOf(name: string) {
   if (/stavba|stavmont|rohbau|\bobra\b|stroy|cantiere|bygg|gradnja|epit|budowa|framing|stroyka/.test(n)) return "build";
   if (/drub|hydina|poultry|\bpile\b|piletina|geflugel|aves |pollame|baromfi|drob|ptitse|ptice|maple lodge|exceldor/.test(n)) return "poultry";
   if (/peixe|fisk|salmar|leroy|mowi|santa bremor|talley|seafood/.test(n)) return "fish";
-  if (/maso|fleisch|\bmeat\b|hus |mieso|myaso|salumi|slakteri|silver fern|alliance group|anzco|maple leaf|cargill|olymel|\bjbs\b|sofina|tarczy|nortura|\baffco\b/.test(n)) return "meat";
+  if (/maso|fleisch|\bmeat\b|hus |mieso|myaso|salumi|slakteri|silver fern|alliance group|anzco|maple leaf|cargill|olymel|\bjbs\b|sofina|tarczy|nortura|\baffco\b|pick szeged|animex|morliny/.test(n)) return "meat";
   if (/fonterra|saputo|mlekovita|savushkin|open country|dairy|mlekar|mliekar/.test(n)) return "dairy";
   if (/farma|spargel|gurken|zelenchuk|pomodoro|\bbaer\b|voce|ovocie|ovosht|\bsad\b|fruta|berry|greenhouse|estufa|uveghaz|szklarnia|teplitsa|staklenik|agrumi|kiwifruit|zespri|t&g|gront|sadov/.test(n)) return "farm";
   if (/tire|tyre|linglong|tigar|apollo tyres|mabor|puchov/.test(n)) return "tyre";
@@ -491,7 +509,7 @@ function tradeOf(name: string) {
   if (/amorim|cortic/.test(n)) return "plant";
   if (/amazon|dhl|schenker|gebruder weiss|mainfreight|simoes|bcube|posten bring|jysk/.test(n)) return "warehouse";
   if (/\bdc\b|supply chain|logistics|armazem|magazyn|magacin|magazzino|raktar|\blager\b|warehouse|\bsklad\b/.test(n)) return "warehouse";
-  if (/barilla|ferrero|lavazza|granarolo|orkla|\btine\b|nestle|campari|sumol|rohlik/.test(n)) return "food";
+  if (/barilla|ferrero|lavazza|granarolo|orkla|\btine\b|nestle|campari|sumol|rohlik|zuckerfabrik|cukrownia|secerana/.test(n)) return "food";
   if (/jeronimo|sonae|biedronka|penny|loblaw|ahold|\blpp\b/.test(n)) return "retail";
   if (/volkswagen|skoda auto|\bkia\b|hyundai|\bbmw\b|mercedes|porsche|jaguar|stellantis|toyota|suzuki|\baudi\b|man truck|solaris|\bpca\b|\bbyd\b|ducati/.test(n)) return "auto";
   if (/bosch|continental|\bzf\b|schaeffler|faurecia|minebea|brose|mahle|draxl|aptiv|magna|linamar|martinrea|denso|witte|kostal|teklas|yazaki|leoni|\bpwo\b|sensata|melexis/.test(n)) return "parts";

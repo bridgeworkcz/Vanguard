@@ -23,7 +23,7 @@ import {
   type Vacancy,
   type VisaProduct,
 } from "./domain";
-import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners } from "./seed";
+import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners, legacyRealPartners } from "./seed";
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
@@ -643,7 +643,7 @@ async function safeHistory() {
   }
 }
 
-const VACANCY_CATALOG = "2";
+const VACANCY_CATALOG = "3";
 
 async function ensureVacancyCatalog() {
   try {
@@ -1025,7 +1025,7 @@ function present(app: ReturnType<typeof appFrom>) {
 
 async function ensurePartnerCatalog() {
   const map = await settingMap();
-  if (map.partners_catalog === "4") return;
+  if (map.partners_catalog === "5") return;
   const stored = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
   const have = new Set<string>();
   const kept: typeof stored = [];
@@ -1035,9 +1035,10 @@ async function ensurePartnerCatalog() {
     have.add(key);
     kept.push(row);
   }
-  const missing = partnerRows().filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()));
-  if (missing.length || kept.length !== stored.length) await putSetting("partners", JSON.stringify([...kept, ...missing]), "system");
-  await putSetting("partners_catalog", "4", "system");
+  const source = map.partners_catalog === "4" ? legacyRealPartners() : [...partnerRows(), ...legacyRealPartners()];
+  const missing = source.filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()));
+  if (missing.length || kept.length !== stored.length) await putSetting("partners", JSON.stringify([...kept, ...missing]), "system", false);
+  await putSetting("partners_catalog", "5", "system", false);
 }
 
 const MEDIA_KINDS = new Set(["office", "license", "country", "vacancy", "logo", "banner"]);
@@ -1075,8 +1076,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v4.json";
-const SNAP_GEN = 4;
+const SNAP_PATH = "cache/public-site-v5.json";
+const SNAP_GEN = 5;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -1169,6 +1170,7 @@ async function readyForPublicRead() {
   }
   const map = await settingMap().catch(() => null);
   if (map && map.seed_version !== "2") await ensureSeed();
+  if (map) await ensurePartnerCatalog();
   if (map) await ensureVacancyCatalog();
 }
 
