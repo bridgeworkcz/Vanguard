@@ -2,7 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, storyKey, useDesk, useSite } from "./chrome";
 import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, countrySlug, priceFor, productionWeeks, sameCountry, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
@@ -133,7 +133,7 @@ export function HomePage() {
           >
             <p className="kicker">{t("calc_kicker")}</p>
             <h2 className="display mt-3 text-3xl">{t("calc_title")}</h2>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_citizenship")}
                 <select className="field min-w-0" value={citizenship} onChange={(e) => setCitizenship(e.target.value)}>
@@ -198,11 +198,19 @@ export function HomePage() {
                   ))}
                 </select>
               </label>
-              {product && speed ? (
-                <p className="display ember text-5xl sm:col-span-2">{priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span></p>
-              ) : Number.isFinite(fromPrice) ? (
-                <p className="display ember text-4xl sm:col-span-2">{t("fee_from")} {fromPrice} <span className="text-2xl text-mist">EUR</span></p>
-              ) : null}
+              <p className="display ember min-h-16 text-5xl md:col-span-2">
+                {product && speed ? (
+                  <>
+                    {priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
+                  </>
+                ) : Number.isFinite(fromPrice) ? (
+                  <>
+                    {t("fee_from")} {fromPrice} <span className="text-2xl text-mist">EUR</span>
+                  </>
+                ) : (
+                  <span className="text-lg text-mist">{t("calc_hold")}</span>
+                )}
+              </p>
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}
               <button className="btn-solid" type="submit" disabled={!data}>
@@ -280,6 +288,9 @@ export function SearchPage({
   const { data } = useSite();
   const [waitNote, setWaitNote] = useState("");
   const [pick, setPick] = useState<string[]>([]);
+  const [sort, setSort] = useState<"salary" | "seats" | "term">("salary");
+  const [houseOnly, setHouseOnly] = useState(false);
+  const [dayOnly, setDayOnly] = useState(false);
   const visa = data?.products.find((p) => p.id === product);
   const pace = speed === "PRIORITY" || speed === "EXPRESS" || speed === "STANDARD" ? speed : null;
   const ok = visa && pace && visa.allowedProcessing.includes(pace) && !sameCountry(citizenship, visa.country);
@@ -291,6 +302,25 @@ export function SearchPage({
   };
   const jobs = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const full = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
+  const houseN = jobs.filter((job) => hasHousing(job.accommodation)).length;
+  const dayN = jobs.filter((job) => !isNightShift(job.workingHours)).length;
+  const shown = [...jobs]
+    .filter((job) => (!houseOnly || hasHousing(job.accommodation)) && (!dayOnly || !isNightShift(job.workingHours)))
+    .sort((a, b) => {
+      if (sort === "seats") return b.quota - a.quota;
+      if (sort === "term") return termMonths(visa?.duration || "") - termMonths(visa?.duration || "");
+      return salaryNumber(b.salaryNet) - salaryNumber(a.salaryNet);
+    });
+  let waits: Record<string, number> = {};
+  try {
+    waits = JSON.parse(data?.settings.waitlist_counts || "{}") as Record<string, number>;
+  } catch {
+    waits = {};
+  }
+  function payLine(text: string) {
+    const mark = netMark(text);
+    return mark === "net" ? t("pay_net") : mark === "gross" ? t("pay_gross") : "";
+  }
   const compared = jobs.filter((job) => pick.includes(job.id));
   function toggleCompare(id: string) {
     setPick((cur) => (cur.includes(id) ? cur.filter((item) => item !== id) : cur.length >= 2 ? [cur[1]!, id] : [...cur, id]));
@@ -329,6 +359,24 @@ export function SearchPage({
                 </Link>
               </div>
             </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button type="button" className={sort === "salary" ? "btn-solid" : "btn"} onClick={() => setSort("salary")}>{t("sort_salary")}</button>
+              <button type="button" className={sort === "seats" ? "btn-solid" : "btn"} onClick={() => setSort("seats")}>{t("sort_seats")}</button>
+              <button type="button" className={sort === "term" ? "btn-solid" : "btn"} onClick={() => setSort("term")}>{t("sort_term")} · {visa.duration}</button>
+              {houseN > 0 ? (
+                <button type="button" className={houseOnly ? "btn-solid" : "btn"} onClick={() => setHouseOnly((v) => !v)}>
+                  {t("filter_house")} · {houseN}
+                </button>
+              ) : null}
+              {dayN > 0 ? (
+                <button type="button" className={dayOnly ? "btn-solid" : "btn"} onClick={() => setDayOnly((v) => !v)}>
+                  {t("filter_day")} · {dayN}
+                </button>
+              ) : null}
+              {houseOnly || dayOnly ? (
+                <button type="button" className="btn" onClick={() => { setHouseOnly(false); setDayOnly(false); }}>{t("filter_all")} · {jobs.length}</button>
+              ) : null}
+            </div>
             {compared.length === 2 ? (
               <div className="mt-8">
                 <h2 className="display text-3xl">{t("compare_title")}</h2>
@@ -348,7 +396,7 @@ export function SearchPage({
               </div>
             ) : null}
             <div className="mt-8 grid gap-4">
-              {jobs.length === 0 ? <p className="text-mist">{t("search_empty")}</p> : null}
+              {shown.length === 0 ? <p className="text-mist">{t("search_empty")}</p> : null}
               {full.map((job) => (
                 <div key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
@@ -358,8 +406,9 @@ export function SearchPage({
                     <p className="mt-1 text-sm">{job.workingHours}</p>
                     <p className="text-sm text-mist">{job.accommodation}</p>
                     <p className="mt-1 text-sm text-mist">{t("search_wait")}</p>
+                    {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
-                  <p className="text-sm ember">{job.salaryNet}</p>
+                  <p className="text-sm ember">{job.salaryNet}{payLine(job.salaryNet) ? ` · ${payLine(job.salaryNet)}` : ""}</p>
                   <div>
                     {signedIn ? (
                       <button
@@ -398,7 +447,7 @@ export function SearchPage({
                     ))}
                 </div>
               ) : null}
-              {jobs.map((job) => (
+              {shown.map((job) => (
                 <article key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
                     <label className="mb-2 flex items-center gap-2 text-sm text-mist">
@@ -412,8 +461,12 @@ export function SearchPage({
                     <p className="mt-2 inline-flex items-center gap-2 text-sm"><MiniFlag country={visa.country} /> {visa.country} · {visa.duration}</p>
                     <p className="mt-1 text-sm">{job.workingHours}</p>
                     <p className="text-sm text-mist">{job.accommodation}</p>
+                    {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
-                  <p className="text-sm ember">{job.salaryNet}</p>
+                  <p className="text-sm ember">
+                    {job.salaryNet}
+                    {payLine(job.salaryNet) ? <span className="mt-1 block text-mist">{payLine(job.salaryNet)}</span> : <span className="mt-1 block text-xs text-mist">{t("pay_check")}</span>}
+                  </p>
                   <p className="text-sm text-metal">
                     {job.quota} {t("search_quota")}
                   </p>
@@ -601,7 +654,7 @@ export function AboutPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
             <div>
               <p className="text-sm">{s.legal_address}</p>
-              <p className="text-sm text-mist">{t("desk_hours")}</p>
+              <p className="text-sm text-mist">{s.desk_hours || t("desk_hours")}</p>
             </div>
             <a
               className="ember text-sm"
@@ -725,7 +778,16 @@ export function ContactPage() {
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_address")}</dt>
             <dd className="mt-2">{s?.legal_address}</dd>
-            <p className="mt-2 text-sm text-mist">{t("desk_hours")}</p>
+            <p className="mt-2 text-sm text-mist">{s?.desk_hours || t("desk_hours")}</p>
+            <p className="mt-2 text-sm">{s?.legal_address}</p>
+            <a
+              className="ember mt-2 inline-block text-sm"
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s?.legal_address || "Rybná 716/24, Praha 1")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t("map_open")}
+            </a>
             <div className="map-night mt-4 overflow-hidden border border-white/15">
               <iframe
                 title={s?.legal_address || "Praha"}

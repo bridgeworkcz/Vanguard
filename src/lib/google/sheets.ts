@@ -271,6 +271,27 @@ export async function updateSheetRowById(name:string,id:string,patch:SheetRow):P
   invalidateSheet(name);
 }
 
+export async function sheetIdRows(name: string): Promise<{ row: number; id: string; values: string[] }[]> {
+  const schema = await ensureSchema(name);
+  const idIndex = Math.max(0, schema.indexOf("id"));
+  const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(schema.length)}`);
+  const values = result.values || [];
+  return values.slice(1).map((line, index) => ({ row: index + 2, id: String(line[idIndex] ?? ""), values: line.map((cell) => String(cell ?? "")) }));
+}
+
+export async function patchSheetCells(name: string, cells: { row: number; col: number; value: string }[]): Promise<void> {
+  if (!cells.length) return;
+  const data = cells.map((cell) => ({
+    range: `${name}!${col(cell.col)}${cell.row}`,
+    values: [[cell.value]],
+  }));
+  await sheetsFetch("/values:batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({ valueInputOption: "RAW", data }),
+  });
+  invalidateSheet(name);
+}
+
 export async function clearSheetBody(name: string): Promise<void> {
   const schema = await ensureSchema(name);
   await sheetsFetch(`/values/${enc(name)}!A2:${col(schema.length)}:clear`, { method: "POST" });

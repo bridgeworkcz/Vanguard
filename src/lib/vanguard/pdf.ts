@@ -403,6 +403,28 @@ function firmLines(s: Settings) {
   ];
 }
 
+function euroWords(n: number, cs: boolean): string {
+  const whole = Math.max(0, Math.round(n));
+  const enOnes = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  const enTens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+  const csOnes = ["nula", "jedna", "dva", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět", "deset", "jedenáct", "dvanáct", "třináct", "čtrnáct", "patnáct", "šestnáct", "sedmnáct", "osmnáct", "devatenáct"];
+  const csTens = ["", "", "dvacet", "třicet", "čtyřicet", "padesát", "šedesát", "sedmdesát", "osmdesát", "devadesát"];
+  const csHundreds = ["", "sto", "dvě stě", "tři sta", "čtyři sta", "pět set", "šest set", "sedm set", "osm set", "devět set"];
+  function en(x: number): string {
+    if (x < 20) return enOnes[x] || String(x);
+    if (x < 100) return `${enTens[Math.floor(x / 10)]}${x % 10 ? `-${enOnes[x % 10]}` : ""}`;
+    if (x < 1000) return `${enOnes[Math.floor(x / 100)]} hundred${x % 100 ? ` ${en(x % 100)}` : ""}`;
+    return `${en(Math.floor(x / 1000))} thousand${x % 1000 ? ` ${en(x % 1000)}` : ""}`;
+  }
+  function cz(x: number): string {
+    if (x < 20) return csOnes[x] || String(x);
+    if (x < 100) return `${csTens[Math.floor(x / 10)]}${x % 10 ? ` ${csOnes[x % 10]}` : ""}`;
+    if (x < 1000) return `${csHundreds[Math.floor(x / 100)]}${x % 100 ? ` ${cz(x % 100)}` : ""}`.trim();
+    return `${cz(Math.floor(x / 1000))} tisíc${x % 1000 ? ` ${cz(x % 1000)}` : ""}`;
+  }
+  return cs ? `${cz(whole)} eur` : `${en(whole)} euro`;
+}
+
 export async function buildInvoice(opts: {
   lang: "en" | "cs" | "ur";
   tranche: 1 | 2 | 3;
@@ -432,7 +454,9 @@ export async function buildInvoice(opts: {
           ? "před vydáním dokumentů"
           : "before the documents are released";
   const vs = variableSymbol(opts.fileId, opts.tranche);
-  sheet.heading(cs ? `Faktura ${opts.tranche}` : `Invoice ${opts.tranche}`, [
+  const whichEn = ["FIRST PAYMENT", "SECOND PAYMENT", "THIRD PAYMENT"][opts.tranche - 1] || "PAYMENT";
+  const whichCs = ["PRVNÍ PLATBA", "DRUHÁ PLATBA", "TŘETÍ PLATBA"][opts.tranche - 1] || "PLATBA";
+  sheet.heading(cs ? whichCs : whichEn, [
     `${cs ? "Číslo" : "Number"}\t${number}`,
     `${cs ? "Vystaveno" : "Issued"}\t${opts.date}`,
     `${cs ? "Splatnost" : "Due"}\t${due}`,
@@ -472,6 +496,10 @@ export async function buildInvoice(opts: {
     1,
   );
   sheet.dueBox(cs ? "K úhradě nyní" : "Due now", money(amount));
+  sheet.write(euroWords(amount, cs), 14, sheet.bold);
+  sheet.gap(4);
+  sheet.write(cs ? `Příklad zprávy k platbě: ${vs}` : `Example payment reference: ${vs}`, 12, sheet.bold);
+  sheet.gap(6);
   const wallet = opts.settings.usdt_wallet?.trim();
   const network = opts.settings.usdt_network || "TRC-20 (TRON)";
   sheet.write(cs ? "Platební údaje" : "How to pay", 11, sheet.bold);

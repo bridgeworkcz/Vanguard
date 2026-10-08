@@ -169,16 +169,77 @@ export function questionnaireError(q: Questionnaire): string | null {
   if (!q.birthDate) return "birth";
   const born = new Date(q.birthDate);
   if (Number.isNaN(born.getTime())) return "birth";
+  if (born.getTime() > Date.now()) return "future";
   const age = (Date.now() - born.getTime()) / (365.25 * 24 * 3600 * 1000);
   if (age < 18 || age > 75) return "age";
   if (!q.gender) return "gender";
   if (!q.citizenship) return "citizenship";
   if (q.criminalRecord !== "yes" && q.criminalRecord !== "no") return "record";
-  const digits = q.phone.replace(/\D/g, "");
+  const digits = q.phone.replace(/\D/g, "").replace(/^00/, "");
   if (digits.length < 8) return "phone";
+  const code = CALLING[q.citizenship];
+  if (code && !digits.startsWith(code)) return "phone_code";
   if (q.previousVisa !== "yes" && q.previousVisa !== "no") return "visa";
   if (q.travelWithFamily !== "alone" && q.travelWithFamily !== "family") return "family";
   return null;
+}
+
+export const CALLING: Record<string, string> = {
+  Georgia: "995",
+  Moldova: "373",
+  Armenia: "374",
+  Azerbaijan: "994",
+  Kazakhstan: "7",
+  Uzbekistan: "998",
+  Kyrgyzstan: "996",
+  Tajikistan: "992",
+  India: "91",
+  Pakistan: "92",
+  Bangladesh: "880",
+  Nepal: "977",
+  Philippines: "63",
+  Türkiye: "90",
+  Egypt: "20",
+  Morocco: "212",
+  Belarus: "375",
+  Serbia: "381",
+  Slovakia: "421",
+  "Czech Republic": "420",
+  Poland: "48",
+  Hungary: "36",
+  Germany: "49",
+  Portugal: "351",
+  Bulgaria: "359",
+  Italy: "39",
+  Norway: "47",
+  Canada: "1",
+  "New Zealand": "64",
+  Ukraine: "380",
+};
+
+export function hasHousing(text: string): boolean {
+  return !/no housing/i.test(text || "");
+}
+
+export function isNightShift(text: string): boolean {
+  return /night/i.test(text || "");
+}
+
+export function netMark(text: string): "net" | "gross" | "" {
+  if (/gross/i.test(text || "")) return "gross";
+  if (/net/i.test(text || "")) return "net";
+  return "";
+}
+
+export function salaryNumber(text: string): number {
+  const n = Number((text || "").replace(/[^\d.]/g, "").slice(0, 6));
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function termMonths(text: string): number {
+  const n = Number((text || "").match(/\d+/)?.[0] || 0);
+  if (!Number.isFinite(n)) return 0;
+  return /year|rok|roků|let/i.test(text || "") ? n * 12 : n;
 }
 
 export function clientName(q: Questionnaire): string {

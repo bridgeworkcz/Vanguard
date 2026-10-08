@@ -55,10 +55,10 @@ const ROLES: [string, string][] = [
 
 const HOUSING = [
   "Employer hostel, shared room, for the first contract year",
-  "Housing allowance paid with the monthly wage",
+  "No housing included. The worker finds a room.",
   "Dormitory for the first 90 days, then a private lease",
   "Company apartment, two workers to a room, utilities included",
-  "Employer-arranged room near the plant, rent deducted from the wage",
+  "No housing included. The worker finds a room.",
 ];
 
 const HOURS = [

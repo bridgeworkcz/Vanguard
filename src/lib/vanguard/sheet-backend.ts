@@ -1,6 +1,6 @@
 import { downloadFileFromDrive, resolveVaultFolder, safeDriveRedirect, uploadFileToDrive } from "@/lib/google/drive";
 import { documentPathname, downloadPrivateDocument, uploadPrivateDocument } from "@/lib/blob";
-import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, primeSheetRows, readSheetRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
+import { appendSheetRow, appendSheetRows, clearSheetBody, invalidateSheet, patchSheetCells, primeSheetRows, readSheetRows, sheetIdRows, updateSheetRowById, type SheetRow } from "@/lib/google/sheets";
 import {
   DOC_CATEGORIES,
   PROCESS_STAGES,
@@ -46,6 +46,7 @@ type Extra = {
   history: boolean;
   lang: string;
   accountClosed: boolean;
+  commissionPaid: boolean;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -222,6 +223,7 @@ function emptyExtra(): Extra {
     history: false,
     lang: "en",
     accountClosed: false,
+    commissionPaid: false,
   };
 }
 
@@ -1035,8 +1037,29 @@ export async function publicSite() {
   return refreshPublic();
 }
 
+const NO_HOUSING = "No housing included. The worker finds a room.";
+
+async function mixVacancyOffers() {
+  const map = await settingMap();
+  if (map.vacancy_mix === "1") return;
+  const rows = await sheetIdRows("Vacancies");
+  const acc = 7;
+  const cells: { row: number; col: number; value: string }[] = [];
+  for (const row of rows) {
+    if (!row.id) continue;
+    const hash = [...row.id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 5;
+    const housing = row.values[6] || "";
+    if ((hash === 0 || hash === 1) && !/no housing/i.test(housing)) {
+      cells.push({ row: row.row, col: acc, value: NO_HOUSING });
+    }
+  }
+  if (cells.length) await patchSheetCells("Vacancies", cells);
+  await putSetting("vacancy_mix", "1", "system");
+}
+
 async function buildPublicSite() {
   await readyForPublicRead();
+  await mixVacancyOffers().catch((err) => console.error("[mix]", err));
   const [settings, products, vacancies, teamRows, galleryRows, filings] = await Promise.all([
     settingMap(),
     loadProducts(),
@@ -1093,6 +1116,16 @@ export async function takeInvoiceNumber(userId: string) {
 
 export async function joinWaitlist(userId: string, data: { vacancyId: string; citizenship: string }) {
   await profile(userId);
+  const map = await settingMap();
+  let counts: Record<string, number> = {};
+  try {
+    counts = JSON.parse(map.waitlist_counts || "{}") as Record<string, number>;
+  } catch {
+    counts = {};
+  }
+  counts[data.vacancyId] = (Number(counts[data.vacancyId]) || 0) + 1;
+  await putSetting("waitlist_counts", JSON.stringify(counts), userId);
+  dropPublicCache();
   await audit(userId, "WAITLIST", data.vacancyId, data.citizenship);
   return { ok: true };
 }
@@ -1119,6 +1152,14 @@ export async function getMine(userId: string, id: string) {
 async function resolveReferrer(code: string): Promise<string> {
   const trimmed = code.trim();
   if (!trimmed) return "";
+  const map = await settingMap().catch(() => ({}) as Record<string, string>);
+  try {
+    const aliases = JSON.parse(map.agent_aliases || "{}") as Record<string, { code?: string }>;
+    const found = Object.entries(aliases).find(([, item]) => (item.code || "").toLowerCase() === trimmed.toLowerCase());
+    if (found) return found[0];
+  } catch {
+    /* the code may still be a user id */
+  }
   const row = (await readSheetRows("Users")).find((item) => item.id === trimmed || item.email.toLowerCase() === trimmed.toLowerCase());
   if (!row || roleOf(rolesOf(row.roles)) !== "SUBAGENT") return "";
   return row.id;
@@ -1330,6 +1371,9 @@ export async function adminOverview(userId: string) {
     proofs: apps.filter((app) => app.status === "OPEN" && app.stage === 2 && docs.some((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status === "UPLOADED")).length,
     live: apps.filter((app) => app.status === "OPEN").length,
     users,
+    closed: (await readSheetRows("Users"))
+      .filter((row) => row.isActive === "false")
+      .map((row) => ({ userId: row.id, email: row.email, fullName: row.fullName })),
     funnel: await readFunnel().catch(() => ({ week: "", calc: 0, apply: 0, question: 0 })),
   };
 }
@@ -1349,6 +1393,32 @@ export async function adminGet(userId: string, id: string) {
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || isHistoryApp(app)) throw new Error("Not found");
   return { app: present(app), documents: await docsFor(id), messages: await messagesFor(id) };
+}
+
+function docNote(lang: string, reason: string): string {
+  const [code, extra] = reason.split("|");
+  const copy: Record<string, Record<string, string>> = {
+    en: {
+      blur: "The amount on the receipt is not readable. Send a closer photo.",
+      name: "The name on the paper does not match the questionnaire.",
+      page: "This file has too many pages. Send only the page the case asked for.",
+      other: "This paper was declined.",
+    },
+    cs: {
+      blur: "Částka na potvrzení není čitelná. Pošlete bližší fotografii.",
+      name: "Jméno na dokladu nesedí s dotazníkem.",
+      page: "Soubor má příliš mnoho stran. Pošlete jen tu, kterou kauza žádá.",
+      other: "Doklad byl odmítnut.",
+    },
+    ur: {
+      blur: "رسید پر رقم پڑھی نہیں گئی۔ قریب سے تصویر بھیجیں۔",
+      name: "کاغذ پر نام سوالنامے سے نہیں ملتا۔",
+      page: "فائل میں صفحات زیادہ ہیں۔ صرف وہ صفحہ بھیجیں جو کیس مانگتا ہے۔",
+      other: "یہ کاغذ مسترد ہوا۔",
+    },
+  };
+  const line = (copy[lang] || copy.en)?.[code || ""] || reason;
+  return extra?.trim() ? `${line} ${extra.trim()}` : line;
 }
 
 function stageNote(lang: string, action: string): string {
@@ -1699,6 +1769,15 @@ export async function adminSaveProduct(userId: string, data: VisaProduct) {
   if (pricing.some((row) => row.id === data.id)) await updateSheetRowById("Pricing", data.id, priceRow);
   else await appendSheetRow("Pricing", priceRow);
   await audit(userId, "PRICING", data.id, String(data.basePrice));
+  const logMap = await settingMap();
+  let priceLog: Record<string, { at: string; by: string; amount: string }> = {};
+  try {
+    priceLog = JSON.parse(logMap.price_log || "{}") as Record<string, { at: string; by: string; amount: string }>;
+  } catch {
+    priceLog = {};
+  }
+  priceLog[data.id] = { at: stamp, by: userId, amount: String(data.basePrice) };
+  await putSetting("price_log", JSON.stringify(priceLog), userId);
   dropPublicCache();
 }
 
@@ -1820,10 +1899,6 @@ export async function adminDeleteAccount(userId: string, targetId: string) {
   if (roleOf(rolesOf(target.roles)) === "ADMIN" && admins.length < 1) throw new Error("Last admin");
   await updateSheetRowById("Users", target.id, {
     ...target,
-    email: `deleted.${target.id}@invalid.local`,
-    phone: "",
-    passwordHash: "",
-    roles: JSON.stringify(["CLIENT"]),
     isActive: "false",
   });
   const apps = await loadApps();
@@ -1832,6 +1907,15 @@ export async function adminDeleteAccount(userId: string, targetId: string) {
     await saveApp(app, { ...app.extra, accountClosed: true });
   }
   await audit(userId, "ACCOUNT_DELETE", target.id, target.email);
+}
+
+export async function adminMarkCommission(userId: string, data: { id: string; paid: boolean }) {
+  await requireStaff(userId);
+  const app = (await loadApps()).find((item) => item.id === data.id);
+  if (!app || isHistoryApp(app)) throw new Error("Not found");
+  await saveApp(app, { ...app.extra, commissionPaid: Boolean(data.paid) });
+  await audit(userId, "COMMISSION", app.id, data.paid ? "paid" : "due");
+  return { ok: true };
 }
 
 export async function adminSetReferrer(userId: string, data: { id: string; referrerUserId: string }) {
@@ -1845,14 +1929,51 @@ export async function adminSetReferrer(userId: string, data: { id: string; refer
   return { ok: true };
 }
 
+export async function adminRestoreAccount(userId: string, targetId: string) {
+  await requireAdmin(userId);
+  const rows = await readSheetRows("Users");
+  const target = rows.find((row) => row.id === targetId);
+  if (!target) throw new Error("Not found");
+  await updateSheetRowById("Users", target.id, { ...target, isActive: "true" });
+  await audit(userId, "ACCOUNT_RESTORE", target.id, target.email);
+}
+
+export async function agentRename(userId: string, code: string) {
+  const person = await profile(userId);
+  if (person.role !== "SUBAGENT") throw new Error("Forbidden");
+  const next = code.trim().slice(0, 40);
+  if (!/^[a-z0-9-]{3,40}$/i.test(next)) throw new Error("Code");
+  const map = await settingMap();
+  let book: Record<string, { code: string; locked?: boolean }> = {};
+  try {
+    book = JSON.parse(map.agent_aliases || "{}") as Record<string, { code: string; locked?: boolean }>;
+  } catch {
+    book = {};
+  }
+  const mine = book[person.userId];
+  if (mine?.locked) throw new Error("Locked");
+  const taken = Object.entries(book).some(([id, item]) => id !== person.userId && item.code.toLowerCase() === next.toLowerCase());
+  if (taken) throw new Error("Code");
+  book[person.userId] = { code: next, locked: true };
+  await putSetting("agent_aliases", JSON.stringify(book), userId);
+  return { code: next };
+}
+
 export async function agentBook(userId: string) {
   const person = await profile(userId);
   if (person.role !== "SUBAGENT") throw new Error("Forbidden");
   const map = await settingMap();
   const rate = Number(map.subagent_rate) || 10;
-  const cases = (await loadApps()).filter((app) => app.referrerUserId === userId);
+  let aliases: Record<string, { code: string; locked?: boolean }> = {};
+  try {
+    aliases = JSON.parse(map.agent_aliases || "{}") as Record<string, { code: string; locked?: boolean }>;
+  } catch {
+    aliases = {};
+  }
+  const cases = (await loadApps()).filter((app) => app.referrerUserId === userId && !isHistoryApp(app));
   return {
-    code: person.userId,
+    code: aliases[person.userId]?.code || person.userId,
+    locked: Boolean(aliases[person.userId]?.locked),
     email: person.email,
     rate,
     month: kyivMonth(),
@@ -1860,12 +1981,13 @@ export async function agentBook(userId: string) {
     cases: cases
       .map((app) => ({
         id: app.id,
-        name: clientName(parseQuestionnaire(app.questionnaire)) || "—",
         country: app.country,
-        citizenship: app.citizenship,
         status: app.status,
         stage: app.stage,
+        total: app.totalCost,
         createdAt: app.createdAt,
+        pay: app.stage >= 3 ? "paid" : app.stage >= 2 ? "due" : "wait",
+        commission: app.stage < 2 ? "wait" : app.extra.commissionPaid ? "paid" : "due",
       }))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   };
@@ -1927,6 +2049,17 @@ export async function reviewDocument(userId: string, data: { id: string; status:
     rejectionReason: data.status === "REJECTED" ? data.reason : "",
   });
   await audit(userId, "DOCUMENT", raw.id, data.status);
+  if (data.status === "REJECTED" && data.reason) {
+    const app = (await loadApps()).find((item) => item.id === raw.dossierId);
+    if (app) {
+      const note = docNote(app.extra.lang || "en", data.reason);
+      try {
+        await postMessage(userId, { applicationId: app.id, body: note });
+      } catch (err) {
+        console.error("[doc-note]", err);
+      }
+    }
+  }
   return { ok: true };
 }
 

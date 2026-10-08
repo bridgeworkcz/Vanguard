@@ -10,6 +10,7 @@ import {
   getSessionProfile,
   listAgentBook,
   listMyApplications,
+  agentRename,
   postMessage,
   resubmitApplication,
   saveQuestionnaire,
@@ -21,11 +22,14 @@ import {
   type AppRow,
 } from "@/lib/vanguard/api";
 import {
+  CALLING,
+  CITIZENSHIPS,
   DOC_CATEGORIES,
   EMPTY_QUESTIONNAIRE,
   clientName,
   invoice2Unlocked,
   parseQuestionnaire,
+  questionnaireError,
   tranches,
   whatsAppHref,
   type DocCategory,
@@ -36,6 +40,14 @@ import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { DocScreen } from "./doc-view";
+
+function shownReason(raw: string, t: (key: CopyKey) => string) {
+  const code = raw.split("|")[0] || "";
+  const extra = raw.split("|").slice(1).join("|").trim();
+  const line = code === "blur" ? t("pay_blur") : code === "name" ? t("reject_name") : code === "page" ? t("pass_pages") : code === "other" ? t("reject_other") : raw;
+  if (line === raw) return raw;
+  return extra ? `${line} ${extra}` : line;
+}
 
 function remain(iso: string | null, now: number) {
   if (!iso) return "";
@@ -298,6 +310,11 @@ export function PortalPage({ id }: { id: string }) {
   const [docNote, setDocNote] = useState("");
   const [docBusy, setDocBusy] = useState(false);
   const [proofNote, setProofNote] = useState("");
+  const [qStep, setQStep] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [shot, setShot] = useState<{ url: string; file: File } | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
+  const [codeNote, setCodeNote] = useState("");
 
   async function refreshList() {
     const list = await listMyApplications();
@@ -344,7 +361,12 @@ export function PortalPage({ id }: { id: string }) {
         setContact({ email: p.email, phone: p.phone });
         setRole(p.role);
         if (p.role === "ADMIN" || p.role === "MANAGER") void navigate({ to: "/admin", search: { tab: "overview", id: "" } });
-        if (p.role === "SUBAGENT") return listAgentBook().then(setBook);
+        if (p.role === "SUBAGENT") {
+          return listAgentBook().then((next) => {
+            setBook(next);
+            setCodeDraft(next.code);
+          });
+        }
         return undefined;
       })
       .catch(() => undefined);
@@ -386,6 +408,34 @@ export function PortalPage({ id }: { id: string }) {
     localStorage.setItem(`vg-draft-${current.id}`, JSON.stringify(q));
   }, [q, detail]);
 
+  function stepBad(step: number): string | null {
+    if (step === 0) {
+      if (!q.firstName.trim() || !q.lastName.trim()) return "name";
+      if (!q.middleNameAbsent && !q.middleName.trim()) return "middle";
+    }
+    if (step === 1) {
+      if (!q.birthDate) return "birth";
+      const born = new Date(q.birthDate);
+      if (Number.isNaN(born.getTime())) return "birth";
+      if (born.getTime() > Date.now()) return "future";
+      const age = (Date.now() - born.getTime()) / (365.25 * 24 * 3600 * 1000);
+      if (age < 18 || age > 75) return "age";
+    }
+    if (step === 2 && !q.gender) return "gender";
+    if (step === 3 && !q.citizenship) return "citizenship";
+    if (step === 4) {
+      const digits = q.phone.replace(/\D/g, "").replace(/^00/, "");
+      if (digits.length < 8) return "phone";
+      const code = CALLING[q.citizenship];
+      if (code && !digits.startsWith(code)) return "phone_code";
+    }
+    if (step === 5 && q.criminalRecord !== "yes" && q.criminalRecord !== "no") return "record";
+    if (step === 6 && q.previousVisa !== "yes" && q.previousVisa !== "no") return "visa";
+    if (step === 7 && q.travelWithFamily !== "alone" && q.travelWithFamily !== "family") return "family";
+    if (step >= 8) return questionnaireError(q);
+    return null;
+  }
+
   if (pending) {
     return (
       <Shell>
@@ -399,6 +449,15 @@ export function PortalPage({ id }: { id: string }) {
   const visa = site?.products.find((p) => p.id === app?.visaProductId);
   const parts = app ? tranches(app.totalCost) : null;
   const proof = detail?.documents.find((d) => d.category === "PAYMENT_PROOF");
+  const thirdPaid =
+    app?.status === "ISSUED" ||
+    Boolean(
+      app &&
+        app.stage >= 4 &&
+        detail?.documents.some(
+          (d) => d.category === "PAYMENT_PROOF" && d.status !== "REJECTED" && (!app.stage4At || (d.createdAt || "") >= app.stage4At),
+        ),
+    );
   const finals = detail?.documents.filter((d) => d.category === "FINAL") ?? [];
   const qErrKey = msg ? (`q_err_${msg}` as CopyKey) : null;
 
@@ -411,6 +470,8 @@ export function PortalPage({ id }: { id: string }) {
       return;
     }
     void noteFunnel({ data: { kind: "question" } }).catch(() => undefined);
+    setEditing(false);
+    setQStep(0);
     await refreshDetail(app.id);
     await refreshList();
   }
@@ -461,6 +522,51 @@ export function PortalPage({ id }: { id: string }) {
     });
     setDocBusy(false);
     setDocNote(bad.length ? bad.join(" · ") : t("docs_saved"));
+  }
+
+  async function queueDoc(cat: DocCategory, file: File) {
+    let next = file;
+    if (cat === "PASSPORT" && /^IMG_\d+/i.test(file.name)) {
+      const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+      next = new File([file], `passport.${ext}`, { type: file.type || "image/jpeg" });
+    }
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+      const text = await file.text();
+      const pages = (text.match(/\/Type\s*\/Page(?!s)/g) || []).length;
+      if (pages > 8) {
+        setDocNote(t("pass_pages"));
+        return;
+      }
+    }
+    if (cat === "PASSPORT" && (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) {
+      const url = URL.createObjectURL(next);
+      setShot((cur) => {
+        if (cur) URL.revokeObjectURL(cur.url);
+        return { url, file: next };
+      });
+      return;
+    }
+    setPendingDocs((cur) => ({ ...cur, [cat]: next }));
+    setDocNote("");
+  }
+
+  async function sendProof(file: File) {
+    if (!file.type.startsWith("application/pdf") && !/\.pdf$/i.test(file.name)) {
+      const url = URL.createObjectURL(file);
+      const size = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => reject(new Error("type"));
+        img.src = url;
+      }).finally(() => URL.revokeObjectURL(url));
+      if (size.w < 1000 || size.h < 700) {
+        setProofNote(t("pay_blur"));
+        return;
+      }
+    }
+    setProofNote(t("docs_wait"));
+    await sendFile("PAYMENT_PROOF", file);
+    setProofNote(t("docs_saved"));
   }
 
   function showPreview(next: { url: string; name: string; tranche?: 1 | 2 | 3 }) {
@@ -545,6 +651,28 @@ export function PortalPage({ id }: { id: string }) {
                 <p className="text-xs uppercase tracking-widest text-mist">{t("desk_code")}</p>
                 <p className="mt-1 text-lg">{book.code}</p>
                 <p className="text-sm text-mist">{book.email}</p>
+                {book.locked ? (
+                  <p className="mt-2 text-sm text-mist">{t("agent_code_locked")}</p>
+                ) : (
+                  <form
+                    className="mt-2 grid gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      setCodeNote("");
+                      void agentRename({ data: { code: codeDraft } })
+                        .then((next) => {
+                          setBook({ ...book, code: next.code, locked: true });
+                          setCodeNote(t("agent_code_locked"));
+                        })
+                        .catch(() => setCodeNote(t("q_err_name")));
+                    }}
+                  >
+                    <p className="text-sm text-mist">{t("agent_code_once")}</p>
+                    <input className="field" value={codeDraft} onChange={(e) => setCodeDraft(e.target.value)} />
+                    <button className="btn w-fit" type="submit">{t("agent_code_save")}</button>
+                    {codeNote ? <p className="text-sm text-metal">{codeNote}</p> : null}
+                  </form>
+                )}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-widest text-mist">{t("desk_month")}</p>
@@ -573,27 +701,46 @@ export function PortalPage({ id }: { id: string }) {
               </button>
             </div>
             {book.cases.length === 0 ? <p className="text-mist">{t("desk_empty")}</p> : null}
+            <button
+              type="button"
+              className="btn w-fit"
+              onClick={() => {
+                const head = ["id", "country", "stage", "pay", "fee", "commission", "opened"];
+                const lines = book.cases
+                  .filter((row) => (row.createdAt || "").slice(0, 7) === book.month)
+                  .map((row) => [row.id, row.country, row.stage, row.pay, row.total, row.commission, (row.createdAt || "").slice(0, 10)].join(","));
+                const blob = new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `cases-${book.month}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              {t("agent_csv")}
+            </button>
             <div className="sheet-wrap">
               <table className="sheet w-full min-w-[640px] text-left text-sm">
                 <thead className="text-mist">
                   <tr>
                     <th className="py-2 font-medium">{t("filings_id")}</th>
-                    <th className="py-2 font-medium">{t("name")}</th>
-                    <th className="py-2 font-medium">{t("filings_from")}</th>
                     <th className="py-2 font-medium">{t("filings_to")}</th>
-                    <th className="py-2 font-medium">{t("filings_date")}</th>
-                    <th className="py-2 font-medium">{t("filings_status")}</th>
+                    <th className="py-2 font-medium">{t("admin_stage")}</th>
+                    <th className="py-2 font-medium">{t("portal_paid")}</th>
+                    <th className="py-2 font-medium">{t("search_fee")}</th>
+                    <th className="py-2 font-medium">{t("agent_comm")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {book.cases.map((row) => (
                     <tr key={row.id} className="border-t border-white/10">
                       <td className="latin py-3" data-label={t("filings_id")}>{row.id}</td>
-                      <td data-label={t("name")}>{row.name}</td>
-                      <td data-label={t("filings_from")}>{row.citizenship || "—"}</td>
                       <td data-label={t("filings_to")}>{row.country}</td>
-                      <td className="latin" data-label={t("filings_date")}>{row.createdAt?.slice(0, 10)}</td>
-                      <td className="ember" data-label={t("filings_status")}>{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
+                      <td className="ember" data-label={t("admin_stage")}>{row.status === "CANCELLED" ? t("status_cancelled") : row.status === "REJECTED" ? t("status_rejected") : t(`stage_${row.stage}` as CopyKey)}</td>
+                      <td data-label={t("portal_paid")}>{row.pay === "paid" ? t("agent_pay_paid") : row.pay === "due" ? t("agent_pay_due") : t("agent_pay_wait")}</td>
+                      <td className="latin" data-label={t("search_fee")}>{row.total}</td>
+                      <td data-label={t("agent_comm")}>{row.commission === "paid" ? t("agent_pay_paid") : row.commission === "due" ? t("agent_pay_due") : t("agent_pay_wait")}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -640,6 +787,16 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
             <div className="glass p-5">
               <p className="kicker">{app.id}</p>
+              <button
+                type="button"
+                className="btn mt-2"
+                onClick={() => {
+                  const line = `${app.id} · ${t(`stage_${app.stage}` as CopyKey)}`;
+                  void navigator.clipboard.writeText(line).catch(() => undefined);
+                }}
+              >
+                {t("share_case")}
+              </button>
               <h2 className="display mt-2 text-4xl">{app.vacancyTitle}</h2>
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
@@ -690,7 +847,7 @@ export function PortalPage({ id }: { id: string }) {
                   </section>
                 );
               })()}
-              {app.status === "REJECTED" && app.rejectionReason ? <p className="mt-2">{app.rejectionReason}</p> : null}
+              {app.status === "REJECTED" && app.rejectionReason ? <p className="mt-2">{shownReason(app.rejectionReason, t)}</p> : null}
               {app.status === "REJECTED" ? (
                 <button
                   type="button"
@@ -703,6 +860,12 @@ export function PortalPage({ id }: { id: string }) {
                 </button>
               ) : null}
               {parts ? (
+                <p className="mt-3 text-sm">
+                  {t("pay_left")} {app.stage >= 4 ? parts.first + parts.second : app.stage >= 3 ? parts.first : 0} EUR · {t("pay_still")}{" "}
+                  {app.stage >= 4 ? parts.final : app.stage >= 3 ? parts.second + parts.final : app.totalCost} EUR
+                </p>
+              ) : null}
+              {parts ? (
                 <p className="mt-3 text-sm text-mist">
                   30% {parts.first} EUR · {app.stage >= 2 ? t("portal_paid") : t("portal_due")}
                   {" · "}40% {parts.second} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
@@ -713,27 +876,44 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "CANCELLED" ? <p>{t("cancel_done")}</p> : null}
 
-            {app.status === "OPEN" && app.stage === 1 && !app.profileComplete ? (
+            {app.status === "OPEN" && app.stage === 1 && (!app.profileComplete || editing) ? (
               <form
-                className="glass grid gap-3 p-5 sm:p-7"
+                className="glass grid gap-4 p-5 sm:p-7"
                 onSubmit={(e) => {
                   e.preventDefault();
+                  const bad = stepBad(qStep);
+                  if (bad) {
+                    setMsg(bad);
+                    return;
+                  }
+                  setMsg("");
+                  if (qStep < 8) {
+                    setQStep(qStep + 1);
+                    return;
+                  }
                   void saveQ();
                 }}
               >
-                <h3 className="display text-3xl">{t("q_title")}</h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input className="field" placeholder={t("q_first")} value={q.firstName} onChange={(e) => setQ({ ...q, firstName: e.target.value })} />
-                  <input className="field" placeholder={t("q_last")} value={q.lastName} onChange={(e) => setQ({ ...q, lastName: e.target.value })} />
-                  <input className="field" placeholder={t("q_middle")} disabled={q.middleNameAbsent} value={q.middleName} onChange={(e) => setQ({ ...q, middleName: e.target.value })} />
-                  <label className="flex min-h-12 items-center gap-2 text-sm">
-                    <input type="checkbox" checked={q.middleNameAbsent} onChange={(e) => setQ({ ...q, middleNameAbsent: e.target.checked, middleName: "" })} />
-                    {t("q_no_middle")}
-                  </label>
+                <p className="text-xs uppercase tracking-widest text-mist">{qStep + 1} / 9</p>
+                <h3 className="display text-3xl">{qStep === 8 ? t("q_review") : t("q_title")}</h3>
+                {qStep === 0 ? (
+                  <div className="grid gap-3">
+                    <input className="field" placeholder={t("q_first")} value={q.firstName} onChange={(e) => setQ({ ...q, firstName: e.target.value })} />
+                    <input className="field" placeholder={t("q_last")} value={q.lastName} onChange={(e) => setQ({ ...q, lastName: e.target.value })} />
+                    <input className="field" placeholder={t("q_middle")} disabled={q.middleNameAbsent} value={q.middleName} onChange={(e) => setQ({ ...q, middleName: e.target.value })} />
+                    <label className="flex min-h-12 items-center gap-2 text-sm">
+                      <input type="checkbox" checked={q.middleNameAbsent} onChange={(e) => setQ({ ...q, middleNameAbsent: e.target.checked, middleName: "" })} />
+                      {t("q_no_middle")}
+                    </label>
+                  </div>
+                ) : null}
+                {qStep === 1 ? (
                   <label className="grid gap-1 text-sm text-mist">
                     {t("q_birth")}
                     <input className="field" type="date" value={q.birthDate} onChange={(e) => setQ({ ...q, birthDate: e.target.value })} />
                   </label>
+                ) : null}
+                {qStep === 2 ? (
                   <label className="grid gap-1 text-sm text-mist">
                     {t("q_gender")}
                     <select className="field" value={q.gender} onChange={(e) => setQ({ ...q, gender: e.target.value })}>
@@ -743,34 +923,87 @@ export function PortalPage({ id }: { id: string }) {
                       <option value="x">{t("q_gender_x")}</option>
                     </select>
                   </label>
+                ) : null}
+                {qStep === 3 ? (
                   <label className="grid gap-1 text-sm text-mist">
                     {t("q_citizen")}
-                    <input className="field" value={q.citizenship} onChange={(e) => setQ({ ...q, citizenship: e.target.value })} />
+                    <select className="field" value={q.citizenship} onChange={(e) => setQ({ ...q, citizenship: e.target.value })}>
+                      <option value="" />
+                      {CITIZENSHIPS.map((c) => (
+                        <option key={c}>{c}</option>
+                      ))}
+                      <option>Other</option>
+                    </select>
                   </label>
+                ) : null}
+                {qStep === 4 ? (
                   <label className="grid gap-1 text-sm text-mist">
                     {t("q_phone")}
-                    <input className="field" value={q.phone} onChange={(e) => setQ({ ...q, phone: e.target.value })} />
+                    <input className="field" inputMode="tel" placeholder={CALLING[q.citizenship] ? `+${CALLING[q.citizenship]}` : ""} value={q.phone} onChange={(e) => setQ({ ...q, phone: e.target.value })} />
                   </label>
-                </div>
-                <fieldset className="grid gap-2 text-sm">
-                  <legend>{t("q_record")}</legend>
-                  <label className="flex gap-2"><input type="radio" name="rec" checked={q.criminalRecord === "no"} onChange={() => setQ({ ...q, criminalRecord: "no" })} />{t("q_no")}</label>
-                  <label className="flex gap-2"><input type="radio" name="rec" checked={q.criminalRecord === "yes"} onChange={() => setQ({ ...q, criminalRecord: "yes" })} />{t("q_yes")}</label>
-                </fieldset>
-                <fieldset className="grid gap-2 text-sm">
-                  <legend>{t("q_prev")}</legend>
-                  <label className="flex gap-2"><input type="radio" name="visa" checked={q.previousVisa === "no"} onChange={() => setQ({ ...q, previousVisa: "no" })} />{t("q_no")}</label>
-                  <label className="flex gap-2"><input type="radio" name="visa" checked={q.previousVisa === "yes"} onChange={() => setQ({ ...q, previousVisa: "yes" })} />{t("q_yes")}</label>
-                </fieldset>
-                <fieldset className="grid gap-2 text-sm">
-                  <legend>{t("q_family")}</legend>
-                  <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "alone"} onChange={() => setQ({ ...q, travelWithFamily: "alone" })} />{t("q_alone")}</label>
-                  <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "family"} onChange={() => setQ({ ...q, travelWithFamily: "family" })} />{t("q_with")}</label>
-                </fieldset>
+                ) : null}
+                {qStep === 5 ? (
+                  <fieldset className="grid gap-2 text-sm">
+                    <legend>{t("q_record")}</legend>
+                    <label className="flex gap-2"><input type="radio" name="rec" checked={q.criminalRecord === "no"} onChange={() => setQ({ ...q, criminalRecord: "no" })} />{t("q_no")}</label>
+                    <label className="flex gap-2"><input type="radio" name="rec" checked={q.criminalRecord === "yes"} onChange={() => setQ({ ...q, criminalRecord: "yes" })} />{t("q_yes")}</label>
+                  </fieldset>
+                ) : null}
+                {qStep === 6 ? (
+                  <fieldset className="grid gap-2 text-sm">
+                    <legend>{t("q_prev")}</legend>
+                    <label className="flex gap-2"><input type="radio" name="visa" checked={q.previousVisa === "no"} onChange={() => setQ({ ...q, previousVisa: "no" })} />{t("q_no")}</label>
+                    <label className="flex gap-2"><input type="radio" name="visa" checked={q.previousVisa === "yes"} onChange={() => setQ({ ...q, previousVisa: "yes" })} />{t("q_yes")}</label>
+                  </fieldset>
+                ) : null}
+                {qStep === 7 ? (
+                  <fieldset className="grid gap-2 text-sm">
+                    <legend>{t("q_family")}</legend>
+                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "alone"} onChange={() => setQ({ ...q, travelWithFamily: "alone" })} />{t("q_alone")}</label>
+                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "family"} onChange={() => setQ({ ...q, travelWithFamily: "family" })} />{t("q_with")}</label>
+                  </fieldset>
+                ) : null}
+                {qStep === 8 ? (
+                  <ul className="grid gap-2 text-sm">
+                    <li>{q.firstName} {q.middleNameAbsent ? "" : q.middleName} {q.lastName}</li>
+                    <li>{q.birthDate}</li>
+                    <li>{q.gender}</li>
+                    <li>{q.citizenship}</li>
+                    <li>{q.phone}</li>
+                    <li>{q.criminalRecord}</li>
+                    <li>{q.previousVisa}</li>
+                    <li>{q.travelWithFamily}</li>
+                  </ul>
+                ) : null}
                 {qErrKey ? <p className="text-metal">{t(qErrKey)}</p> : null}
-                <p className="kicker ember">{t("hint_here")}</p>
-                <button className="btn-solid step-live w-fit" type="submit">{t("q_save")}</button>
+                <div className="flex flex-wrap gap-2">
+                  {qStep > 0 ? (
+                    <button type="button" className="btn" onClick={() => { setMsg(""); setQStep(qStep - 1); }}>{t("q_back")}</button>
+                  ) : null}
+                  <button className="btn-solid w-fit" type="submit">{qStep === 8 ? t("q_save") : t("q_next")}</button>
+                </div>
               </form>
+            ) : null}
+
+            {app.status === "OPEN" && app.stage === 1 && app.profileComplete && !editing ? (
+              <div className="glass grid gap-2 p-5">
+                <h3 className="display text-3xl">{t("q_review")}</h3>
+                {[
+                  [q.firstName, q.lastName, 0],
+                  [q.birthDate, "", 1],
+                  [q.gender, "", 2],
+                  [q.citizenship, "", 3],
+                  [q.phone, "", 4],
+                  [q.criminalRecord, "", 5],
+                  [q.previousVisa, "", 6],
+                  [q.travelWithFamily, "", 7],
+                ].map((row) => (
+                  <p key={String(row[2])} className="flex items-center justify-between gap-3 border-t border-white/10 py-2 text-sm">
+                    <span>{[row[0], row[1]].filter(Boolean).join(" ")}</span>
+                    <button type="button" className="btn" onClick={() => { setEditing(true); setQStep(Number(row[2])); }}>{t("q_edit")}</button>
+                  </p>
+                ))}
+              </div>
             ) : null}
 
             {app.status === "ISSUED" ? (
@@ -832,28 +1065,22 @@ export function PortalPage({ id }: { id: string }) {
             {app.status === "OPEN" && app.stage >= 2 ? (
               <div className="flex flex-wrap gap-3">
                 <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
-                <p className="w-full text-sm text-mist">{t("open_here")}</p>
-                <button type="button" className="btn" onClick={() => void invoice(1)}>{t("invoice_1")}</button>
+                {thirdPaid ? <p className="w-full text-sm text-mist">{t("pay_no_more")}</p> : <p className="w-full text-sm text-mist">{t("open_here")}</p>}
+                {thirdPaid ? null : <button type="button" className="btn" onClick={() => void invoice(1)}>{t("invoice_1")}</button>}
                 <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
                 <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
-                {app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
+                {!thirdPaid && app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
                   <button type="button" className="btn" onClick={() => void invoice(2)}>{t("invoice_2")}</button>
-                ) : app.stage >= 2 ? (
-                  <p className="self-center text-sm text-mist">{t("invoice2_locked")}</p>
                 ) : null}
-                {app.stage >= 4 ? (
-                  <>
-                    {detail?.documents.some((d) => d.status === "REJECTED") ? null : <p className="kicker ember w-full">{t("hint_here")}</p>}
-                    <button type="button" className={`btn ${detail?.documents.some((d) => d.status === "REJECTED") ? "" : "step-live"}`} onClick={() => void invoice(3)}>{t("invoice_3")}</button>
-                  </>
+                {!thirdPaid && app.stage >= 4 ? (
+                  <button type="button" className="btn" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
                 ) : null}
               </div>
             ) : null}
 
-            {app.status === "OPEN" && app.stage === 2 ? (
-              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof ? "" : "step-live"}`}>
-                {proof ? null : <span className="kicker ember">{t("hint_here")}</span>}
-                {t("proof_title")}
+            {app.status === "OPEN" && (app.stage === 2 || (app.stage >= 4 && !thirdPaid)) ? (
+              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof && app.stage === 2 ? "" : "step-live"}`}>
+                {t("pay_i_paid")}
                 <span className="text-mist">{t("proof_help")}</span>
                 <label className="btn relative mt-2 inline-flex w-fit cursor-pointer items-center overflow-hidden">
                   {t("upload")}
@@ -865,10 +1092,7 @@ export function PortalPage({ id }: { id: string }) {
                       const file = e.target.files?.[0];
                       e.target.value = "";
                       if (!file) return;
-                      setProofNote(t("docs_wait"));
-                      void sendFile("PAYMENT_PROOF", file)
-                        .then(() => setProofNote(t("docs_saved")))
-                        .catch((err: unknown) => setProofNote(uploadError(err)));
+                      void sendProof(file).catch((err: unknown) => setProofNote(uploadError(err)));
                     }}
                   />
                 </label>
@@ -889,7 +1113,7 @@ export function PortalPage({ id }: { id: string }) {
                       <li key={cat} className={`flex items-baseline justify-between gap-3 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a] bg-[#ff6a1a]/10 px-2" : "border-white/10"}`}>
                         <span>
                           {t(`cat_${cat}`)}
-                          {latest?.status === "REJECTED" && latest.rejectionReason ? <span className="mt-1 block text-lg text-paper">{latest.rejectionReason}</span> : null}
+                          {latest?.status === "REJECTED" && latest.rejectionReason ? <span className="mt-1 block text-lg text-paper">{shownReason(latest.rejectionReason, t)}</span> : null}
                         </span>
                         <span className={latest?.status === "REJECTED" ? "ember" : "text-mist"}>{label}</span>
                       </li>
@@ -898,23 +1122,55 @@ export function PortalPage({ id }: { id: string }) {
                 </ul>
                 <h3 className="display mt-8 text-3xl">{t("docs_title")}</h3>
                 <p className="mt-2 text-sm text-mist">{t("docs_help")}</p>
+                {shot ? (
+                  <div className="mt-4 grid gap-3">
+                    <img src={shot.url} alt="" className="max-h-[70vh] w-full object-contain bg-black/40" />
+                    <p className="text-sm text-mist">{t("pass_hint")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          URL.revokeObjectURL(shot.url);
+                          setShot(null);
+                        }}
+                      >
+                        {t("pass_retake")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-solid"
+                        onClick={() => {
+                          setPendingDocs((cur) => ({ ...cur, PASSPORT: shot.file }));
+                          URL.revokeObjectURL(shot.url);
+                          setShot(null);
+                        }}
+                      >
+                        {t("pass_use")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <ul className="mt-4 grid gap-3">
                   {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
-                    const files = detail?.documents.filter((d) => d.category === cat) ?? [];
+                    const files = [...(detail?.documents.filter((d) => d.category === cat) ?? [])].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+                    const newest = files[files.length - 1]?.id;
                     return (
                       <li key={cat} className="border-t border-white/10 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span>{t(`cat_${cat}`)}</span>
                           <span className="text-sm text-mist">{files.length ? t("uploaded") : t("checklist_miss")}</span>
                         </div>
+                        {cat === "PASSPORT" ? <p className="mt-1 text-sm text-mist">{t("pass_hint")}</p> : null}
                         <div className="mt-2 grid gap-2">
                           {files.map((doc) => (
                             <article key={doc.id} className={`p-3 text-sm ${doc.status === "REJECTED" ? "bg-[#ff6a1a]/15" : "bg-white/5"}`}>
                               <p>{doc.fileName}</p>
+                              {doc.id !== newest && doc.status === "REJECTED" ? <p className="text-mist">{t("pass_earlier")}</p> : null}
                               <p className="text-mist">
                                 {doc.createdAt?.slice(0, 16)} · {doc.status === "REJECTED" ? t("admin_doc_no") : doc.status === "APPROVED" ? t("admin_doc_ok") : t("uploaded")}
                               </p>
-                              {doc.rejectionReason ? <p className="mt-2 text-lg">{doc.rejectionReason}</p> : null}
+                              {doc.rejectionReason ? <p className="mt-2 text-lg">{shownReason(doc.rejectionReason, t)}</p> : null}
                             </article>
                           ))}
                         </div>
@@ -929,8 +1185,7 @@ export function PortalPage({ id }: { id: string }) {
                               const file = e.target.files?.[0];
                               e.target.value = "";
                               if (!file) return;
-                              setPendingDocs((cur) => ({ ...cur, [cat]: file }));
-                              setDocNote("");
+                              void queueDoc(cat, file);
                             }}
                           />
                         </label>

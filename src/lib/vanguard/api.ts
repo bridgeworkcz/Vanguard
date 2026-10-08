@@ -397,18 +397,20 @@ export const listAgentBook = createServerFn({ method: "GET" })
     }));
     return {
       code: person.userId,
+      locked: true,
       email: person.email,
       rate,
       month: kyivMonth(),
       commission: monthCommission(cases, rate),
       cases: cases.map((app) => ({
         id: app.id,
-        name: clientName(parseQuestionnaire(app.questionnaire)) || "—",
         country: app.country,
-        citizenship: app.citizenship,
         status: app.status,
         stage: app.stage,
+        total: Number(app.totalCost),
         createdAt: app.createdAt,
+        pay: app.stage >= 3 ? "paid" : app.stage >= 2 ? "due" : "wait",
+        commission: app.stage < 2 ? "wait" : "due",
       })),
     };
   });
@@ -1202,6 +1204,30 @@ export const adminDeleteAccount = createServerFn({ method: "POST" })
     if (target[0]?.role === "ADMIN" && Number(admins[0]?.c ?? 0) < 1) throw new Error("Last admin");
     await sql`delete from profiles where user_id = ${data.userId}`;
     await audit(sql, context.userId, "ACCOUNT_DELETE", data.userId, "");
+  });
+
+export const adminRestoreAccount = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string }) => ({ userId: clean(input?.userId, 80) }))
+  .handler(async ({ context, data }) => {
+    if (!sheetsOn()) throw new Error("Unavailable");
+    await (await import("./sheet-backend")).adminRestoreAccount(context.userId, data.userId);
+  });
+
+export const adminMarkCommission = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; paid: boolean }) => ({ id: clean(input?.id, 40), paid: Boolean(input?.paid) }))
+  .handler(async ({ context, data }) => {
+    if (!sheetsOn()) throw new Error("Unavailable");
+    return (await import("./sheet-backend")).adminMarkCommission(context.userId, data);
+  });
+
+export const agentRename = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { code: string }) => ({ code: clean(input?.code, 40) }))
+  .handler(async ({ context, data }) => {
+    if (!sheetsOn()) throw new Error("Unavailable");
+    return (await import("./sheet-backend")).agentRename(context.userId, data.code);
   });
 
 export const adminSetReferrer = createServerFn({ method: "POST" })

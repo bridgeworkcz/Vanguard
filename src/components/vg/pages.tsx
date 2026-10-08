@@ -1,8 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { listPublicFilings } from "@/lib/vanguard/api";
+import { listAgentBook, listPublicFilings } from "@/lib/vanguard/api";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
-import { Shell } from "./chrome";
+import { Shell, useDesk } from "./chrome";
 
 function Article({ kicker, title, children }: { kicker: string; title: string; children: ReactNode }) {
   return (
@@ -19,6 +19,9 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
 export function QuestionsPage() {
   const { t } = useI18n();
   const [find, setFind] = useState("");
+  useEffect(() => {
+    setFind(window.localStorage.getItem("vg-faq") || "");
+  }, []);
   const needle = find.trim().toLowerCase();
   const steps: [string, string][] = [
     [t("process_1t"), t("process_1b")],
@@ -77,7 +80,7 @@ export function QuestionsPage() {
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
-      <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => setFind(e.target.value)} />
+      <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => { setFind(e.target.value); window.localStorage.setItem("vg-faq", e.target.value); }} />
       {empty ? <p className="text-mist">{t("faq_none")}</p> : null}
       {pathHit ? (
         <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
@@ -151,6 +154,15 @@ export function QuestionsPage() {
 
 export function AgentsPage() {
   const { t } = useI18n();
+  const { signedIn } = useDesk();
+  useEffect(() => {
+    if (!signedIn) return;
+    void listAgentBook()
+      .then((book) => {
+        if (book.code) sessionStorage.setItem("vg-agent", book.code);
+      })
+      .catch(() => undefined);
+  }, [signedIn]);
   return (
     <Article kicker={t("agents_kicker")} title={t("agents_title")}>
       <p>{t("agents_body")}</p>
@@ -162,8 +174,11 @@ export function AgentsPage() {
         ))}
       </ul>
       <p className="text-sm text-mist">www.vanguardmobility.site/r/your-code</p>
-      <p>
-        <Link to="/contact" className="btn-solid">
+      <p className="flex flex-wrap gap-3">
+        <Link to="/" hash="calc" className="btn-solid">
+          {t("calc_title")}
+        </Link>
+        <Link to="/contact" className="btn">
           {t("agents_write")}
         </Link>
       </p>

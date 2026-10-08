@@ -9,6 +9,8 @@ import {
   adminDeleteMedia,
   adminDeletePartner,
   adminDeleteAccount,
+  adminRestoreAccount,
+  adminMarkCommission,
   adminDeleteTeam,
   adminDeleteVacancy,
   adminGetApplication,
@@ -163,7 +165,12 @@ function CaseFiles({
               <button
                 type="button"
                 className="btn"
-                onClick={() => void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason: docReason } }).then(onChanged)}
+                onClick={() => {
+                  const code = docReason.split("|")[0] || "other";
+                  const extra = docReason.split("|").slice(1).join("|");
+                  const reason = ["blur", "name", "page", "other"].includes(code) ? `${code}|${extra}` : `other|${docReason}`;
+                  void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason } }).then(onChanged);
+                }}
               >
                 {t("admin_doc_no")}
               </button>
@@ -171,7 +178,19 @@ function CaseFiles({
           </li>
         ))}
       </ul>
-      <input className="field mt-3" placeholder={t("admin_reason")} value={docReason} onChange={(e) => onReason(e.target.value)} />
+      <div className="mt-3 grid max-w-md gap-2">
+        <select
+          className="field"
+          value={(docReason.split("|")[0] || "other")}
+          onChange={(e) => onReason(`${e.target.value}|${docReason.split("|").slice(1).join("|")}`)}
+        >
+          <option value="blur">{t("reject_blur")}</option>
+          <option value="name">{t("reject_name")}</option>
+          <option value="page">{t("reject_page")}</option>
+          <option value="other">{t("reject_other")}</option>
+        </select>
+        <input className="field" placeholder={t("reject_line")} value={docReason.includes("|") ? docReason.split("|").slice(1).join("|") : docReason} onChange={(e) => onReason(`${docReason.split("|")[0] || "other"}|${e.target.value}`)} />
+      </div>
       {fileErr ? <p className="mt-2 text-sm text-metal">{fileErr}</p> : null}
       {viewer ? (
         <DocScreen
@@ -342,11 +361,27 @@ function PhotoPick({ label, onFile }: { label: string; onFile: (file: File) => v
 
 function phoneOf(raw: string) {
   try {
-    const q = JSON.parse(raw || "{}") as { phone?: string };
+    const q = JSON.parse(raw) as { phone?: string };
     return q.phone || "";
   } catch {
     return "";
   }
+}
+
+function lastNameOf(raw: string) {
+  try {
+    const q = JSON.parse(raw) as { lastName?: string };
+    return q.lastName || "";
+  } catch {
+    return "";
+  }
+}
+
+function moneyHanging(app: AppRow) {
+  if (app.status !== "OPEN") return false;
+  const stamp = app.stage === 2 ? app.stage2At : app.stage === 4 ? app.stage4At : "";
+  if (!stamp) return false;
+  return Date.now() - Date.parse(stamp) > 48 * 3600 * 1000;
 }
 
 function photoError(err: unknown, t: (key: CopyKey) => string) {
@@ -395,6 +430,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [stageNote, setStageNote] = useState("");
   const [caseQuery, setCaseQuery] = useState("");
   const [casePage, setCasePage] = useState(1);
+  const [hangOnly, setHangOnly] = useState(false);
+  const [rejectCode, setRejectCode] = useState("other");
 
   async function acceptCase(caseId: string) {
     setErr("");
@@ -485,7 +522,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
     setErr("");
     setStageNote("");
     try {
-      const result = await adminSetStage({ data: { id: detail.app.id, action, reason } });
+      const result = await adminSetStage({ data: { id: detail.app.id, action, reason: action === "reject" ? `${rejectCode}|${reason}` : reason } });
       const moved = Number(result?.stage) || 0;
       const d = await adminGetApplication({ data: detail.app.id });
       if (moved > d.app.stage && d.app.status === "OPEN") d.app.stage = moved;
@@ -543,6 +580,21 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <p className="text-sm text-mist">{t("funnel_apply")}: {overview.funnel.apply}</p>
                 <p className="text-sm text-mist">{t("funnel_q")}: {overview.funnel.question}</p>
               </article>
+            ) : null}
+            {"closed" in overview && overview.closed?.length ? (
+              <div className="sm:col-span-3">
+                <h2 className="mt-6 text-lg">{t("account_closed")}</h2>
+                <ul className="mt-2 grid gap-2">
+                  {overview.closed.map((row) => (
+                    <li key={row.userId} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span>{row.email || row.fullName}</span>
+                      <button type="button" className="btn" onClick={() => void adminRestoreAccount({ data: { userId: row.userId } }).then(() => adminOverview().then(setOverview))}>
+                        {t("account_restore")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
             {isAdmin ? (
               <div className="sm:col-span-3">
@@ -625,6 +677,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} />
                 {t("mine_only")}
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={hangOnly} onChange={(e) => setHangOnly(e.target.checked)} />
+                {t("hang_money")}
               </label>
               <button
                 type="button"
@@ -711,12 +767,29 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
                 .filter((a) => !unassignedOnly || !a.assignedManagerId)
                 .filter((a) => !mineOnly || a.assignedManagerId === me)
-                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)}`.toLowerCase().includes(caseQuery.trim().toLowerCase()));
+                .filter((a) => !hangOnly || (a.stage === 2 && moneyHanging(a)))
+                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)} ${lastNameOf(a.questionnaire)}`.toLowerCase().includes(caseQuery.trim().toLowerCase()));
               const pages = Math.max(1, Math.ceil(filtered.length / 15));
               const currentPage = Math.min(casePage, pages);
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
+              const phones = new Map<string, number>();
+              for (const row of apps) {
+                const digits = (row.clientPhone || phoneOf(row.questionnaire)).replace(/\D/g, "");
+                if (digits.length >= 8) phones.set(digits, (phones.get(digits) || 0) + 1);
+              }
+              const hanging = apps.filter((row) => moneyHanging(row));
               return (
                 <>
+                  {hanging.length ? (
+                    <div className="grid gap-2">
+                      <p className="text-sm text-mist">{t("hang_list")}</p>
+                      {hanging.map((row) => (
+                        <button key={row.id} type="button" className="btn w-fit" onClick={() => go("applications", row.id)}>
+                          {row.id} · {row.country} · {row.stage}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="sheet-wrap min-w-0 max-w-full">
                     <table className="sheet w-full text-left text-sm md:min-w-[880px]">
                       <thead className="text-mist">
@@ -734,8 +807,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {slice.map((a) => (
-                          <tr key={a.id} className="border-t border-white/10">
+                        {slice.map((a) => {
+                          const digits = (a.clientPhone || phoneOf(a.questionnaire)).replace(/\D/g, "");
+                          const twin = digits.length >= 8 && (phones.get(digits) || 0) > 1;
+                          return (
+                          <tr key={a.id} className={twin ? "border-t border-[#ff6a1a] bg-[#ff6a1a]/10" : "border-t border-white/10"}>
                             <td className="py-3" data-label="">
                               <input
                                 type="checkbox"
@@ -751,6 +827,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                             <td className="latin" data-label={t("filings_date")}>{a.createdAt?.slice(0, 10)}</td>
                             <td className="latin" data-label={t("name")}>
                               {a.clientEmail || "—"}
+                              {lastNameOf(a.questionnaire) ? <span className="mt-1 block text-xs text-mist">{lastNameOf(a.questionnaire)}</span> : null}
+                              {twin ? <span className="mt-1 block text-xs">{t("phone_same")}</span> : null}
                               {a.accountClosed ? <span className="mt-1 block text-xs text-mist">{t("account_closed")}</span> : null}
                             </td>
                             <td data-label={t("admin_country")}>{a.country}</td>
@@ -780,7 +858,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -813,6 +892,33 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                           ? t("admin_block_doc")
                           : t("admin_block_ok")}
                 </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
+                    <button type="button" className="btn-solid" onClick={() => void act("accept")}>{t("admin_accept")}</button>
+                  ) : null}
+                  {detail.app.status === "OPEN" ? (
+                    <button type="button" className="btn" onClick={() => void act("reject")}>{t("admin_reject")}</button>
+                  ) : null}
+                  <button type="button" className="btn" onClick={() => document.getElementById("case-note")?.scrollIntoView({ block: "center" })}>{t("case_write")}</button>
+                  {detail.app.referrerUserId ? (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void adminMarkCommission({ data: { id: detail.app.id, paid: true } }).then(() => setStageNote(t("agent_pay_paid")))}
+                    >
+                      {t("agent_comm")} · {t("agent_pay_paid")}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-3 grid max-w-md gap-2">
+                  <select className="field" value={rejectCode} onChange={(e) => setRejectCode(e.target.value)}>
+                    <option value="blur">{t("reject_blur")}</option>
+                    <option value="name">{t("reject_name")}</option>
+                    <option value="page">{t("reject_page")}</option>
+                    <option value="other">{t("reject_other")}</option>
+                  </select>
+                  <input className="field" placeholder={t("reject_line")} value={reason} onChange={(e) => setReason(e.target.value)} />
+                </div>
                 <CaseFiles
                   appId={detail.app.id}
                   documents={detail.documents}
@@ -934,6 +1040,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                   </button>
                 </label>
                 <form
+                  id="case-note"
                   className="mt-4 flex min-w-0 flex-wrap gap-2"
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -1025,6 +1132,20 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {t("active")}
                     </label>
                     <button type="button" className="btn" onClick={() => setDraft(v)}>{t("edit")}</button>
+                    <button type="button" className="btn" onClick={() => setDraft({ ...v, id: "" })}>{t("copy_vac")}</button>
+                    <label className="grid gap-1 text-xs text-mist">
+                      {t("hide_until")}
+                      <input
+                        className="field"
+                        type="date"
+                        onChange={(e) => {
+                          if (!e.target.value) return;
+                          void adminSaveVacancy({
+                            data: { ...v, active: false, pauseUntil: new Date(`${e.target.value}T23:59:59`).toISOString() },
+                          }).then(reload);
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="btn"
@@ -1073,9 +1194,16 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         {current === "pricing" && staff && data ? (
           <ul className="mt-8 grid gap-4">
             <p className="text-sm text-mist">{t("admin_live_note")}</p>
-            {data.products.map((p) => (
-              <PriceRow key={p.id} product={p} readOnly={!isAdmin} onSaved={reload} />
-            ))}
+            {data.products.map((p) => {
+              let log: { at: string; by: string; amount: string } | undefined;
+              try {
+                const book = JSON.parse(data.settings.price_log || "{}") as Record<string, { at: string; by: string; amount: string }>;
+                log = book[p.id];
+              } catch {
+                log = undefined;
+              }
+              return <PriceRow key={p.id} product={p} readOnly={!isAdmin} onSaved={reload} log={log} />;
+            })}
           </ul>
         ) : null}
 
@@ -1125,9 +1253,18 @@ function VacancyForm({
     blockedCitizenships: "",
   });
   useEffect(() => {
-    if (initial.id) setV({ ...v, ...initial, quota: Number(initial.quota ?? v.quota) });
+    if (!initial.id && !initial.title) return;
+    setV((cur) => ({
+      ...cur,
+      ...initial,
+      id: initial.id || "",
+      quota: Number(initial.quota ?? cur.quota),
+      country: initial.country || cur.country,
+      visaProductId: initial.visaProductId || cur.visaProductId,
+      active: initial.active ?? cur.active,
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial.id]);
+  }, [initial.id, initial.title, initial.visaProductId, initial.country]);
   return (
     <form
       className="glass grid gap-2 p-4 md:grid-cols-2"
@@ -1323,6 +1460,7 @@ function ContentEditor({
     { key: "telegram_owner_chat", label: "admin_field_tg_owner" },
     { key: "telegram_staff_chat", label: "admin_field_tg_staff" },
     { key: "subagent_rate", label: "admin_field_rate" },
+    { key: "desk_hours", label: "hours_field" },
     { key: "review_1_name", label: "name" },
     { key: "review_1_country", label: "admin_country" },
     { key: "review_1_date", label: "filings_date" },
@@ -1422,6 +1560,11 @@ function ContentEditor({
             .catch(() => setSaveNote(t("admin_unsaved")));
         }}
       >
+        {[1, 2].some((n) => {
+          const bits = ["name", "country", "date", "text"].map((key) => (settings[`review_${n}_${key}`] || "").trim());
+          const filled = bits.filter(Boolean).length;
+          return filled > 0 && filled < 4;
+        }) ? <p className="text-sm text-metal">{t("review_need")}</p> : null}
         {fields.map((field) => (
           <label key={field.key} className="grid gap-1 text-sm text-mist">
             {t(field.label)}
@@ -1632,7 +1775,7 @@ function WorkplacePhotos({ vacancyId, readOnly }: { vacancyId: string; readOnly:
   );
 }
 
-function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOnly: boolean; onSaved: () => void }) {
+function PriceRow({ product, readOnly, onSaved, log }: { product: VisaProduct; readOnly: boolean; onSaved: () => void; log?: { at: string; by: string; amount: string } }) {
   const t = useAdminT();
   const [p, setP] = useState(product);
   useEffect(() => setP(product), [product.id, product.basePrice, product.active]);
@@ -1668,6 +1811,8 @@ function PriceRow({ product, readOnly, onSaved }: { product: VisaProduct; readOn
           {t("save")}
         </button>
       )}
+      <p className="text-sm text-mist md:col-span-4">{t("price_kept")}</p>
+      {log ? <p className="text-xs text-mist md:col-span-4">{t("price_who")}: {log.at.slice(0, 16)} · {log.amount} · {log.by}</p> : null}
     </li>
   );
 }
