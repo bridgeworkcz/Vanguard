@@ -191,4 +191,11 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   admin_legacy_cap: "Справи, відкриті до 16 вересня 2026, не йдуть далі за момент, коли відкривається інвойс 2.",
   admin_delete_case: "Видалити справу",
   admin_delete_case_ask: "Видалити лише цю справу? Акаунт залишиться.",
+  admin_filters: "Фільтр",
+  admin_export_picked: "Вивантажити позначені",
+  admin_delete_picked: "Видалити позначені",
+  admin_delete_picked_ask: "Видалити лише позначені справи? Акаунти залишаться.",
+  hang_days: "днів",
+  door_field: "Як знайти двері",
+  search_quota_help: "Вільні місця на цей дозвіл, не розмір фірми.",
 };

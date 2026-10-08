@@ -50,10 +50,11 @@ export function HomePage() {
   const [speed, setSpeed] = useState<Processing | "">("");
   const [msg, setMsg] = useState("");
   const [restored, setRestored] = useState(false);
+  const [countryOpen, setCountryOpen] = useState(false);
   const [agentNote, setAgentNote] = useState(false);
   useEffect(() => {
     setAgentNote(Boolean(sessionStorage.getItem("vg-agent")));
-    const raw = window.localStorage.getItem("vg-last-calc");
+    const raw = window.sessionStorage.getItem("vg-last-calc");
     if (!raw) return;
     try {
       const saved = JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" };
@@ -63,12 +64,12 @@ export function HomePage() {
       setSpeed(saved.speed || "");
       if (saved.citizenship && saved.country && saved.productId && saved.speed) setRestored(true);
     } catch {
-      /* ignore a broken local note */
+      /* ignore a broken note from this session */
     }
   }, []);
   useEffect(() => {
     if (!citizenship && !country && !productId && !speed) return;
-    window.localStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId, speed }));
+    window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId, speed }));
     if (citizenship || country) sessionStorage.setItem("vg-route", [citizenship, country].filter(Boolean).join(" → "));
   }, [citizenship, country, productId, speed]);
   useEffect(() => {
@@ -108,7 +109,7 @@ export function HomePage() {
       setMsg(t("calc_speed_unavailable"));
       return;
     }
-    window.localStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId: product.id, speed }));
+    window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId: product.id, speed }));
     void navigate({
       to: "/search",
       search: { citizenship, country, product: product.id, speed },
@@ -163,27 +164,30 @@ export function HomePage() {
               </label>
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_country")}
-                <select
-                  className="field min-w-0"
-                  value={country}
-                  onChange={(e) => {
-                    setCountry(e.target.value);
-                    setProductId("");
-                    setSpeed("");
-                  }}
-                >
-                  <option value="">{t("calc_pick")}</option>
-                  {countries.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-                {country ? (
-                  <span className="mt-1 inline-flex items-center gap-2 text-xs text-mist">
-                    <MiniFlag country={country} />
-                    <Link to="/country/$code" params={{ code: countrySlug(country) }} className="underline-offset-4 hover:underline">
-                      {t("country_openings")}
-                    </Link>
-                  </span>
+                <button type="button" className="field flex min-h-11 items-center gap-2 text-left" onClick={() => setCountryOpen((open) => !open)}>
+                  {country ? <MiniFlag country={country} /> : null}
+                  <span>{country || t("calc_pick")}</span>
+                </button>
+                {countryOpen ? (
+                  <ul className="max-h-60 overflow-auto border border-white/15 bg-[#101114]">
+                    {countries.map((c) => (
+                      <li key={c}>
+                        <button
+                          type="button"
+                          className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm text-paper"
+                          onClick={() => {
+                            setCountry(c);
+                            setProductId("");
+                            setSpeed("");
+                            setCountryOpen(false);
+                          }}
+                        >
+                          <MiniFlag country={c} />
+                          {c}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
               </label>
               <label className="grid gap-1 text-sm text-mist">
@@ -216,42 +220,64 @@ export function HomePage() {
                   ))}
                 </select>
               </label>
-              <p className="display ember min-h-16 text-5xl md:col-span-2">
-                {product && speed ? (
-                  <>
-                    {priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
-                  </>
-                ) : Number.isFinite(fromPrice) ? (
-                  <>
-                    {t("fee_from")} {fromPrice} <span className="text-2xl text-mist">EUR</span>
-                  </>
-                ) : (
-                  <span className="text-lg text-mist">{t("calc_hold")}</span>
-                )}
-              </p>
               {msg ? <p className="text-sm text-metal">{msg}</p> : null}
               {error ? <p className="text-sm text-metal">{error}</p> : null}
-              <button className="btn-solid" type="submit" disabled={!data}>
-                {data ? t("calc_search") : t("loading")}
-              </button>
+              <article className="glass p-4 md:col-span-2">
+                <h2 className="display text-2xl">{t("fee_includes_t")}</h2>
+                <p className="mt-2 text-sm leading-relaxed text-mist">{t("fee_includes_b")}</p>
+              </article>
+              <article className="md:col-span-2">
+                <h2 className="display text-2xl">{t("speed_table_t")}</h2>
+                <table className="mt-3 w-full table-fixed text-left text-sm">
+                  <thead className="text-mist">
+                    <tr>
+                      <th className="w-[34%] py-1 font-medium">{t("speed_col_pace")}</th>
+                      <th className="w-[33%] py-1 font-medium">{t("speed_col_weeks")}</th>
+                      <th className="py-1 font-medium">{t("speed_col_fee")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(["STANDARD", "PRIORITY", "EXPRESS"] as const)
+                      .filter((pace) => !product || product.allowedProcessing.includes(pace))
+                      .map((pace) => (
+                        <tr key={pace} className="border-t border-white/10 align-top">
+                          <td className="py-2 pr-2">{t(`speed_${pace}`)}</td>
+                          <td className="py-2 pr-2">
+                            {product
+                              ? `${productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, pace)} ${t("weeks")}`
+                              : t(`speed_weeks_${pace}` as "speed_weeks_STANDARD")}
+                          </td>
+                          <td className="py-2">
+                            {product ? `${priceFor(product.basePrice, pace)} EUR` : t(`speed_fee_${pace}` as "speed_fee_STANDARD")}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </article>
+              <div className="grid gap-3 border-t border-white/10 py-3 md:sticky md:bottom-0 md:z-20 md:col-span-2 md:bg-[#090909]/95">
+                <p className="display ember min-h-14 text-5xl">
+                  {product && speed ? (
+                    <>
+                      {priceFor(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
+                    </>
+                  ) : Number.isFinite(fromPrice) ? (
+                    <>
+                      {t("fee_from")} {fromPrice} <span className="text-2xl text-mist">EUR</span>
+                    </>
+                  ) : (
+                    <span className="text-lg text-mist">{t("calc_hold")}</span>
+                  )}
+                </p>
+                <button className="btn-solid" type="submit" disabled={!data}>
+                  {data ? t("calc_search") : t("loading")}
+                </button>
+              </div>
             </div>
           </form>
         </div>
       </section>
-      <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 md:grid-cols-2">
-        <article className="glass p-5">
-          <h2 className="display text-3xl">{t("fee_includes_t")}</h2>
-          <p className="mt-3 text-sm leading-relaxed text-mist">{t("fee_includes_b")}</p>
-        </article>
-        <article className="glass p-5">
-          <h2 className="display text-3xl">{t("speed_table_t")}</h2>
-          <ul className="mt-3 grid gap-2 text-sm text-mist">
-            <li>{t("speed_row_standard")}</li>
-            <li>{t("speed_row_priority")}</li>
-            <li>{t("speed_row_express")}</li>
-          </ul>
-        </article>
-      </section>
+      <StepRail />
       <section className="banner-row">
         <article className="banner banner-orange">
           <span>01</span>
@@ -267,7 +293,6 @@ export function HomePage() {
         </article>
       </section>
       <CountLine />
-      <StepRail />
     </Shell>
   );
 }
@@ -378,25 +403,45 @@ export function SearchPage({
               ) : null}
             </div>
             {compared.length === 2 ? (
-              <div className="mt-8">
+              <div className="mt-8 overflow-x-auto">
                 <h2 className="display text-3xl">{t("compare_title")}</h2>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  {compared.map((job) => (
-                    <article key={job.id} className="glass p-5">
-                      <h3 className="display text-2xl">{job.title}</h3>
-                      <p className="mt-1 text-sm text-mist">{job.employer}</p>
-                      <dl className="mt-4 grid gap-2 text-sm">
-                        <div><dt className="text-mist">{t("field_salary")}</dt><dd>{job.salaryNet}</dd></div>
-                        <div><dt className="text-mist">{t("field_hours")}</dt><dd>{job.workingHours}</dd></div>
-                        <div><dt className="text-mist">{t("field_housing")}</dt><dd>{job.accommodation}</dd></div>
-                      </dl>
-                    </article>
-                  ))}
-                </div>
+                <table className="mt-4 w-full min-w-[520px] text-left text-sm">
+                  <thead className="text-mist">
+                    <tr>
+                      <th className="py-2 font-medium" />
+                      {compared.map((job) => (
+                        <th key={job.id} className="py-2 font-medium">{job.title}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      [
+                        [t("field_salary"), (job: (typeof compared)[number]) => job.salaryNet],
+                        [t("field_hours"), (job: (typeof compared)[number]) => job.workingHours],
+                        [t("field_housing"), (job: (typeof compared)[number]) => job.accommodation],
+                        [t("search_quota"), (job: (typeof compared)[number]) => String(job.quota)],
+                      ] as const
+                    ).map(([label, read]) => (
+                      <tr key={label} className="border-t border-white/10">
+                        <th className="py-2 pr-3 font-medium text-mist">{label}</th>
+                        {compared.map((job) => (
+                          <td key={job.id} className="py-2">{read(job)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : null}
             <div className="mt-8 grid gap-4">
-              {shown.length === 0 ? <p className="text-mist">{t("search_empty")}</p> : null}
+              {shown.length === 0 ? (
+                <div className="grid gap-2">
+                  <p className="text-mist">{t("search_empty")}</p>
+                  {jobs.length === 0 ? <Link to="/" className="btn w-fit">{t("search_empty_next")}</Link> : null}
+                </div>
+              ) : null}
+              {full.length ? <h2 className="display text-3xl">{t("search_queue")}</h2> : null}
               {full.map((job) => (
                 <div key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
@@ -447,6 +492,7 @@ export function SearchPage({
                     ))}
                 </div>
               ) : null}
+              {shown.length ? <h2 className="display text-3xl">{t("search_open")}</h2> : null}
               {shown.map((job) => (
                 <article key={job.id} className="glass grid gap-3 p-5 md:grid-cols-4">
                   <div className="md:col-span-2">
@@ -464,11 +510,13 @@ export function SearchPage({
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
                   <p className="text-sm text-paper">
-                    {job.salaryNet}
-                    {payLine(job.salaryNet) ? <span className="mt-1 block text-mist">{payLine(job.salaryNet)}</span> : <span className="mt-1 block text-xs text-mist">{t("pay_check")}</span>}
+                    <span className="block">{job.salaryNet}</span>
+                    <span className="mt-1 block text-mist">{job.accommodation}</span>
+                    {payLine(job.salaryNet) ? <span className="mt-1 block text-xs text-mist">{payLine(job.salaryNet)}</span> : null}
                   </p>
                   <p className="text-sm text-metal">
                     {job.quota} {t("search_quota")}
+                    <span className="mt-1 block text-xs text-mist">{t("search_quota_help")}</span>
                   </p>
                 </article>
               ))}
@@ -532,7 +580,7 @@ export function VacancyPage({
   }
   return (
     <Shell>
-      <article className="mx-auto max-w-3xl px-4 py-12">
+      <article className="mx-auto max-w-3xl px-4 py-12 pb-28 md:pb-12">
         <button type="button" className="text-sm text-mist" onClick={() => history.back()}>
           {t("search_back")}
         </button>
@@ -547,7 +595,6 @@ export function VacancyPage({
             [t("field_salary"), job.salaryNet],
             [t("field_hours"), job.workingHours],
             [t("field_housing"), job.accommodation],
-            [t("field_requirements"), job.requirements],
             [t("permit"), `${visa.name}, ${visa.duration}`],
             [t("fee"), visa && pace ? `${priceFor(visa.basePrice, pace)} EUR` : ""],
           ].map(([k, v]) => (
@@ -557,6 +604,20 @@ export function VacancyPage({
             </div>
           ))}
         </dl>
+        {job.requirements ? (
+          <div className="mt-8">
+            <h2 className="text-xs uppercase tracking-widest text-mist">{t("field_requirements")}</h2>
+            <ul className="mt-3 grid gap-2 text-sm">
+              {job.requirements
+                .split(/\n+|(?<=\.)\s+/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line) => (
+                  <li key={line} className="border-t border-white/10 pt-2">{line}</li>
+                ))}
+            </ul>
+          </div>
+        ) : null}
         {err ? <p className="mt-4 text-sm text-metal">{err}</p> : null}
         <label className="mt-6 grid max-w-sm gap-1 text-sm text-mist">
           {t("agent_code")}
@@ -570,7 +631,7 @@ export function VacancyPage({
           />
         </label>
         {!signedIn ? <p className="mt-4 text-sm text-mist">{t("need_account")}</p> : null}
-        <div className="fixed inset-x-0 bottom-16 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
           <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizenship} onClick={() => void apply()}>
             {busy ? t("applying") : t("search_apply")}
           </button>
@@ -602,6 +663,16 @@ export function AboutPage() {
       <article className="mx-auto max-w-3xl px-4 py-16">
         <p className="kicker">{t("nav_about")}</p>
         <h1 className="display mt-4 text-5xl sm:text-6xl">{lead}</h1>
+        <div className="mt-6 border border-white/15 p-4 text-sm">
+          <p>{s.legal_address}</p>
+          <p className="mt-2 text-mist">{s.desk_hours || t("desk_hours")}</p>
+          <p className="mt-2">{s.legal_entity}</p>
+          <p className="mt-1 text-mist">{t("legal_id")} {s.registration_number}</p>
+        </div>
+        <div className="mt-6">
+          <h2 className="display text-3xl">{t("about_license")}</h2>
+          <LicenseWall items={licenses} />
+        </div>
         <div className="mt-8 space-y-4 text-base leading-relaxed whitespace-pre-line">{story}</div>
       </article>
       <section className="banner banner-orange">
@@ -738,7 +809,7 @@ export function AboutPage() {
                     aria-expanded={open}
                     onClick={() => setOpenCountry(open ? null : c)}
                   >
-                    <span>{c}</span>
+                    <span className="inline-flex items-center gap-2">{c ? <MiniFlag country={c} /> : null}{c}</span>
                     <span className="text-[11px] tracking-[0.14em] text-mist uppercase">{open ? "–" : "+"} {list.length}</span>
                   </button>
                   {open ? (
@@ -764,14 +835,20 @@ export function ContactPage() {
   const { t } = useI18n();
   const { data } = useSite();
   const s = data?.settings;
+  const [caseNote, setCaseNote] = useState("");
+  useEffect(() => {
+    const id = window.sessionStorage.getItem("vg-case") || "";
+    setCaseNote(id ? `${id}.` : "");
+  }, []);
   return (
     <Shell>
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2">
         <div>
           <p className="kicker">{t("contact_kicker")}</p>
           <h1 className="display mt-4 text-5xl">{t("contact_title")}</h1>
+          <p className="mt-4 text-mist">{s?.desk_hours || t("desk_hours")}</p>
           {s?.support_phone ? (
-            <a className="btn-solid mt-8 inline-flex w-fit" href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
+            <a className="btn-solid mt-8 inline-flex w-fit" href={whatsAppHref(s.support_phone, caseNote)} target="_blank" rel="noopener noreferrer">
               WhatsApp · {s.support_phone}
             </a>
           ) : null}
@@ -780,8 +857,7 @@ export function ContactPage() {
           <div>
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_address")}</dt>
             <dd className="mt-2">{s?.legal_address}</dd>
-            <p className="mt-2 text-sm text-mist">{s?.desk_hours || t("desk_hours")}</p>
-            <p className="mt-2 text-sm">{s?.legal_address}</p>
+            <p className="mt-2 text-sm">{s?.door_hint || t("door_hint")}</p>
             <a
               className="mt-2 inline-block text-sm"
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s?.legal_address || "Rybná 716/24, Praha 1")}`}
@@ -803,7 +879,7 @@ export function ContactPage() {
             <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_phone")}</dt>
             <dd className="mt-2">
               {s?.support_phone ? (
-                <a href={whatsAppHref(s.support_phone)} target="_blank" rel="noopener noreferrer">
+                <a href={whatsAppHref(s.support_phone, caseNote)} target="_blank" rel="noopener noreferrer">
                   {s.support_phone}
                 </a>
               ) : null}
@@ -816,15 +892,6 @@ export function ContactPage() {
               <a href={`mailto:${s?.support_email ?? ""}`}>{s?.support_email}</a>
             </dd>
           </div>
-          {s?.usdt_wallet ? (
-            <div>
-              <dt className="text-xs uppercase tracking-widest text-mist">{t("contact_wallet")}</dt>
-              <dd className="mt-2 break-all">
-                {s.usdt_wallet}
-                {s.usdt_network ? <span className="mt-1 block text-sm text-mist">{s.usdt_network}</span> : null}
-              </dd>
-            </div>
-          ) : null}
         </dl>
       </div>
     </Shell>
@@ -838,11 +905,25 @@ export function CountryPage({ code }: { code: string }) {
   const country = products[0]?.country ?? "";
   const ids = new Set(products.map((item) => item.id));
   const jobs = (data?.vacancies ?? []).filter((item) => item.active && ids.has(item.visaProductId));
+  const blocked = Array.from(
+    new Set(
+      jobs
+        .flatMap((job) => (job.blockedCitizenships || "").split(/[,;\n]/))
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).join(", ");
   return (
     <Shell>
       <article className="mx-auto max-w-5xl px-4 py-14">
         <p className="kicker">{t("country_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
+        {products.length ? (
+          <p className="mt-3 text-sm text-mist">
+            {t("country_fee_range")} {Math.min(...products.map((item) => item.basePrice))}–{Math.max(...products.map((item) => item.basePrice))} EUR
+          </p>
+        ) : null}
+        {blocked ? <p className="mt-3 text-sm text-mist">{t("country_blocked")}: {blocked}</p> : null}
         {country ? <CountryStill country={country} /> : null}
         {products.length === 0 ? <p className="mt-6 text-mist">{t("country_empty")}</p> : null}
         <div className="mt-8 grid gap-4">
@@ -882,14 +963,14 @@ export function CountryPage({ code }: { code: string }) {
           className="btn-solid mt-8 inline-flex items-center"
           onClick={() => {
             if (!country) return;
-            const raw = window.localStorage.getItem("vg-last-calc");
+            const raw = window.sessionStorage.getItem("vg-last-calc");
             let prev: Record<string, string> = {};
             try {
               prev = raw ? (JSON.parse(raw) as Record<string, string>) : {};
             } catch {
               prev = {};
             }
-            window.localStorage.setItem("vg-last-calc", JSON.stringify({ ...prev, country, productId: "", speed: "" }));
+            window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ ...prev, country, productId: "", speed: "" }));
           }}
         >
           {t("country_file")}

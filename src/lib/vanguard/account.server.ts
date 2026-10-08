@@ -109,7 +109,7 @@ export async function runAccountAuth(data: AccountInput) {
     if (phone.replace(/\D/g, "").length < 7) throw new Error("A valid phone number is required.");
     const sameEmail = rows.filter((row) => emailOf(row.email) === email);
     if (sameEmail.some((row) => row.isActive !== "false")) throw new Error("User with this email already exists.");
-    if (sameEmail.length) throw new Error("This email is closed. Ask the desk to open it again.");
+    if (sameEmail.length) throw new Error("This email is closed. Ask the office to open it again.");
     const live = rows.filter((row) => row.isActive !== "false");
     if (live.some((row) => phoneOf(row.phone) === phone)) throw new Error("User with this phone already exists.");
     const hasAdmin = live.some((row) => withOwner(emailOf(row.email), rolesOf(row.roles)).includes("ADMIN"));

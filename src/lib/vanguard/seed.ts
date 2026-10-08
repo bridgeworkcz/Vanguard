@@ -318,7 +318,7 @@ export const OFFICE = [
     id: "MED-FACADE",
     kind: "office",
     title: "Praha 1",
-    caption: "The practice, Staré Město.",
+    caption: "The office, Staré Město.",
     image: "/media/office-facade.jpg",
     sort: 1,
   },
@@ -366,12 +366,18 @@ const SMALL_HIRERS: Record<string, string[]> = {
 
 export function partnerRows(): { id: string; country: string; name: string; sort: number }[] {
   const rows: { id: string; country: string; name: string; sort: number }[] = [];
+  const seen = new Set<string>();
   for (const [country, names] of Object.entries(EMPLOYERS)) {
     const all = [...names, ...(SMALL_HIRERS[country] ?? [])];
-    all.forEach((name, idx) => {
+    let sort = 1;
+    for (const name of all) {
+      const key = `${country}|${name}`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
       const slug = `${country}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 28);
-      rows.push({ id: `PT-${slug}`, country, name, sort: idx + 1 });
-    });
+      rows.push({ id: `PT-${slug}`, country, name, sort });
+      sort += 1;
+    }
   }
   return rows;
 }
@@ -399,8 +405,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
     "Zvolte občanství, zemi, typ povolení a tempo přípravy spisu. Ukážeme honorář a volná místa, která sedí. Rozhoduje ministerstvo. My dodáme úplný spis.",
   hero_body_ur:
     "شہریت، ملک، اجازت نامے کی قسم اور فائل کی رفتار منتخب کریں۔ ہم فیس اور موزوں اسامیاں دکھائیں گے۔ فیصلہ وزارت کرتی ہے۔ ہم فائل مکمل بناتے ہیں۔",
-  about_lead_en: "A Prague practice for people who already know where they are going to work.",
-  about_lead_cs: "Pražská praxe pro lidi, kteří už vědí, kde budou pracovat.",
+  about_lead_en: "A Prague office for people who already know where they are going to work.",
+  about_lead_cs: "Pražská kancelář pro lidi, kteří už vědí, kde budou pracovat.",
   about_lead_ur: "پراگ کا دفتر ان لوگوں کے لیے جو پہلے ہی جانتے ہیں کہ وہ کہاں کام کریں گے۔",
   about_story_en:
     "Vanguard Global Mobility s.r.o. files work permits for clients who have a concrete employer and a concrete country. The work is unglamorous on purpose: identity checked, police clearance in the file, the employer's papers aligned with the permit we actually sell, and a fee split into three parts so nobody is asked for the whole sum on day one.\n\nWe do not promise a visa. Slovakia, Czechia, Germany, Portugal, Bulgaria, Italy, Norway, Serbia, Canada, Hungary, Poland, New Zealand, and Belarus each have their own term and their own speed. Where a faster lane does not exist, we do not invent one.\n\nThe office is in Staré Město. The file is handled by a named person. When the ministry is slow, the case page says so.",
@@ -420,6 +426,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   banner_end: "",
   step_copy: "",
   desk_hours: "",
+  door_hint: "",
   review_1_name: "",
   review_1_country: "",
   review_1_date: "",

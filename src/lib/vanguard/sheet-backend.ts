@@ -940,12 +940,19 @@ function present(app: ReturnType<typeof appFrom>) {
 
 async function ensurePartnerCatalog() {
   const map = await settingMap();
-  if (map.partners_catalog === "3") return;
+  if (map.partners_catalog === "4") return;
   const stored = await readJson<{ id: string; country: string; name: string; sort: number }[]>("partners", []);
-  const have = new Set(stored.map((row) => `${row.country}|${row.name}`.toLowerCase()));
+  const have = new Set<string>();
+  const kept: typeof stored = [];
+  for (const row of stored) {
+    const key = `${row.country}|${row.name}`.toLowerCase();
+    if (have.has(key)) continue;
+    have.add(key);
+    kept.push(row);
+  }
   const missing = partnerRows().filter((row) => !have.has(`${row.country}|${row.name}`.toLowerCase()));
-  if (missing.length) await putSetting("partners", JSON.stringify([...stored, ...missing]), "system");
-  await putSetting("partners_catalog", "3", "system");
+  if (missing.length || kept.length !== stored.length) await putSetting("partners", JSON.stringify([...kept, ...missing]), "system");
+  await putSetting("partners_catalog", "4", "system");
 }
 
 const MEDIA_KINDS = new Set(["office", "license", "country", "vacancy", "logo", "banner"]);
@@ -1481,14 +1488,14 @@ function docNote(lang: string, reason: string): string {
 function stageNote(lang: string, action: string): string {
   const copy: Record<string, Record<string, string>> = {
     en: {
-      accept: "The practice accepted the file. The first 30% is now due in your case.",
+      accept: "The office accepted the file. The first 30% is now due in your case.",
       "confirm-payment": "The first payment is in. Send the papers the case still lists.",
       stage4: "The last 30% is due. After it is paid, the permit can be sent.",
       reject: "The file was declined. You can open it again from your case.",
       cancel: "The file was cancelled. The seat is free.",
     },
     cs: {
-      accept: "Praxe spis přijala. V kauze je splatných prvních 30 %.",
+      accept: "Kancelář spis přijala. V kauze je splatných prvních 30 %.",
       "confirm-payment": "První platba je přijatá. Doplňte doklady, které kauza ještě žádá.",
       stage4: "Splatných je posledních 30 %. Po zaplacení lze povolení odeslat.",
       reject: "Spis byl odmítnut. Z kabinetu ho lze otevřít znovu.",

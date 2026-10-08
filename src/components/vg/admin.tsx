@@ -433,6 +433,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [exportNote, setExportNote] = useState("");
   const [docReason, setDocReason] = useState("");
   const [stageNote, setStageNote] = useState("");
+  const [acting, setActing] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [caseQuery, setCaseQuery] = useState("");
   const [casePage, setCasePage] = useState(1);
   const [hangOnly, setHangOnly] = useState(false);
@@ -533,9 +535,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const isAdmin = role === "ADMIN";
 
   async function act(action: string) {
-    if (!detail) return;
+    if (!detail || acting) return;
     setErr("");
     setStageNote("");
+    setActing(true);
     try {
       const result = await adminSetStage({ data: { id: detail.app.id, action, reason: action === "reject" ? `${rejectCode}|${reason}` : reason } });
       const moved = Number(result?.stage) || 0;
@@ -550,6 +553,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
       const text = stageFail(errorMessage(e), t);
       setStageNote(text);
       setErr(text);
+    } finally {
+      setActing(false);
     }
   }
 
@@ -580,16 +585,18 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
 
         {current === "overview" && overview ? (
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            {[
-              [overview.waiting, t("admin_clients")],
-              [overview.proofs, t("admin_review")],
-              [overview.live, t("admin_live")],
-            ].map(([n, label]) => (
-              <article key={String(label)} className="glass p-5">
-                <p className="display text-5xl">{n}</p>
-                <p className="mt-2 text-mist">{label}</p>
-              </article>
-            ))}
+            <button type="button" className="glass p-5 text-left" onClick={() => { setQStage("1"); setHangOnly(false); setShowAll(true); go("applications"); }}>
+              <p className="display text-5xl">{overview.waiting}</p>
+              <p className="mt-2 text-mist">{t("admin_clients")}</p>
+            </button>
+            <button type="button" className="glass p-5 text-left" onClick={() => { setQStage("2"); setHangOnly(false); setShowAll(true); go("applications"); }}>
+              <p className="display text-5xl">{overview.proofs}</p>
+              <p className="mt-2 text-mist">{t("admin_review")}</p>
+            </button>
+            <button type="button" className="glass p-5 text-left" onClick={() => { setQStage(""); setHangOnly(false); setShowAll(false); go("applications"); }}>
+              <p className="display text-5xl">{overview.live}</p>
+              <p className="mt-2 text-mist">{t("admin_live")}</p>
+            </button>
             {"funnel" in overview && overview.funnel ? (
               <article className="glass p-5 sm:col-span-3">
                 <p className="kicker">{t("funnel_t")}</p>
@@ -697,6 +704,17 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         {current === "applications" && staff ? (
           <div className="mt-8 grid gap-4">
             <>
+            <input
+              className="field max-w-md"
+              placeholder={t("admin_id_search")}
+              value={caseQuery}
+              onChange={(e) => {
+                setCaseQuery(e.target.value);
+                setCasePage(1);
+              }}
+            />
+            <button type="button" className="btn w-fit md:hidden" onClick={() => setFiltersOpen((open) => !open)}>{t("admin_filters")}</button>
+            <div className={`${filtersOpen ? "grid" : "hidden"} gap-2 md:grid`}>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
               {t("admin_show_all")}
@@ -753,16 +771,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 {t("admin_export")}
               </button>
               {exportNote ? <span className="text-sm text-mist">{exportNote}</span> : null}
-              <input
-                className="field max-w-xs"
-                placeholder={t("admin_id_search")}
-                value={caseQuery}
-                onChange={(e) => {
-                  setCaseQuery(e.target.value);
-                  setCasePage(1);
-                }}
-              />
               {role === "MANAGER" ? <p className="text-sm text-mist">{t("admin_only_mine")}</p> : null}
+            </div>
             </div>
             <p className="text-sm text-mist">{t("admin_pick_hint")}</p>
             <div className="flex flex-wrap gap-2">
@@ -775,7 +785,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <button
                 type="button"
                 className="btn"
-                disabled={!managerId || picked.length === 0}
+                disabled={acting || !managerId || picked.length === 0}
                 onClick={() =>
                   void assignManagers({ data: { ids: picked, managerId } })
                     .then(() => adminListApplications({ data: { includeIncomplete: showAll } }).then(setApps))
@@ -783,6 +793,49 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 }
               >
                 {t("admin_assign")} · {picked.length}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={picked.length === 0}
+                onClick={() => {
+                  const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
+                  for (const row of apps.filter((item) => picked.includes(item.id))) {
+                    const phone = row.clientPhone || phoneOf(row.questionnaire);
+                    lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
+                  }
+                  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = "selected-cases.csv";
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                {t("admin_export_picked")} · {picked.length}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={acting || picked.length === 0}
+                onClick={() => {
+                  if (!window.confirm(t("admin_delete_picked_ask"))) return;
+                  setActing(true);
+                  void (async () => {
+                    try {
+                      for (const id of picked) await adminDeleteApplication({ data: id });
+                      setPicked([]);
+                      setApps(await adminListApplications({ data: { includeIncomplete: showAll } }));
+                    } catch {
+                      setErr(t("admin_unsaved"));
+                    } finally {
+                      setActing(false);
+                    }
+                  })();
+                }}
+              >
+                {t("admin_delete_picked")} · {picked.length}
               </button>
             </div>
             <form
@@ -840,6 +893,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {hanging.map((row) => (
                         <button key={row.id} type="button" className="btn w-fit" onClick={() => go("applications", row.id)}>
                           {row.id} · {row.country} · {row.stage}
+                          {row.stage2At ? ` · ${Math.max(0, Math.floor((Date.now() - Date.parse(row.stage2At)) / 86400000))} ${t("hang_days")}` : ""}
                         </button>
                       ))}
                     </div>
@@ -897,7 +951,13 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               {a.stage >= 3 && a.status === "OPEN" ? <span className="mt-1 block text-xs text-mist">{t("admin_waiting_doc")}</span> : null}
                             </td>
                             <td className="latin" data-label={t("portal_paid")}>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
-                            <td className="latin" data-label={t("admin_assign")}>{a.assignedManagerId || "—"}</td>
+                            <td className="latin" data-label={t("admin_assign")}>
+                              {(() => {
+                                const person = overview?.users.find((u) => u.userId === a.assignedManagerId);
+                                const name = person?.fullName || person?.email;
+                                return name ? <span className="text-[#7eb6ff]">{name}</span> : "—";
+                              })()}
+                            </td>
                             <td data-label={t("admin_action")}>
                               {a.status === "OPEN" && a.stage === 1 && a.profileComplete ? (
                                 <button type="button" className="btn" onClick={() => void acceptCase(a.id)}>
@@ -951,10 +1011,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
-                    <button type="button" className="btn-solid" onClick={() => void act("accept")}>{t("admin_accept")}</button>
+                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("accept")}>{t("admin_accept")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
-                    <button type="button" className="btn" onClick={() => void act("reject")}>{t("admin_reject")}</button>
+                    <button type="button" className="btn" disabled={acting} onClick={() => void act("reject")}>{t("admin_reject")}</button>
                   ) : null}
                   <button type="button" className="btn" onClick={() => document.getElementById("case-note")?.scrollIntoView({ block: "center" })}>{t("case_write")}</button>
                   {detail.app.referrerUserId ? (
@@ -1007,11 +1067,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <QuestionnaireBlock raw={detail.app.questionnaire} />
                 <div className="mt-4 flex flex-wrap gap-2">
                   {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
-                    <button type="button" className="btn" onClick={() => void act("accept")}>{t("admin_accept")}</button>
+                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("accept")}>{t("admin_accept")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 2 ? (
                     <>
-                      <button type="button" className="btn" onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
+                      <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
                       <label className="btn relative inline-flex cursor-pointer items-center overflow-hidden">
                         {t("admin_proof_add")}
                         <input
@@ -1040,32 +1100,14 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     </>
                   ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 3 && !openedBeforeInvoice2Rule(detail.app.createdAt) ? (
-                    <button type="button" className="btn" onClick={() => void act("stage4")}>{t("admin_to4")}</button>
+                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("stage4")}>{t("admin_to4")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
-                    <button type="button" className="btn" onClick={() => void act("reject")}>{t("admin_reject")}</button>
+                    <button type="button" className="btn" disabled={acting} onClick={() => void act("reject")}>{t("admin_reject")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
-                    <button type="button" className="btn" onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
+                    <button type="button" className="btn" disabled={acting} onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      if (!detail || !window.confirm(t("admin_delete_case_ask"))) return;
-                      const caseId = detail.app.id;
-                      void adminDeleteApplication({ data: caseId })
-                        .then(async () => {
-                          setDetail(null);
-                          const listed = await adminListApplications({ data: { includeIncomplete: current === "overview" || showAll } });
-                          setApps(listed.filter((row) => row.id !== caseId));
-                          go(current);
-                        })
-                        .catch(() => setStageNote(t("admin_unsaved")));
-                    }}
-                  >
-                    {t("admin_delete_case")}
-                  </button>
                 </div>
                 {openedBeforeInvoice2Rule(detail.app.createdAt) ? <p className="mt-3 text-sm text-mist">{t("admin_legacy_cap")}</p> : null}
                 {stageNote ? <p className="mt-3 text-sm text-metal">{stageNote}</p> : null}
@@ -1148,6 +1190,27 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       </li>
                     ))}
                 </ul>
+                <button
+                  type="button"
+                  className="btn mt-8"
+                  disabled={acting}
+                  onClick={() => {
+                    if (!detail || !window.confirm(t("admin_delete_case_ask"))) return;
+                    const caseId = detail.app.id;
+                    setActing(true);
+                    void adminDeleteApplication({ data: caseId })
+                      .then(async () => {
+                        setDetail(null);
+                        const listed = await adminListApplications({ data: { includeIncomplete: current === "overview" || showAll } });
+                        setApps(listed.filter((row) => row.id !== caseId));
+                        go(current);
+                      })
+                      .catch(() => setStageNote(t("admin_unsaved")))
+                      .finally(() => setActing(false));
+                  }}
+                >
+                  {t("admin_delete_case")}
+                </button>
               </article>
             ) : null}
 
@@ -1545,6 +1608,7 @@ function ContentEditor({
     { key: "telegram_staff_chat", label: "admin_field_tg_staff" },
     { key: "subagent_rate", label: "admin_field_rate" },
     { key: "desk_hours", label: "hours_field" },
+    { key: "door_hint", label: "door_field" },
     { key: "review_1_name", label: "name" },
     { key: "review_1_country", label: "admin_country" },
     { key: "review_1_date", label: "filings_date" },

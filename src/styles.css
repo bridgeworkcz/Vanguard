@@ -277,10 +277,11 @@ html.lang-ur .hero-no,
 html.lang-ur .stage-line { direction: rtl; }
 html.lang-ur .stage-line::before,
 html.lang-ur .stage-line::after { left: auto; right: 4px; }
+html.lang-ur .stage-name,
 html.lang-ur .stage-now-line {
   font-family: "Noto Nastaliq Urdu", var(--font-sans);
   font-weight: 600;
-  line-height: 1.8;
+  line-height: 2.15;
   font-size: 1.15rem;
 }
 .shot {

@@ -10,7 +10,7 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Vanguard Global Mobility" },
-      { name: "description", content: "Work-permit filings from a Prague practice. The fee is fixed before you choose an opening." },
+      { name: "description", content: "Work-permit filings from a Prague office. The fee is fixed before you choose an opening." },
       { name: "theme-color", content: "#070809" },
     ],
     links: [

@@ -80,24 +80,21 @@ export function QuestionsPage() {
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
+      <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
+        <h2 className="display text-3xl">{t("process_title")}</h2>
+        <ol className="grid gap-4">
+          {steps.map(([title, body], index) => (
+            <li key={title} className="glass p-5">
+              <p className="text-sm text-mist">0{index + 1}</p>
+              <h3 className="display mt-1 text-3xl">{title}</h3>
+              <p className="mt-2 text-mist">{body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
       <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => { setFind(e.target.value); window.localStorage.setItem("vg-faq", e.target.value); }} />
-      {empty ? <p className="text-mist">{t("faq_none")}</p> : null}
-      {pathHit ? (
-        <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
-          <h2 className="display text-3xl">{t("process_title")}</h2>
-          <ol className="grid gap-4">
-            {steps.map(([title, body], index) => (
-              <li key={title} className="glass p-5">
-                <p className="text-sm text-mist">0{index + 1}</p>
-                <h3 className="display mt-1 text-3xl">{title}</h3>
-                <p className="mt-2 text-mist">{body}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
-      {papersHit ? (
-        <section id="papers" className="scroll-mt-32 grid gap-3 border-t border-white/10 pt-8">
+      {groups.length === 0 && needle ? <p className="text-mist">{t("faq_none")}</p> : null}
+      <section id="papers" className="scroll-mt-32 grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("papers_title")}</h2>
           <p className="text-mist">{t("papers_intro")}</p>
           <ul className="grid gap-3">
@@ -108,9 +105,7 @@ export function QuestionsPage() {
             ))}
           </ul>
         </section>
-      ) : null}
-      {!needle || `${t("sample_case_t")} ${t("sample_case_b")}`.toLowerCase().includes(needle) ? (
-        <section id="case" className="grid gap-3 border-t border-white/10 pt-8">
+      <section id="case" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("sample_case_t")}</h2>
           <p className="text-mist">{t("sample_case_b")}</p>
           <ol className="grid gap-2 text-sm">
@@ -119,16 +114,12 @@ export function QuestionsPage() {
             ))}
           </ol>
         </section>
-      ) : null}
-      {!needle || `${t("family_t")} ${t("family_can")} ${t("family_cant")}`.toLowerCase().includes(needle) ? (
-        <section id="family" className="grid gap-3 border-t border-white/10 pt-8">
+      <section id="family" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("family_t")}</h2>
           <p>{t("family_can")}</p>
           <p className="text-mist">{t("family_cant")}</p>
         </section>
-      ) : null}
-      {!needle || t("share_cards").toLowerCase().includes(needle) ? (
-        <section id="cards" className="grid gap-3 border-t border-white/10 pt-8">
+      <section id="cards" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("share_cards")}</h2>
           <ul className="grid gap-3">
             <li className="glass p-4"><p className="text-sm text-mist">01</p><h3 className="display text-2xl">{t("card_steps")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
@@ -136,7 +127,6 @@ export function QuestionsPage() {
             <li className="glass p-4"><p className="text-sm text-mist">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist">www.vanguardmobility.site/#calc</p></li>
           </ul>
         </section>
-      ) : null}
       {groups.map((group) => (
         <section key={group.title} className="grid gap-5 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{group.title}</h2>
@@ -191,6 +181,7 @@ const PAGE = 15;
 export function FilingsPage() {
   const { t } = useI18n();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof listPublicFilings>>>([]);
+  const [country, setCountry] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [err, setErr] = useState("");
@@ -199,7 +190,8 @@ export function FilingsPage() {
       .then(setRows)
       .catch((e: unknown) => setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy"))));
   }, []);
-  const filtered = rows.filter((row) => !query.trim() || row.id.toLowerCase().includes(query.trim().toLowerCase()));
+  const filtered = rows.filter((row) => (!query.trim() || row.id.toLowerCase().includes(query.trim().toLowerCase())) && (!country || row.country === country));
+  const countries = Array.from(new Set(rows.map((row) => row.country).filter(Boolean))).sort();
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const current = Math.min(page, pages);
   const slice = filtered.slice((current - 1) * PAGE, current * PAGE);
@@ -222,15 +214,30 @@ export function FilingsPage() {
         <p className="kicker">{t("filings_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{t("filings_title")}</h1>
         <p className="mt-3 max-w-2xl text-mist">{t("filings_hint")}</p>
-        <input
-          className="field mt-6 max-w-sm"
-          value={query}
-          placeholder={t("filings_search")}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setPage(1);
-          }}
-        />
+        <div className="mt-6 flex flex-wrap gap-2">
+          <input
+            className="field max-w-sm"
+            value={query}
+            placeholder={t("filings_search")}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+          />
+          <select
+            className="field max-w-xs"
+            value={country}
+            onChange={(e) => {
+              setCountry(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">{t("filings_country")}</option>
+            {countries.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </div>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
         <div className="sheet-wrap mt-6">
           <table className="sheet w-full min-w-[640px] text-left text-sm">

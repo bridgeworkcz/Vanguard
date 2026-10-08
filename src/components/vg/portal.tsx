@@ -407,6 +407,11 @@ export function PortalPage({ id }: { id: string }) {
     if (!current || current.profileComplete || current.stage !== 1) return;
     localStorage.setItem(`vg-draft-${current.id}`, JSON.stringify(q));
   }, [q, detail]);
+  useEffect(() => {
+    const id = detail?.app?.id;
+    if (!id) return;
+    window.sessionStorage.setItem("vg-case", id);
+  }, [detail?.app?.id]);
 
   function stepBad(step: number): string | null {
     if (step === 0) {
@@ -798,6 +803,9 @@ export function PortalPage({ id }: { id: string }) {
                 {t("share_case")}
               </button>
               <h2 className="display mt-2 text-4xl">{app.vacancyTitle}</h2>
+              <a href="#case-next" className="btn-solid mt-4 inline-flex">
+                {nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
+              </a>
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
               </p>
@@ -888,6 +896,7 @@ export function PortalPage({ id }: { id: string }) {
 
             {app.status === "OPEN" && app.stage === 1 && (!app.profileComplete || editing) ? (
               <form
+                id="case-next"
                 className="glass grid gap-4 p-5 sm:p-7"
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -1044,11 +1053,11 @@ export function PortalPage({ id }: { id: string }) {
               </div>
             ) : null}
             {app.status === "OPEN" && app.stage === 1 && app.profileComplete ? (
-              <div className="grid gap-3">
+              <div id="case-next" className="grid gap-3">
                 <p>{t("status_wait")}</p>
                 <p>{t("contact_ask")}</p>
                 {site?.settings.support_phone ? (
-                  <a className="btn-solid w-fit" href={whatsAppHref(site.settings.support_phone, `${app.citizenship} → ${app.country}`)} target="_blank" rel="noopener noreferrer">
+                  <a className="btn-solid w-fit" href={whatsAppHref(site.settings.support_phone, `${app.id}. ${app.citizenship} → ${app.country}`)} target="_blank" rel="noopener noreferrer">
                     WhatsApp · {site.settings.support_phone}
                   </a>
                 ) : null}
@@ -1059,7 +1068,8 @@ export function PortalPage({ id }: { id: string }) {
             {app.status === "OPEN" && app.stage === 2 ? (
               <div className="glass p-5">
                 <p>
-                  {t("cancel_in")}: {proof ? t("proof_pending") : remain(app.cancelDeadlineAt, now)}
+                  {t("cancel_on")}{" "}
+                  {app.cancelDeadlineAt ? new Date(app.cancelDeadlineAt).toLocaleDateString() : "—"}
                 </p>
                 {canCancel(app.status, app.stage, app.cancelDeadlineAt, Boolean(proof)) ? (
                   <button
@@ -1076,17 +1086,28 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
 
             {app.status === "OPEN" && app.stage >= 2 ? (
-              <div className="flex flex-wrap gap-3">
+              <div id="case-next" className="flex flex-wrap gap-3">
                 <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
                 {thirdPaid ? <p className="w-full text-sm text-mist">{t("pay_no_more")}</p> : <p className="w-full text-sm text-mist">{t("open_here")}</p>}
-                {thirdPaid ? null : <button type="button" className="btn" onClick={() => void invoice(1)}>{t("invoice_1")}</button>}
+                {thirdPaid ? null : (
+                  <button type="button" className={app.stage === 2 ? "btn-solid" : "btn"} onClick={() => void invoice(1)}>{t("invoice_1")}</button>
+                )}
                 <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
                 <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
                 {!thirdPaid && app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
-                  <button type="button" className="btn" onClick={() => void invoice(2)}>{t("invoice_2")}</button>
+                  <button type="button" className={app.stage < 4 ? "btn-solid" : "btn"} onClick={() => void invoice(2)}>{t("invoice_2")}</button>
+                ) : null}
+                {!thirdPaid && app.stage >= 3 && !invoice2Unlocked(app.processStage) ? (
+                  <p className="w-full text-sm text-mist">{t("invoice_2_when")}</p>
                 ) : null}
                 {!thirdPaid && app.stage >= 4 ? (
-                  <button type="button" className="btn" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
+                  <button type="button" className="btn-solid" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
+                ) : null}
+                {site?.settings.usdt_wallet && !thirdPaid && app.stage >= 2 ? (
+                  <p className="w-full break-all text-sm">
+                    {t("contact_wallet")}: {site.settings.usdt_wallet}
+                    {site.settings.usdt_network ? <span className="mt-1 block text-mist">{site.settings.usdt_network}</span> : null}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -1228,7 +1249,7 @@ export function PortalPage({ id }: { id: string }) {
               <div>
                 <h3 className="display text-3xl">{t("finals_title")}</h3>
                 <p className="mt-2 text-sm text-mist">{t("finals_help")}</p>
-                {finals.length === 0 ? <p className="mt-3 text-mist">{t("finals_empty")}</p> : null}
+                {finals.length === 0 ? <p className="mt-3 text-mist">{t("finals_empty")}</p> : <p className="mt-3 text-sm">{t("finals_ready")}</p>}
                 <ul className="mt-3 grid gap-2">
                   {finals.map((doc) => (
                     <li key={doc.id}>
@@ -1265,7 +1286,9 @@ export function PortalPage({ id }: { id: string }) {
               <ul className="mt-4 grid gap-2">
                 {detail?.messages.map((m) => (
                   <li key={m.id} className="border-t border-white/10 py-2 text-sm">
-                    <span className="text-metal">{m.authorRole}</span> {m.body}
+                    <span className="text-metal">{m.authorRole === "CLIENT" ? t("msg_you") : t("msg_office")}</span>
+                    {m.createdAt ? <span className="text-mist"> · {m.createdAt.slice(0, 16)}</span> : null}
+                    <span> {m.body}</span>
                   </li>
                 ))}
               </ul>

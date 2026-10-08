@@ -517,8 +517,8 @@ export async function buildInvoice(opts: {
         ? "Částka na této faktuře se o nic nezvyšuje. Pokud to síť dovolí, do zprávy uveďte číslo spisu. Potvrzení nahrajte ve spise. Prostředky neposílejte na jinou adresu, než je uvedena výše."
         : "Nothing is added on top of the amount on this invoice. If the network allows a note, put the file number in it. Upload the receipt in the case. Do not send funds to any address other than the wallet printed above."
       : cs
-        ? "Praxe zatím nezveřejnila peněženku. Prostředky neposílejte, dokud vám stůl adresu nesdělí ve spise."
-        : "The practice has not published a wallet yet. Do not send funds until the desk writes the address on the file.",
+        ? "Kancelář zatím nezveřejnila peněženku. Prostředky neposílejte, dokud vám kancelář adresu nesdělí ve spise."
+        : "The office has not published a wallet yet. Do not send funds until the office writes the address on the file.",
     9,
   );
   sheet.gap(4);
