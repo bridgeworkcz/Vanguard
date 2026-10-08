@@ -23,7 +23,7 @@ import {
   type Vacancy,
   type VisaProduct,
 } from "./domain";
-import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners } from "./seed";
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
@@ -97,14 +97,14 @@ async function settingMap() {
   return out;
 }
 
-async function putSetting(key: string, value: string, actor: string) {
+async function putSetting(key: string, value: string, actor: string, touchCache = true) {
   invalidateSheet("SystemSettings");
   const rows = await settingsRows();
   const found = rows.find((row) => row.key === key);
   const stamp = nowIso();
   if (found) await updateSheetRowById("SystemSettings", found.id, { value, updatedAt: stamp, updatedBy: actor });
   else await appendSheetRow("SystemSettings", { id: newId("SET"), key, value, updatedAt: stamp, updatedBy: actor });
-  dropPublicCache();
+  if (touchCache) dropPublicCache();
 }
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -643,7 +643,7 @@ async function safeHistory() {
   }
 }
 
-const VACANCY_CATALOG = "1";
+const VACANCY_CATALOG = "2";
 
 async function ensureVacancyCatalog() {
   try {
@@ -655,39 +655,69 @@ async function ensureVacancyCatalog() {
     const started = Date.parse(map.vacancy_catalog_at || "");
     const cooling = map.vacancy_catalog === "writing" || map.vacancy_catalog === "pending";
     if (cooling && Number.isFinite(started) && Date.now() - started < 180_000) return;
-    await putSetting("vacancy_catalog", "writing", "system");
-    await putSetting("vacancy_catalog_at", nowIso(), "system");
+    await putSetting("vacancy_catalog", "writing", "system", false);
+    await putSetting("vacancy_catalog_at", nowIso(), "system", false);
     invalidateSheet("Vacancies");
     const existing = await readSheetRows("Vacancies");
-    const taken = new Set(existing.map((row) => `${row.country}|${(row.employerLabel || "").trim().toLowerCase()}`));
-    const ids = new Set(existing.map((row) => row.id));
-    const open = new Map<string, number>();
+    const seatKey = (country: string, name: string) => `${country.trim()}|${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
+    const titles = new Set(existing.map((row) => `${seatKey(row.country || "", row.employerLabel || "")}|${(row.title || "").trim().toLowerCase()}`));
+    const perEmployer = new Map<string, number>();
     for (const row of existing) {
       if (row.isActive === "false") continue;
-      open.set(row.country, (open.get(row.country) || 0) + 1);
+      const key = seatKey(row.country || "", row.employerLabel || "");
+      perEmployer.set(key, (perEmployer.get(key) || 0) + 1);
+    }
+    const ids = new Set(existing.map((row) => row.id));
+    let partners: { country: string; name: string }[] = [];
+    try {
+      const stored = JSON.parse(map.partners || "[]") as { country?: string; name?: string }[];
+      if (Array.isArray(stored)) partners = stored.filter((item) => item.country && item.name).map((item) => ({ country: item.country!, name: item.name! }));
+    } catch {
+      partners = [];
+    }
+    const byCountry = new Map<string, { country: string; name: string }[]>();
+    for (const partner of partners) {
+      const list = byCountry.get(partner.country) ?? [];
+      list.push(partner);
+      byCountry.set(partner.country, list);
+    }
+    const ordered: { country: string; name: string }[] = [];
+    const groups = [...byCountry.values()];
+    for (let index = 0; ordered.length < partners.length; index += 1) {
+      let added = false;
+      for (const group of groups) {
+        const partner = group[index];
+        if (!partner) continue;
+        ordered.push(partner);
+        added = true;
+      }
+      if (!added) break;
     }
     const missing: SheetRow[] = [];
     let extra = 1;
-    for (const vacancy of buildVacancies()) {
-      const key = `${vacancy.country}|${vacancy.employer.trim().toLowerCase()}`;
-      if (taken.has(key)) continue;
-      const count = open.get(vacancy.country) || 0;
-      if (count >= 20) continue;
+    const batch = 640;
+    for (const vacancy of seatsForPartners(ordered)) {
+      if (missing.length >= batch) break;
+      const employerKey = seatKey(vacancy.country, vacancy.employer);
+      const titleKey = `${employerKey}|${vacancy.title.trim().toLowerCase()}`;
+      if (titles.has(titleKey)) continue;
+      if ((perEmployer.get(employerKey) || 0) >= 2) continue;
       let id = vacancy.id;
       while (ids.has(id)) {
         extra += 1;
-        id = `VAC-X${String(extra).padStart(4, "0")}`;
+        id = `VAC-S${String(extra + 5000).padStart(4, "0")}`;
       }
       ids.add(id);
-      taken.add(key);
-      open.set(vacancy.country, count + 1);
+      titles.add(titleKey);
+      perEmployer.set(employerKey, (perEmployer.get(employerKey) || 0) + 1);
       missing.push(vacancyTo({ ...vacancy, id }));
     }
     if (missing.length) await appendSheetRows("Vacancies", missing);
-    await putSetting("vacancy_catalog", VACANCY_CATALOG, "system");
+    const stillShort = ordered.some((partner) => (perEmployer.get(seatKey(partner.country, partner.name)) || 0) < 2);
+    await putSetting("vacancy_catalog", missing.length >= batch && stillShort ? "more" : VACANCY_CATALOG, "system", false);
   } catch (err) {
-    await putSetting("vacancy_catalog", "pending", "system").catch(() => undefined);
-    await putSetting("vacancy_catalog_at", nowIso(), "system").catch(() => undefined);
+    await putSetting("vacancy_catalog", "pending", "system", false).catch(() => undefined);
+    await putSetting("vacancy_catalog_at", nowIso(), "system", false).catch(() => undefined);
     console.error("[vacancies]", err);
   }
 }
@@ -1045,8 +1075,8 @@ let filingsCache: { at: number; value: { id: string; citizenship: string; countr
 let publicFlight: Promise<Awaited<ReturnType<typeof buildPublicSite>>> | null = null;
 let publicGen = 0;
 const PUBLIC_TTL = 90_000;
-const SNAP_PATH = "cache/public-site-v3.json";
-const SNAP_GEN = 3;
+const SNAP_PATH = "cache/public-site-v4.json";
+const SNAP_GEN = 4;
 
 function dropPublicCache() {
   publicGen += 1;
@@ -1139,6 +1169,7 @@ async function readyForPublicRead() {
   }
   const map = await settingMap().catch(() => null);
   if (map && map.seed_version !== "2") await ensureSeed();
+  if (map) await ensureVacancyCatalog();
 }
 
 export async function publicSite() {

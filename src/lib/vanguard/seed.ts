@@ -347,7 +347,6 @@ export const TEAM = [
   { id: "TM-4", name: "Daniel Okonkwo", position: "Employer relations", phone: "+420 770 347 163", photo: "", sort: 4 },
 ];
 
-/** Smaller sites that hire the people this practice files for. Partners only — not extra vacancies. */
 const SMALL_HIRERS: Record<string, string[]> = {
   Slovakia: ["Hydina Senec", "Mäso Topoľčany", "Farma Galanta", "Hotel Tatranská", "Sklad Malacky", "Upratovanie Bratislava", "Stavba Žilina", "Ovocie Dunajská Streda"],
   "Czech Republic": ["Drůbež Klatovy", "Maso Polička", "Farma Znojmo", "Hotel Karlín night", "Sklad Modletice", "Úklid Praha", "Stavmont Kladno", "Sad Mělník"],
@@ -380,6 +379,167 @@ export function partnerRows(): { id: string; country: string; name: string; sort
     }
   }
   return rows;
+}
+
+type Seat = { title: string; description: string; hours: string; housing: string; requirements?: string; seasonal?: boolean };
+
+const FOOD = "Passport, police clearance issued within 6 months, a medical set, and a hygiene brief on the first day.";
+const SITE = "Passport, police clearance, a medical set, and safety boots. The site issues a helmet and a vest.";
+const PAPERS = "Passport, police clearance issued within 6 months, and a medical set.";
+
+const SEATS: Record<string, Seat[]> = {
+  auto: [
+    { title: "Assembly line operator", description: "Fit parts to a moving line against a posted sequence. The pace is set by the line.", hours: "40 hours a week, morning or afternoon shift", housing: "Employer hostel, shared room, for the first contract year" },
+    { title: "Parts sequencer", description: "Pick kits and deliver them to the line in the order the vehicles are built.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease" },
+  ],
+  parts: [
+    { title: "Assembly cell operator", description: "Repeat one station on an automotive component. Each check is written down.", hours: "40 hours a week, morning or afternoon shift", housing: "Employer hostel, shared room, for the first contract year" },
+    { title: "Machine unload helper", description: "Load and unload a single press or mould beside a setter. No unsupervised set-up.", hours: "12-hour shifts, three days on and three days off", housing: "Company apartment, two workers to a room, utilities included" },
+  ],
+  electronics: [
+    { title: "Electronics assembler", description: "Hand assembly or board handling in an ESD area. The gowning and the station are taught on site.", hours: "40 hours a week, morning or afternoon shift", housing: "Dormitory for the first 90 days, then a private lease" },
+    { title: "Final test assistant", description: "Run a posted test and set failed units aside for a technician.", hours: "38–42 hours a week, rotating shift", housing: "No housing included. The worker finds a room." },
+  ],
+  warehouse: [
+    { title: "Order picker", description: "Pick to a scanner in a paced hall and stage the order for dispatch.", hours: "40 hours a week, morning or afternoon shift", housing: "No housing included. The worker finds a room." },
+    { title: "Inbound receiver", description: "Unload, scan, and stage incoming freight. A forklift licence is not required to start.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease" },
+  ],
+  hotel: [
+    { title: "Room attendant", description: "Strip, make, and restock rooms to a written checklist.", hours: "40 hours a week, morning or afternoon shift", housing: "Staff room for the first contract season" },
+    { title: "Public area attendant", description: "Corridors, lobby, and service landings. The chemical set stays with the housekeeper.", hours: "40 hours a week, Monday to Friday", housing: "No housing included. The worker finds a room." },
+  ],
+  hotelNight: [
+    { title: "Night porter", description: "Desk, luggage, and guest calls through the night. The day team takes over in the morning.", hours: "Night shift, four nights on and four nights off", housing: "Staff room for the first contract season" },
+    { title: "Breakfast setup", description: "Prepare the breakfast room before service. The cook runs the hot line.", hours: "Night shift, four nights on and four nights off", housing: "No housing included. The worker finds a room." },
+  ],
+  clean: [
+    { title: "Building cleaner", description: "Offices or common parts after the working day, to a room checklist.", hours: "40 hours a week, morning or afternoon shift", housing: "No housing included. The worker finds a room." },
+    { title: "Floor machine assistant", description: "Work beside a trained operator. The machine stays with them.", hours: "Night shift, four nights on and four nights off", housing: "No housing included. The worker finds a room." },
+  ],
+  build: [
+    { title: "Site labourer", description: "Move materials, keep routes clear, and tidy the work area. No licence is required.", hours: "40 hours a week, Monday to Friday", housing: "Dormitory for the first 90 days, then a private lease", requirements: SITE },
+    { title: "Formwork helper", description: "Carry, oil, and stack shutters under a carpenter.", hours: "40 hours a week, Monday to Friday", housing: "Company apartment, two workers to a room, utilities included", requirements: SITE },
+  ],
+  poultry: [
+    { title: "Poultry line worker", description: "Hang or pack on a chilled line. Hairnet, coat, and boots are issued.", hours: "38–42 hours a week, rotating shift", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+    { title: "Portion packer", description: "Tray, weigh, and label portions under the site hygiene plan.", hours: "40 hours a week, morning or afternoon shift", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+  ],
+  meat: [
+    { title: "Packing hall operative", description: "Pack primals or portions in a chilled hall. Coat and boots are issued. This is not a butcher's hire.", hours: "38–42 hours a week, rotating shift", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+    { title: "Trim assistant", description: "Trim to a posted spec beside a butcher and keep the station clear.", hours: "40 hours a week, morning or afternoon shift", housing: "Dormitory for the first 90 days, then a private lease", requirements: FOOD },
+  ],
+  fish: [
+    { title: "Fish process worker", description: "Grade, gut, or pack on a wet line. The waterproof kit is issued.", hours: "38–42 hours a week, rotating shift", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+    { title: "Frozen store hand", description: "Pick cartons in a frozen room. The cold suit is issued on site.", hours: "12-hour shifts, three days on and three days off", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+  ],
+  dairy: [
+    { title: "Dairy packing operative", description: "Bottles, cups, or crates on a cold line. The hygiene brief is on the first morning.", hours: "38–42 hours a week, rotating shift", housing: "Employer hostel, shared room, for the first contract year", requirements: FOOD },
+    { title: "Crate wash assistant", description: "Wash and return crates so the line can restart. Chemicals stay with the process operator.", hours: "40 hours a week, morning or afternoon shift", housing: "Dormitory for the first 90 days, then a private lease", requirements: FOOD },
+  ],
+  farm: [
+    { title: "Harvest worker", description: "Pick or cut the crop and carry it to the trailer or the belt.", hours: "40 hours a week, Monday to Friday", housing: "Employer hostel, shared room, for the season", requirements: FOOD, seasonal: true },
+    { title: "Packhouse grader", description: "Sort and pack the day's harvest. Gloves and a coat are issued.", hours: "40 hours a week, morning or afternoon shift", housing: "Employer hostel, shared room, for the season", requirements: FOOD, seasonal: true },
+  ],
+  food: [
+    { title: "Process line operative", description: "Mix, fill, or pack on a food line. Hairnet and boots are issued.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease", requirements: FOOD },
+    { title: "Line change assistant", description: "Wash and reset the line between products, beside a process operator.", hours: "40 hours a week, morning or afternoon shift", housing: "No housing included. The worker finds a room.", requirements: FOOD },
+  ],
+  retail: [
+    { title: "Store picker", description: "Pick cases for shops against a scanner list.", hours: "40 hours a week, morning or afternoon shift", housing: "No housing included. The worker finds a room." },
+    { title: "Dispatch loader", description: "Build and check outbound pallets or cages for the shop run.", hours: "Night shift, four nights on and four nights off", housing: "No housing included. The worker finds a room." },
+  ],
+  tyre: [
+    { title: "Tyre building assistant", description: "Feed components to a building machine under a setter.", hours: "12-hour shifts, three days on and three days off", housing: "Employer hostel, shared room, for the first contract year" },
+    { title: "Finish inspector", description: "Trim, inspect, and pallet cured tyres to a posted standard.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease" },
+  ],
+  glass: [
+    { title: "Glass handling assistant", description: "Rack, check edges, and move sheets with a team. Gloves and sleeves stay on.", hours: "40 hours a week, morning or afternoon shift", housing: "Dormitory for the first 90 days, then a private lease", requirements: SITE },
+    { title: "Cutting table helper", description: "Offload and label cut glass. No unsupervised cutting.", hours: "38–42 hours a week, rotating shift", housing: "No housing included. The worker finds a room.", requirements: SITE },
+  ],
+  paper: [
+    { title: "Reel handler", description: "Move and label paper reels with a team. A forklift licence is not required to start.", hours: "12-hour shifts, three days on and three days off", housing: "Dormitory for the first 90 days, then a private lease" },
+    { title: "Converting packer", description: "Pack finished reels or sheets and check the label against the order.", hours: "40 hours a week, morning or afternoon shift", housing: "No housing included. The worker finds a room." },
+  ],
+  heavy: [
+    { title: "Process helper", description: "Support one station in a heavy plant. No unsupervised hot work.", hours: "12-hour shifts, three days on and three days off", housing: "Employer hostel, shared room, for the first contract year", requirements: SITE },
+    { title: "Yard operative", description: "Chock and direct inbound materials in the yard, beside a licensed driver.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease", requirements: SITE },
+  ],
+  plant: [
+    { title: "Production operator", description: "One station, a written instruction, and a handover at the end of the shift.", hours: "40 hours a week, morning or afternoon shift", housing: "Employer hostel, shared room, for the first contract year" },
+    { title: "Internal logistics", description: "Move parts between the store and the line with a pallet truck. A forklift licence is not required to start.", hours: "38–42 hours a week, rotating shift", housing: "Dormitory for the first 90 days, then a private lease" },
+  ],
+};
+
+function foldName(value: string) {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+function tradeOf(name: string) {
+  const n = foldName(name);
+  if (/hotel|hotell/.test(n) && /night|noc|nacht/.test(n)) return "hotelNight";
+  if (/hotel|hotell/.test(n)) return "hotel";
+  if (/uklid|uprat|reinigung|limpeza|pochist|pulizie|renhold|cisc|takarit|sprzat|uborka|cleaning/.test(n)) return "clean";
+  if (/stavba|stavmont|rohbau|\bobra\b|stroy|cantiere|bygg|gradnja|epit|budowa|framing|stroyka/.test(n)) return "build";
+  if (/drub|hydina|poultry|\bpile\b|piletina|geflugel|aves |pollame|baromfi|drob|ptitse|ptice|maple lodge|exceldor/.test(n)) return "poultry";
+  if (/peixe|fisk|salmar|leroy|mowi|santa bremor|talley|seafood/.test(n)) return "fish";
+  if (/maso|fleisch|\bmeat\b|hus |mieso|myaso|salumi|slakteri|silver fern|alliance group|anzco|maple leaf|cargill|olymel|\bjbs\b|sofina|tarczy|nortura|\baffco\b/.test(n)) return "meat";
+  if (/fonterra|saputo|mlekovita|savushkin|open country|dairy|mlekar|mliekar/.test(n)) return "dairy";
+  if (/farma|spargel|gurken|zelenchuk|pomodoro|\bbaer\b|voce|ovocie|ovosht|\bsad\b|fruta|berry|greenhouse|estufa|uveghaz|szklarnia|teplitsa|staklenik|agrumi|kiwifruit|zespri|t&g|gront|sadov/.test(n)) return "farm";
+  if (/tire|tyre|linglong|tigar|apollo tyres|mabor|puchov/.test(n)) return "tyre";
+  if (/\bagc\b|flat glass|sklarn/.test(n)) return "glass";
+  if (/mondi|navigator company|papirna|paper/.test(n)) return "paper";
+  if (/amorim|cortic/.test(n)) return "plant";
+  if (/amazon|dhl|schenker|gebruder weiss|mainfreight|simoes|bcube|posten bring|jysk/.test(n)) return "warehouse";
+  if (/\bdc\b|supply chain|logistics|armazem|magazyn|magacin|magazzino|raktar|\blager\b|warehouse|\bsklad\b/.test(n)) return "warehouse";
+  if (/barilla|ferrero|lavazza|granarolo|orkla|\btine\b|nestle|campari|sumol|rohlik/.test(n)) return "food";
+  if (/jeronimo|sonae|biedronka|penny|loblaw|ahold|\blpp\b/.test(n)) return "retail";
+  if (/volkswagen|skoda auto|\bkia\b|hyundai|\bbmw\b|mercedes|porsche|jaguar|stellantis|toyota|suzuki|\baudi\b|man truck|solaris|\bpca\b|\bbyd\b|ducati/.test(n)) return "auto";
+  if (/bosch|continental|\bzf\b|schaeffler|faurecia|minebea|brose|mahle|draxl|aptiv|magna|linamar|martinrea|denso|witte|kostal|teklas|yazaki|leoni|\bpwo\b|sensata|melexis/.test(n)) return "parts";
+  if (/foxconn|honeywell|panasonic|samsung|flextronic|sk on|lg energy|whirlpool|electrolux|\bbsh\b|amica|schneider|\bfesto\b|prysmian|atlant|\blinet\b/.test(n)) return "electronics";
+  if (/u\. s\. steel|zeleziarne|aurubis|belaz|belaruskali|hydro aluminium|aker solution|thyssen|basf|karcher|\bmaz\b|amkodor|\bmtz\b|siemens|doosan/.test(n)) return "heavy";
+  return "plant";
+}
+
+function payNudge(name: string) {
+  let hash = 0;
+  for (const ch of name) hash = (hash + ch.charCodeAt(0)) % 160;
+  return hash;
+}
+
+export function seatsForPartners(partners: { country: string; name: string }[]): Vacancy[] {
+  const out: Vacancy[] = [];
+  let n = 1;
+  for (const partner of partners) {
+    const name = partner.name.trim();
+    const country = partner.country.trim();
+    if (!name || !country) continue;
+    const products = VISA_PRODUCTS.filter((item) => item.country === country && item.active);
+    if (!products.length) continue;
+    const trade = tradeOf(name);
+    const seats = SEATS[trade] ?? SEATS.plant!;
+    const seasonal = seats.some((seat) => seat.seasonal);
+    const product = (seasonal && products.find((item) => /9 month/i.test(item.duration))) || products[0]!;
+    const base = PAY[country] ?? 1000;
+    seats.forEach((seat, index) => {
+      const net = base + payNudge(`${name}${index}`);
+      out.push({
+        id: `VAC-S${String(n).padStart(4, "0")}`,
+        title: seat.title,
+        country,
+        visaProductId: product.id,
+        employer: name,
+        salaryNet: `${net}–${net + 140} EUR net / month`,
+        accommodation: seat.housing,
+        workingHours: seat.hours,
+        description: `${seat.description} Employer: ${name}. Permit term: ${product.duration}.`,
+        requirements: seat.requirements || PAPERS,
+        quota: 2 + ((n + index) % 4),
+        active: true,
+      });
+      n += 1;
+    });
+  }
+  return out;
 }
 
 export const DEFAULT_SETTINGS: Record<string, string> = {

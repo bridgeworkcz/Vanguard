@@ -23,7 +23,7 @@ import {
   type Vacancy,
   type VisaProduct,
 } from "./domain";
-import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows } from "./seed";
+import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners } from "./seed";
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { canCancel, citizenshipBlocked, kyivMonth, monthCommission } from "./ops";
@@ -95,6 +95,41 @@ async function ensurePartnerCatalog(sql: Sql) {
     have.add(`${row.country}|${row.name}`.toLowerCase());
   }
   await sql`insert into settings (key, value) values ('partners_catalog', '4') on conflict (key) do update set value = '4'`;
+}
+
+async function ensureEmployerSeats(sql: Sql) {
+  const flag = await sql<{ value: string }>`select value from settings where key = 'vacancy_catalog'`;
+  if (flag[0]?.value === "2") return;
+  const partners = await sql<{ country: string; name: string }>`select country, name from partners where active = true order by country, sort_order`;
+  const existing = await sql<{ id: string; country: string; employer: string; title: string; active: boolean }>`select id, country, employer, title, active from vacancies`;
+  const seatKey = (country: string, name: string) => `${country.trim()}|${name.trim().toLowerCase().replace(/\s+/g, " ")}`;
+  const titles = new Set(existing.map((row) => `${seatKey(row.country, row.employer)}|${row.title.trim().toLowerCase()}`));
+  const perEmployer = new Map<string, number>();
+  const ids = new Set(existing.map((row) => row.id));
+  for (const row of existing) {
+    if (!row.active) continue;
+    const key = seatKey(row.country, row.employer);
+    perEmployer.set(key, (perEmployer.get(key) || 0) + 1);
+  }
+  let extra = 1;
+  for (const vacancy of seatsForPartners(partners)) {
+    const employerKey = seatKey(vacancy.country, vacancy.employer);
+    const titleKey = `${employerKey}|${vacancy.title.trim().toLowerCase()}`;
+    if (titles.has(titleKey)) continue;
+    if ((perEmployer.get(employerKey) || 0) >= 2) continue;
+    let id = vacancy.id;
+    while (ids.has(id)) {
+      extra += 1;
+      id = `VAC-S${String(extra + 5000).padStart(4, "0")}`;
+    }
+    ids.add(id);
+    titles.add(titleKey);
+    perEmployer.set(employerKey, (perEmployer.get(employerKey) || 0) + 1);
+    await sql`insert into vacancies (id, title, country, visa_product_id, employer, salary_net, accommodation, working_hours, description, requirements, quota, active)
+      values (${id}, ${vacancy.title}, ${vacancy.country}, ${vacancy.visaProductId}, ${vacancy.employer}, ${vacancy.salaryNet}, ${vacancy.accommodation}, ${vacancy.workingHours}, ${vacancy.description}, ${vacancy.requirements}, ${vacancy.quota}, true)
+      on conflict (id) do nothing`;
+  }
+  await sql`insert into settings (key, value) values ('vacancy_catalog', '2') on conflict (key) do update set value = '2'`;
 }
 
 async function ensureDirector(sql: Sql) {
@@ -301,6 +336,11 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     await ensurePartnerCatalog(sql);
   } catch (err) {
     console.error("[partners]", err);
+  }
+  try {
+    await ensureEmployerSeats(sql);
+  } catch (err) {
+    console.error("[vacancies]", err);
   }
   await expireUnpaid(sql);
   const settingsRows = await sql<{ key: string; value: string }>`select key, value from settings`;
