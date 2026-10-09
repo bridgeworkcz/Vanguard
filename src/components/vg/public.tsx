@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Shell, rememberAgent, storyKey, useAgentCut, useDesk, useSite } from "./chrome";
+import { Shell, rememberAgent, storyKey, useAgentCut, useDesk, usePageMeta, useSite } from "./chrome";
 import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, applyPercent, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS, DEFAULT_SETTINGS } from "@/lib/vanguard/seed";
@@ -42,6 +42,7 @@ function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS"
 
 export function HomePage() {
   const { t, lang } = useI18n();
+  usePageMeta("seo_home_title", "seo_home_desc");
   const { data, error } = useSite();
   const navigate = useNavigate();
   const [citizenship, setCitizenship] = useState("");
@@ -313,6 +314,7 @@ export function SearchPage({
   employer: string;
 }) {
   const { t } = useI18n();
+  usePageMeta("seo_search_title", "seo_search_desc");
   const { signedIn } = useDesk();
   const { data } = useSite();
   const [waitNote, setWaitNote] = useState("");
@@ -596,6 +598,7 @@ export function VacancyPage({
   speed: string;
 }) {
   const { t, lang } = useI18n();
+  usePageMeta("seo_filings_title", "seo_filings_desc");
   const { data } = useSite();
   const { signedIn } = useDesk();
   const navigate = useNavigate();
@@ -727,6 +730,7 @@ export function VacancyPage({
 
 export function AboutPage() {
   const { t, lang } = useI18n();
+  usePageMeta("seo_about_title", "seo_about_desc");
   const { data } = useSite();
   const s = data?.settings ?? {};
   const lead = s[storyKey(lang, "about_lead")] || s.about_lead_en;
@@ -919,6 +923,7 @@ export function AboutPage() {
 
 export function ContactPage() {
   const { t } = useI18n();
+  usePageMeta("seo_contact_title", "seo_contact_desc");
   const { data } = useSite();
   const s = data?.settings;
   const [caseNote, setCaseNote] = useState("");
@@ -990,6 +995,10 @@ export function CountryPage({ code }: { code: string }) {
   const cut = useAgentCut();
   const products = (data?.products ?? VISA_PRODUCTS).filter((item) => item.active && countrySlug(item.country) === code);
   const country = products[0]?.country ?? "";
+  useEffect(() => {
+    document.title = country ? `${country} · Vanguard` : t("seo_filings_title");
+    document.querySelector('meta[name="description"]')?.setAttribute("content", t("country_lead"));
+  }, [country, t]);
   const ids = new Set(products.map((item) => item.id));
   const jobs = (data?.vacancies ?? []).filter((item) => item.active && ids.has(item.visaProductId));
   const blocked = Array.from(
@@ -1005,6 +1014,7 @@ export function CountryPage({ code }: { code: string }) {
       <article className="mx-auto max-w-5xl px-4 py-14">
         <p className="kicker">{t("country_kicker")}</p>
         <h1 className="display mt-3 text-4xl sm:text-5xl">{country || t("country_empty")}</h1>
+        <p className="mt-4 max-w-2xl text-base leading-relaxed">{t("country_lead")}</p>
         {products.length ? (
           <p className="mt-3 text-sm text-mist">
             {t("country_fee_range")} {applyPercent(Math.min(...products.map((item) => item.basePrice)), cut)}–{applyPercent(Math.max(...products.map((item) => item.basePrice)), cut)} EUR
@@ -1063,6 +1073,29 @@ export function CountryPage({ code }: { code: string }) {
         >
           {t("country_file")}
         </Link>
+      </article>
+    </Shell>
+  );
+}
+
+export function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
+  const { t } = useI18n();
+  const { data } = useSite();
+  usePageMeta(kind === "privacy" ? "seo_privacy_title" : "seo_terms_title", kind === "privacy" ? "seo_privacy_desc" : "seo_terms_desc");
+  const entity = data?.settings.legal_entity || "";
+  const address = data?.settings.legal_address || "";
+  return (
+    <Shell>
+      <article className="mx-auto max-w-3xl px-4 py-14">
+        <p className="kicker">{kind === "privacy" ? t("privacy_nav") : t("terms_nav")}</p>
+        <h1 className="display mt-3 text-4xl sm:text-5xl">{kind === "privacy" ? t("privacy_title") : t("terms_title")}</h1>
+        {entity ? <p className="mt-4 text-sm text-mist">{entity}{address ? ` · ${address}` : ""}</p> : null}
+        <div className="mt-8 whitespace-pre-line text-base leading-relaxed">{kind === "privacy" ? t("privacy_body") : t("terms_body")}</div>
+        <p className="mt-8 text-sm">
+          <Link to={kind === "privacy" ? "/terms" : "/privacy"} className="underline-offset-4 hover:underline">
+            {kind === "privacy" ? t("terms_nav") : t("privacy_nav")}
+          </Link>
+        </p>
       </article>
     </Shell>
   );

@@ -1,6 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-export type Lang = "en" | "cs" | "ur";
+export type Lang = "en" | "cs" | "uk" | "ru" | "ur";
+
+export function isLang(value: unknown): value is Lang {
+  return value === "en" || value === "cs" || value === "uk" || value === "ru" || value === "ur";
+}
 
 const en = {
   brand: "Vanguard",
@@ -65,7 +69,7 @@ const en = {
   partners_hint: "Choose a country. Open an employer to see their seats.",
   employer_empty: "No open seats at this employer right now.",
   about_team: "The office",
-  team_hint: "Open a name.",
+  team_hint: "The people who handle a file.",
   legal_id: "ID",
   legal_vat: "VAT",
   legal_court: "Court",
@@ -427,7 +431,7 @@ const en = {
   faq_q17: "How do I pay?",
   faq_a17: "In USDT, on the network printed on the invoice, to the wallet we have published. If the network allows a note, put the case number in it. Upload a screenshot or a receipt. We confirm it before the file moves on.",
   faq_q18: "What does the cabinet show from day to day?",
-  faq_a18: "Which of the three parts is paid, and which is not yet. A reminder if a payment or a document deadline falls inside the next three days. The same language you chose on the site: English, Czech, or Urdu. A closed file says so. After a refusal you can open the file again, and your answers come with you.",
+  faq_a18: "Which of the three parts is paid, and which is not yet. A reminder if a payment or a document deadline falls inside the next three days. The same language you chose on the site: English, Czech, Ukrainian, Russian, or Urdu. A closed file says so. After a refusal you can open the file again, and your answers come with you.",
   faq_q19: "I was given a code.",
   faq_a19: "Type it when you file the opening. The contract is still with Vanguard. The person who sent you sees the status of their own clients only. They do not see your passport or your scans.",
   agents_kicker: "For a monthly book of clients",
@@ -696,6 +700,64 @@ const en = {
   admin_delete_picked_ask: "Delete only the selected cases? The accounts stay.",
   hang_days: "days",
   door_field: "How to find the door",
+  lang_name: "Language",
+  privacy_nav: "Privacy",
+  terms_nav: "Terms",
+  privacy_title: "Privacy",
+  privacy_body:
+    "The company named at the top of this page keeps what a filing needs.\n\nAn account takes an email, a phone, and a password. The questionnaire adds your name, date of birth, citizenship, and the answers the permit asks for. Scans you upload stay on the file. Notes in the case stay on the file.\n\nWe use this to prepare the work-permit file, to issue the invoices, and to write when the file moves. We do not sell the data. We do not run ads.\n\nA sign-in cookie stays on this device so the case opens again. The language you pick, and an agent code if you entered one, stay in this browser.\n\nWhatsApp, if you write to the office there, is a separate service. When an invoice is due, the place to pay is shown inside the case, not on this page.\n\nWrite to the email on the contact page to correct a mistake, or to close an account that has no open file. A paid invoice is kept as Czech accounting law requires.\n\nThe office prepares the file. A ministry decides the permit.",
+  terms_title: "Terms",
+  terms_body:
+    "The office prepares a work-permit file for a named person, a named employer, and a named country. It does not issue the permit, and it does not promise that a ministry will agree.\n\nThe fee is the price shown before you choose an opening. It is the office charge, not a payment to the ministry. It is split in three: 30 when the office accepts the file, 40 when the employer clears the filing on to the ministry, and 30 before anything is sent to you. Each part has its own invoice.\n\nYou can cancel before the first receipt is in the file, inside the time the case shows. After that receipt is accepted, the file goes on.\n\nDocuments you send must be yours and must be true. A declined scan is replaced on the same file. You do not open a new file for that.\n\nThe full agreement is issued in the case after the first payment. This page is the short form, so you can read it before an account exists.",
+  cookie_note: "This device stores the language you picked and, if you sign in, a sign-in cookie. We do not run ads.",
+  cookie_ok: "Understood",
+  login_forgot: "Forgot the password",
+  login_reset_title: "A new password",
+  login_reset_help: "If this email has an account, we send a link. It lasts one hour.",
+  login_reset_sent: "If the account exists, the link is on its way.",
+  login_reset_nomail: "Mail is not connected yet. Write the office on WhatsApp from the phone on the account.",
+  login_reset_new: "New password",
+  login_reset_save: "Save the password",
+  login_reset_done: "Password saved. Sign in.",
+  login_reset_bad: "This link has expired. Ask for a new one.",
+  login_terms: "Creating an account means you have read the terms and the privacy note.",
+  country_lead: "The prices are the office charge for preparing a work-permit file for this country. A ministry decides the permit. The charge is not a payment to the state.",
+  seo_home_title: "Vanguard Global Mobility",
+  seo_home_desc: "Work-permit filings from a Prague office. The fee is fixed before you choose an opening.",
+  seo_about_title: "The office · Vanguard",
+  seo_about_desc: "Prague office, the company record, and the employers we file with.",
+  seo_contact_title: "Contact · Vanguard",
+  seo_contact_desc: "Address, WhatsApp, and email of the Prague office.",
+  seo_questions_title: "Questions · Vanguard",
+  seo_questions_desc: "How a filing moves, what the fee covers, and how payment works.",
+  seo_filings_title: "Openings · Vanguard",
+  seo_filings_desc: "Countries and permits the office prepares.",
+  seo_privacy_title: "Privacy · Vanguard",
+  seo_privacy_desc: "What the office keeps, and why.",
+  seo_terms_title: "Terms · Vanguard",
+  seo_terms_desc: "What the office does, what it does not, and how the fee is split.",
+  seo_search_title: "Openings · Vanguard",
+  seo_search_desc: "Seats that match the route you chose.",
+  seo_agents_title: "Agents · Vanguard",
+  seo_agents_desc: "A code for the clients of a sub-agent.",
+  seo_login_title: "Sign in · Vanguard",
+  seo_login_desc: "Open your case, or create an account.",
+  mail_reset_subject: "A new password",
+  mail_reset_body: "A new password was requested for this account. Open the link within one hour. If you did not ask, ignore this letter.\n\n{link}",
+  mail_stage_subject: "Your file moved",
+  mail_stage_body: "The office moved file {id}. Open the case to see the step and anything that is due.\n\nhttps://www.vanguardmobility.site/portal",
+  mail_doc_subject: "A document was declined",
+  mail_doc_body: "A scan on file {id} was declined. Open the case and replace that scan. You do not open a new file.\n\nhttps://www.vanguardmobility.site/portal",
+  mail_due_subject: "An invoice is due",
+  mail_due_body: "A payment on file {id} is now due. Open the case for the amount and where to send it.\n\nhttps://www.vanguardmobility.site/portal",
+  admin_mail: "Letters to clients",
+  admin_mail_from: "From address",
+  admin_mail_key: "Mail key",
+  admin_mail_help: "A Resend key and a from-address the mail service has already allowed. Letters then go out when a file moves, a scan is declined, an invoice opens, or someone asks for a new password. The key stays in the office register and is not shown on the site.",
+  admin_mail_saved: "Mail saved",
+  admin_mail_ready: "Letters are connected.",
+  admin_mail_missing: "Letters are not connected yet.",
+  admin_mail_keep: "Leave the key blank to keep the one already saved.",
 };
 
 const cs: Record<keyof typeof en, string> = {
@@ -761,7 +823,7 @@ const cs: Record<keyof typeof en, string> = {
   partners_hint: "Vyberte zemi. Otevřete zaměstnavatele a uvidíte jeho místa.",
   employer_empty: "U tohoto zaměstnavatele teď není volné místo.",
   about_team: "Kancelář",
-  team_hint: "Otevřete jméno.",
+  team_hint: "Lidé, kteří vedou spis.",
   legal_id: "IČO",
   legal_vat: "DIČ",
   legal_court: "Soud",
@@ -1123,7 +1185,7 @@ const cs: Record<keyof typeof en, string> = {
   faq_q17: "Jak platím?",
   faq_a17: "V USDT, na síti vytištěné na faktuře, na zveřejněnou peněženku. Dovolí-li to síť, do poznámky dejte číslo spisu. Nahrajte snímek nebo potvrzení. Než se spis posune, potvrdíme to.",
   faq_q18: "Co kabinet ukazuje ze dne na den?",
-  faq_a18: "Která ze tří částí je zaplacená a která ještě ne. Připomínku, když termín platby nebo dokladu padá do příštích tří dnů. Stejný jazyk, který jste zvolili na webu: angličtina, čeština nebo urdština. Uzavřený spis to řekne. Po zamítnutí lze spis otevřít znovu a odpovědi jdou s vámi.",
+  faq_a18: "Která ze tří částí je zaplacená a která ještě ne. Připomínku, když termín platby nebo dokladu padá do příštích tří dnů. Stejný jazyk, který jste zvolili na webu: angličtina, čeština, ukrajinština, ruština nebo urdština. Uzavřený spis to řekne. Po zamítnutí lze spis otevřít znovu a odpovědi jdou s vámi.",
   faq_q19: "Dostal jsem kód.",
   faq_a19: "Napište ho, když podáváte místo. Smlouva je pořád s Vanguardem. Člověk, který vás poslal, vidí stav jen svých klientů. Pas ani skeny nevidí.",
   agents_kicker: "Pro ty, kdo vodí klienty každý měsíc",
@@ -1392,6 +1454,64 @@ const cs: Record<keyof typeof en, string> = {
   admin_delete_picked_ask: "Smazat jen vybrané spisy? Účty zůstanou.",
   hang_days: "dní",
   door_field: "Jak najít dveře",
+  lang_name: "Jazyk",
+  privacy_nav: "Soukromí",
+  terms_nav: "Podmínky",
+  privacy_title: "Soukromí",
+  privacy_body:
+    "Společnost uvedená nahoře na této stránce uchovává to, co podání potřebuje.\n\nÚčet bere e-mail, telefon a heslo. Dotazník přidá jméno, datum narození, občanství a odpovědi, které povolení vyžaduje. Skuny, které nahrajete, zůstávají ve spise. Poznámky ve spise zůstávají ve spise.\n\nPoužíváme to k přípravě spisu k pracovnímu povolení, k vystavení faktur a k tomu, abychom napsali, když se spis pohne. Data neprodáváme. Reklamu nepouštíme.\n\nPřihlašovací cookie zůstává v tomto zařízení, aby se spis znovu otevřel. Jazyk, který zvolíte, a kód agenta, pokud ho zadáte, zůstávají v tomto prohlížeči.\n\nWhatsApp, pokud tam kanceláři napíšete, je samostatná služba. Když je faktura splatná, místo platby je ve spise, ne na této stránce.\n\nNa e-mail z kontaktu napište, když chcete opravit chybu, nebo zavřít účet bez otevřeného spisu. Zaplacená faktura se uchovává, jak žádá české účetnictví.\n\nKancelář připravuje spis. O povolení rozhoduje ministerstvo.",
+  terms_title: "Podmínky",
+  terms_body:
+    "Kancelář připravuje spis k pracovnímu povolení pro jmenovanou osobu, jmenovaného zaměstnavatele a jmenovanou zemi. Povolení nevydává a neslibuje, že ministerstvo souhlasí.\n\nHonorář je cena uvedená před volbou místa. Je to odměna kanceláře, ne platba ministerstvu. Dělí se na tři části: 30, když kancelář spis přijme, 40, když zaměstnavatel uvolní podání na ministerstvo, a 30, než se vám cokoli odešle. Každá část má vlastní fakturu.\n\nZrušit lze, než je ve spise první potvrzení, v čase, který spis ukazuje. Po přijetí toho potvrzení spis pokračuje.\n\nDoklady, které pošlete, musí být vaše a pravdivé. Odmítnutý sken se nahrazuje ve stejném spise. Nový spis kvůli tomu neotevíráte.\n\nPlná smlouva je ve spise po první platbě. Tahle stránka je krátké znění, aby šla přečíst ještě před účtem.",
+  cookie_note: "Toto zařízení si pamatuje zvolený jazyk a při přihlášení i přihlašovací cookie. Reklamu nepouštíme.",
+  cookie_ok: "Rozumím",
+  login_forgot: "Zapomenuté heslo",
+  login_reset_title: "Nové heslo",
+  login_reset_help: "Pokud k tomuto e-mailu účet patří, pošleme odkaz. Platí hodinu.",
+  login_reset_sent: "Pokud účet existuje, odkaz je na cestě.",
+  login_reset_nomail: "Pošta ještě není připojená. Napište kanceláři na WhatsApp z telefonu, který je u účtu.",
+  login_reset_new: "Nové heslo",
+  login_reset_save: "Uložit heslo",
+  login_reset_done: "Heslo je uložené. Přihlaste se.",
+  login_reset_bad: "Odkaz vypršel. Požádejte o nový.",
+  login_terms: "Založením účtu potvrzujete, že jste četli podmínky a poznámku o soukromí.",
+  country_lead: "Ceny jsou odměna kanceláře za přípravu spisu k pracovnímu povolení pro tuto zemi. O povolení rozhoduje ministerstvo. Odměna není platba státu.",
+  seo_home_title: "Vanguard Global Mobility",
+  seo_home_desc: "Podání pracovních povolení z pražské kanceláře. Honorář je daný dřív, než zvolíte místo.",
+  seo_about_title: "Kancelář · Vanguard",
+  seo_about_desc: "Pražská kancelář, zápis společnosti a zaměstnavatelé, se kterými podáváme.",
+  seo_contact_title: "Kontakt · Vanguard",
+  seo_contact_desc: "Adresa, WhatsApp a e-mail pražské kanceláře.",
+  seo_questions_title: "Otázky · Vanguard",
+  seo_questions_desc: "Jak spis postupuje, co honorář kryje a jak se platí.",
+  seo_filings_title: "Místa · Vanguard",
+  seo_filings_desc: "Země a povolení, která kancelář připravuje.",
+  seo_privacy_title: "Soukromí · Vanguard",
+  seo_privacy_desc: "Co kancelář uchovává a proč.",
+  seo_terms_title: "Podmínky · Vanguard",
+  seo_terms_desc: "Co kancelář dělá, co nedělá a jak se honorář dělí.",
+  seo_search_title: "Místa · Vanguard",
+  seo_search_desc: "Místa, která sedí na zvolenou cestu.",
+  seo_agents_title: "Agenti · Vanguard",
+  seo_agents_desc: "Kód pro klienty subagenta.",
+  seo_login_title: "Přihlášení · Vanguard",
+  seo_login_desc: "Otevřete spis, nebo založte účet.",
+  mail_reset_subject: "Nové heslo",
+  mail_reset_body: "Pro tento účet bylo požádáno o nové heslo. Odkaz platí hodinu. Pokud jste o něj nežádali, dopis ignorujte.\n\n{link}",
+  mail_stage_subject: "Spis se pohnul",
+  mail_stage_body: "Kancelář posunula spis {id}. Otevřete případ a uvidíte krok i to, co je splatné.\n\nhttps://www.vanguardmobility.site/portal",
+  mail_doc_subject: "Doklad byl odmítnut",
+  mail_doc_body: "Sken ve spise {id} byl odmítnut. Otevřete případ a ten sken nahraďte. Nový spis kvůli tomu neotevíráte.\n\nhttps://www.vanguardmobility.site/portal",
+  mail_due_subject: "Faktura je splatná",
+  mail_due_body: "Platba ve spise {id} je teď splatná. V případu je částka i kam ji poslat.\n\nhttps://www.vanguardmobility.site/portal",
+  admin_mail: "Dopisy klientům",
+  admin_mail_from: "Adresa odesílatele",
+  admin_mail_key: "Klíč pošty",
+  admin_mail_help: "Klíč Resend a adresa, kterou poštovní služba už povolila. Dopisy pak odcházejí, když se spis pohne, sken je odmítnut, otevře se faktura, nebo někdo žádá nové heslo. Klíč zůstává v evidenci kanceláře a na webu se neukazuje.",
+  admin_mail_saved: "Pošta uložena",
+  admin_mail_ready: "Dopisy jsou připojené.",
+  admin_mail_missing: "Dopisy ještě nejsou připojené.",
+  admin_mail_keep: "Klíč nechte prázdný, pokud má zůstat ten uložený.",
 };
 
 const ur: Record<keyof typeof en, string> = {
@@ -1457,7 +1577,7 @@ const ur: Record<keyof typeof en, string> = {
   partners_hint: "ملک منتخب کریں۔ آجر کھولیں، اس کی اسامیاں دیکھیں۔",
   employer_empty: "اس آجر کے پاس اب کوئی نشست خالی نہیں۔",
   about_team: "دفتر",
-  team_hint: "نام کھولیں۔",
+  team_hint: "فائل سنبھالنے والے لوگ۔",
   legal_id: "رجسٹریشن",
   legal_vat: "ویٹ",
   legal_court: "عدالت",
@@ -1819,7 +1939,7 @@ const ur: Record<keyof typeof en, string> = {
   faq_q17: "ادائیگی کیسے کروں؟",
   faq_a17: "USDT میں، اسی نیٹ ورک پر جو رسید پر لکھا ہے، شائع شدہ بٹوے پر۔ اگر نیٹ ورک نوٹ دے تو کیس نمبر لکھیں۔ تصویر یا رسید بھیجیں۔ فائل آگے بڑھنے سے پہلے ہم تصدیق کرتے ہیں۔",
   faq_q18: "کابینہ روز کیا دکھاتی ہے؟",
-  faq_a18: "تین حصوں میں سے کون سا ادا ہوا اور کون سا ابھی نہیں۔ یاد دہانی اگر ادائیگی یا دستاویز کی آخری تاریخ اگلے تین دن میں ہو۔ وہی زبان جو سائٹ پر چنی: انگریزی، چیک یا اردو۔ بند فائل یہی کہتی ہے۔ رد کے بعد فائل دوبارہ کھول سکتے ہیں، جوابات ساتھ آتے ہیں۔",
+  faq_a18: "تین حصوں میں سے کون سا ادا ہوا اور کون سا ابھی نہیں۔ یاد دہانی اگر ادائیگی یا دستاویز کی آخری تاریخ اگلے تین دن میں ہو۔ وہی زبان جو سائٹ پر چنی: انگریزی، چیک، یوکرینی، روسی یا اردو۔ بند فائل یہی کہتی ہے۔ رد کے بعد فائل دوبارہ کھول سکتے ہیں، جوابات ساتھ آتے ہیں۔",
   faq_q19: "مجھے کوڈ ملا ہے۔",
   faq_a19: "اسامی جمع کرتے وقت لکھیں۔ معاہدہ پھر بھی وینگارڈ کے ساتھ ہے۔ جس نے آپ کو بھیجا وہ صرف اپنے کلائنٹس کی حالت دیکھتا ہے۔ پاسپورٹ یا اسکین نہیں دیکھتا۔",
   agents_kicker: "جو ہر مہینے کلائنٹ لاتے ہیں",
@@ -2088,9 +2208,76 @@ const ur: Record<keyof typeof en, string> = {
   admin_delete_picked_ask: "صرف منتخب کیس حذف کریں؟ اکاؤنٹ رہیں گے۔",
   hang_days: "دن",
   door_field: "دروازہ کیسے ملے",
+  lang_name: "زبان",
+  privacy_nav: "رازداری",
+  terms_nav: "شرائط",
+  privacy_title: "رازداری",
+  privacy_body:
+    "جو کمپنی اس صفحے کے اوپر لکھی ہے، وہ وہی رکھتی ہے جو فائل کے لیے چاہیے۔\n\nاکاؤنٹ کے لیے ای میل، فون اور پاس ورڈ لگتے ہیں۔ سوالنامہ نام، تاریخ پیدائش، شہریت اور وہ جوابات جو اجازت نامہ مانگتا ہے۔ جو اسکین آپ لگاتے ہیں وہ فائل میں رہتے ہیں۔ کیس کے نوٹ بھی فائل میں رہتے ہیں۔\n\nہم اسے ورک پرمٹ کی فائل بنانے، انوائس نکالنے، اور فائل کے بڑھنے پر لکھنے کے لیے استعمال کرتے ہیں۔ ڈیٹا نہیں بیچتے۔ اشتہار نہیں چلاتے۔\n\nسائن ان کی کوکی اس ڈیوائس پر رہتی ہے تاکہ کیس دوبارہ کھلے۔ جو زبان آپ چنیں، اور ایجنٹ کا کوڈ اگر درج کیا ہو، اسی براؤزر میں رہتے ہیں۔\n\nواٹس ایپ، اگر آپ دفتر کو وہاں لکھیں، الگ سروس ہے۔ جب انوائس واجب ہو، ادائیگی کی جگہ کیس کے اندر ہے، اس صفحے پر نہیں۔\n\nرابطے والے ای میل پر لکھیں اگر غلطی درست کرنی ہو، یا ایسا اکاؤنٹ بند کرنا ہو جس کی کوئی کھلی فائل نہ ہو۔ ادا شدہ انوائس چیک حساب کتاب کے قانون کے مطابق رہتی ہے۔\n\nدفتر فائل تیار کرتا ہے۔ فیصلہ وزارت کرتی ہے۔",
+  terms_title: "شرائط",
+  terms_body:
+    "دفتر ایک نامزد شخص، ایک نامزد آجر اور ایک نامزد ملک کے لیے ورک پرمٹ کی فائل تیار کرتا ہے۔ اجازت نامہ خود جاری نہیں کرتا، اور یہ وعدہ نہیں کرتا کہ وزارت ہاں کہے گی۔\n\nفیس وہ قیمت ہے جو اسامی چننے سے پہلے دکھائی جاتی ہے۔ یہ دفتر کی فیس ہے، وزارت کی ادائیگی نہیں۔ تین حصے: 30 جب دفتر فائل قبول کرے، 40 جب آجر وزارت کو بھیجنے کی اجازت دے، اور 30 اس سے پہلے کہ کچھ آپ کو بھیجا جائے۔ ہر حصے کی اپنی انوائس ہے۔\n\nپہلی رسید فائل میں آنے سے پہلے، اس وقت کے اندر جو کیس دکھاتا ہے، منسوخ کر سکتے ہیں۔ وہ رسید قبول ہونے کے بعد فائل آگے بڑھتی ہے۔\n\nجو دستاویز بھیجیں وہ آپ کی اور سچی ہونی چاہیے۔ رد شدہ اسکین اسی فائل پر بدلتا ہے۔ اس کے لیے نئی فائل نہیں کھلتی۔\n\nمکمل معاہدہ پہلی ادائیگی کے بعد کیس میں آتا ہے۔ یہ صفحہ مختصر شکل ہے، تاکہ اکاؤنٹ سے پہلے پڑھی جا سکے۔",
+  cookie_note: "یہ ڈیوائس چنی ہوئی زبان رکھتی ہے، اور سائن ان پر ایک کوکی۔ ہم اشتہار نہیں چلاتے۔",
+  cookie_ok: "سمجھ گیا",
+  login_forgot: "پاس ورڈ بھول گئے",
+  login_reset_title: "نیا پاس ورڈ",
+  login_reset_help: "اگر اس ای میل کا اکاؤنٹ ہے تو لنک بھیجتے ہیں۔ ایک گھنٹہ چلتا ہے۔",
+  login_reset_sent: "اگر اکاؤنٹ ہے تو لنک راستے میں ہے۔",
+  login_reset_nomail: "میل ابھی جڑی نہیں۔ اکاؤنٹ والے فون سے دفتر کو واٹس ایپ پر لکھیں۔",
+  login_reset_new: "نیا پاس ورڈ",
+  login_reset_save: "پاس ورڈ محفوظ کریں",
+  login_reset_done: "پاس ورڈ محفوظ ہو گیا۔ اندر آئیں۔",
+  login_reset_bad: "لنک ختم ہو گیا۔ نیا مانگیں۔",
+  login_terms: "اکاؤنٹ بنانے کا مطلب ہے کہ آپ نے شرائط اور رازداری پڑھ لی۔",
+  country_lead: "قیمتیں اس ملک کی ورک پرمٹ فائل تیار کرنے کی دفتری فیس ہیں۔ فیصلہ وزارت کرتی ہے۔ یہ فیس ریاست کی ادائیگی نہیں۔",
+  seo_home_title: "Vanguard Global Mobility",
+  seo_home_desc: "پراگ کے دفتر سے ورک پرمٹ کی فائلیں۔ فیس اسامی چننے سے پہلے طے ہے۔",
+  seo_about_title: "دفتر · Vanguard",
+  seo_about_desc: "پراگ کا دفتر، کمپنی کا اندراج، اور آجر جن کے ساتھ ہم فائل کرتے ہیں۔",
+  seo_contact_title: "رابطہ · Vanguard",
+  seo_contact_desc: "پراگ کے دفتر کا پتہ، واٹس ایپ اور ای میل۔",
+  seo_questions_title: "سوالات · Vanguard",
+  seo_questions_desc: "فائل کیسے بڑھتی ہے، فیس میں کیا ہے، اور ادائیگی کیسے ہوتی ہے۔",
+  seo_filings_title: "اسامیاں · Vanguard",
+  seo_filings_desc: "ملک اور اجازت نامے جو دفتر تیار کرتا ہے۔",
+  seo_privacy_title: "رازداری · Vanguard",
+  seo_privacy_desc: "دفتر کیا رکھتا ہے، اور کیوں۔",
+  seo_terms_title: "شرائط · Vanguard",
+  seo_terms_desc: "دفتر کیا کرتا ہے، کیا نہیں، اور فیس کیسے بٹتی ہے۔",
+  seo_search_title: "اسامیاں · Vanguard",
+  seo_search_desc: "جو اسامیاں آپ کے راستے سے ملتی ہیں۔",
+  seo_agents_title: "ایجنٹ · Vanguard",
+  seo_agents_desc: "ذیلی ایجنٹ کے گاہکوں کا کوڈ۔",
+  seo_login_title: "داخلہ · Vanguard",
+  seo_login_desc: "اپنا کیس کھولیں، یا اکاؤنٹ بنائیں۔",
+  mail_reset_subject: "نیا پاس ورڈ",
+  mail_reset_body: "اس اکاؤنٹ کے لیے نیا پاس ورڈ مانگا گیا۔ لنک ایک گھنٹہ چلتا ہے۔ اگر آپ نے نہیں مانگا تو خط چھوڑ دیں۔\n\n{link}",
+  mail_stage_subject: "فائل آگے بڑھی",
+  mail_stage_body: "دفتر نے فائل {id} آگے بڑھائی۔ کیس کھولیں، قدم اور واجب رقم وہاں ہے۔\n\nhttps://www.vanguardmobility.site/portal",
+  mail_doc_subject: "دستاویز رد ہوئی",
+  mail_doc_body: "فائل {id} کا ایک اسکین رد ہوا۔ کیس کھول کر وہی اسکین بدلیں۔ نئی فائل نہیں کھلے۔\n\nhttps://www.vanguardmobility.site/portal",
+  mail_due_subject: "انوائس واجب ہے",
+  mail_due_body: "فائل {id} کی ایک ادائیگی اب واجب ہے۔ رقم اور جگہ کیس میں ہے۔\n\nhttps://www.vanguardmobility.site/portal",
+  admin_mail: "گاہکوں کے خطوط",
+  admin_mail_from: "بھیجنے والا پتہ",
+  admin_mail_key: "میل کی کلید",
+  admin_mail_help: "Resend کی کلید اور وہ پتہ جسے میل سروس پہلے سے اجازت دے چکی ہو۔ پھر خط جاتا ہے جب فائل بڑھے، اسکین رد ہو، انوائس کھلے، یا کوئی نیا پاس ورڈ مانگے۔ کلید دفتر کے رجسٹر میں رہتی ہے اور سائٹ پر نہیں دکھتی۔",
+  admin_mail_saved: "میل محفوظ",
+  admin_mail_ready: "خطوط جڑ گئے۔",
+  admin_mail_missing: "خطوط ابھی نہیں جڑے۔",
+  admin_mail_keep: "پرانی کلید رکھنے کے لیے خانہ خالی چھوڑیں۔",
 };
 
-const DICTS = { en, cs, ur };
+import { ru } from "./i18n-ru";
+import { uk } from "./i18n-uk";
+
+const DICTS: Record<Lang, Record<keyof typeof en, string>> = {
+  en,
+  cs,
+  ur,
+  uk: { ...en, ...uk },
+  ru: { ...en, ...ru },
+};
 
 const LanguageContext = createContext<{
   lang: Lang;
@@ -2100,27 +2287,62 @@ const LanguageContext = createContext<{
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
+  const [picked, setPicked] = useState(false);
   useEffect(() => {
-    const stored = window.localStorage.getItem("vg-lang");
-    if (stored === "cs" || stored === "ur" || stored === "en") setLangState(stored);
+    let next: Lang = "en";
+    try {
+      const query = new URLSearchParams(window.location.search).get("lang");
+      const stored = window.localStorage.getItem("vg-lang");
+      if (isLang(query)) next = query;
+      else if (isLang(stored)) next = stored;
+      else {
+        const nav = navigator.language.toLowerCase();
+        if (nav.startsWith("uk")) next = "uk";
+        else if (nav.startsWith("ru")) next = "ru";
+        else if (nav.startsWith("cs")) next = "cs";
+        else if (nav.startsWith("ur")) next = "ur";
+      }
+    } catch {
+      next = "en";
+    }
+    setLangState(next);
+    setPicked(true);
   }, []);
   useEffect(() => {
     document.documentElement.lang = lang;
-    document.documentElement.dir = "ltr";
+    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
     document.documentElement.classList.toggle("lang-ur", lang === "ur");
-  }, [lang]);
+    if (!picked) return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("lang") === lang) return;
+      url.searchParams.set("lang", lang);
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      /* the address bar simply stays as it is */
+    }
+  }, [lang, picked]);
   const value = useMemo(() => {
     const dict = DICTS[lang];
     return {
       lang,
       setLang: (l: Lang) => {
         setLangState(l);
-        window.localStorage.setItem("vg-lang", l);
+        try {
+          window.localStorage.setItem("vg-lang", l);
+        } catch {
+          /* storage unavailable */
+        }
       },
       t: (key: keyof typeof en) => dict[key] ?? en[key],
     };
   }, [lang]);
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function copy(lang: string, key: keyof typeof en): string {
+  const code: Lang = isLang(lang) ? lang : "en";
+  return DICTS[code][key] ?? en[key];
 }
 
 export function softenError(raw: string, busy: string) {

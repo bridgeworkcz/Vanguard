@@ -33,6 +33,8 @@ import { HISTORY_COUNT, buildHistoryBoard, kyivDay } from "./history";
 import { readSheetSessionUser } from "./account.server";
 import { siteFileUrl } from "./files";
 import { canCancel, citizenshipBlocked, dueWithinHours, kyivMonth, monthCommission, trancheSplit } from "./ops";
+import { copy } from "./i18n";
+import { RESET_LINK, deliverMail } from "./mail";
 import crypto from "crypto";
 
 const MAX_DATA = 2_600_000;
@@ -108,6 +110,28 @@ async function putSetting(key: string, value: string, actor: string, touchCache 
   if (found) await updateSheetRowById("SystemSettings", found.id, { value, updatedAt: stamp, updatedBy: actor });
   else await appendSheetRow("SystemSettings", { id: newId("SET"), key, value, updatedAt: stamp, updatedBy: actor });
   if (touchCache) dropPublicCache();
+}
+
+function filedLang(lang: string) {
+  return lang === "cs" || lang === "ur" || lang === "uk" || lang === "ru" ? lang : "en";
+}
+
+async function mailCase(app: { id: string; clientEmail: string; extra: { lang: string } }, kind: "stage" | "due" | "doc") {
+  try {
+    const map = await settingMap();
+    const lang = filedLang(app.extra.lang);
+    const subjectKey = kind === "due" ? "mail_due_subject" : kind === "doc" ? "mail_doc_subject" : "mail_stage_subject";
+    const bodyKey = kind === "due" ? "mail_due_body" : kind === "doc" ? "mail_doc_body" : "mail_stage_body";
+    await deliverMail({
+      key: map.resend_key || "",
+      from: map.mail_from || "",
+      to: app.clientEmail || "",
+      subject: copy(lang, subjectKey),
+      text: copy(lang, bodyKey).replaceAll("{id}", app.id),
+    });
+  } catch (err) {
+    console.error("[mail]", err);
+  }
 }
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -527,7 +551,9 @@ async function markTrancheDue(applicationId: string, key: string) {
   const row = (await readSheetRows("PaymentTransactions")).find(
     (item) => item.dossierId === applicationId && item.trancheKey === key && item.status === "NOT_DUE",
   );
-  if (row) await updateSheetRowById("PaymentTransactions", row.id, { ...row, status: "DUE" });
+  if (!row) return false;
+  await updateSheetRowById("PaymentTransactions", row.id, { ...row, status: "DUE" });
+  return true;
 }
 
 async function ensureTranches(applicationId: string, userId: string, total: number) {
@@ -1403,7 +1429,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
   const percent = await cutFor(referrerUserId);
   const id = newId("VG");
   const stamp = nowIso();
-  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, lang: data.lang === "cs" || data.lang === "ur" ? data.lang : "en", productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
+  const extra: Extra = { ...emptyExtra(), clientEmail: person.email, citizenship: data.citizenship, lang: filedLang(data.lang || ""), productionWeeks: productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing), questionnaire: { ...parseQuestionnaire("{}"), citizenship: data.citizenship }, referrerUserId };
   await appendSheetRow("Applications", {
     id,
     userId,
@@ -1633,6 +1659,18 @@ function docNote(lang: string, reason: string): string {
       page: "فائل میں صفحات زیادہ ہیں۔ صرف وہ صفحہ بھیجیں جو کیس مانگتا ہے۔",
       other: "یہ کاغذ مسترد ہوا۔",
     },
+    uk: {
+      blur: "Суму на квитанції не прочитати. Надішліть ближче фото.",
+      name: "Ім’я на папері не збігається з анкетою.",
+      page: "У файлі забагато сторінок. Надішліть лише ту, яку просить справа.",
+      other: "Цей папір відхилено.",
+    },
+    ru: {
+      blur: "Сумму на квитанции не прочитать. Пришлите фото ближе.",
+      name: "Имя на бумаге не совпадает с анкетой.",
+      page: "В файле слишком много страниц. Пришлите только ту, которую просит дело.",
+      other: "Этот документ отклонён.",
+    },
   };
   const line = (copy[lang] || copy.en)?.[code || ""] || reason;
   return extra?.trim() ? `${line} ${extra.trim()}` : line;
@@ -1660,6 +1698,20 @@ function stageNote(lang: string, action: string): string {
       stage4: "آخری 30% واجب ہیں۔ اس کے بعد اجازت نامہ بھیجا جا سکتا ہے۔",
       reject: "فائل مسترد ہوئی۔ کیس سے اسے دوبارہ کھولا جا سکتا ہے۔",
       cancel: "فائل منسوخ ہوئی۔ جگہ خالی ہے۔",
+    },
+    uk: {
+      accept: "Офіс прийняв справу. Перші 30% тепер у кабінеті.",
+      "confirm-payment": "Перша оплата є. Надішліть папери, яких справа ще просить.",
+      stage4: "Останні 30% до сплати. Після них дозвіл можна надсилати.",
+      reject: "Справу відхилено. Її можна відкрити знову з кабінету.",
+      cancel: "Справу скасовано. Місце вільне.",
+    },
+    ru: {
+      accept: "Офис принял дело. Первые 30% теперь в кабинете.",
+      "confirm-payment": "Первая оплата есть. Пришлите бумаги, которые дело ещё просит.",
+      stage4: "Последние 30% к оплате. После них разрешение можно отправлять.",
+      reject: "Дело отклонено. Его можно открыть снова из кабинета.",
+      cancel: "Дело отменено. Место свободно.",
     },
   };
   return (copy[lang] || copy.en)?.[action] || "";
@@ -1729,6 +1781,8 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
       console.error("[stage-note]", err);
     }
   }
+  if (data.action === "accept" || data.action === "stage4") void mailCase(app, "due");
+  else if (data.action === "confirm-payment" || data.action === "reject" || data.action === "cancel") void mailCase(app, "stage");
   return { ok: true as const, stage };
 }
 
@@ -1740,7 +1794,8 @@ export async function adminSetProcess(userId: string, data: { id: string; proces
   if (openedBefore(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
   await saveApp(app, app.extra, { processStage: data.processStage });
   if (data.processStage === "EMPLOYER_APPROVED_FOR_MINISTRY" || PROCESS_STAGES.indexOf(data.processStage as ProcessStage) >= PROCESS_STAGES.indexOf("EMPLOYER_APPROVED_FOR_MINISTRY")) {
-    await markTrancheDue(app.id, "T2");
+    const opened = await markTrancheDue(app.id, "T2");
+    if (opened) void mailCase(app, "due");
   }
   await audit(userId, "PROCESS", app.id, data.processStage);
 }
@@ -2350,6 +2405,7 @@ export async function reviewDocument(userId: string, data: { id: string; status:
       } catch (err) {
         console.error("[doc-note]", err);
       }
+      void mailCase(app, "doc");
     }
   }
   return { ok: true };
@@ -2412,5 +2468,81 @@ export async function changeMyPassword(userId: string, data: { current: string; 
   await updateSheetRowById("Users", userId, { ...row, passwordHash: hashPassword(data.next) });
   await audit(userId, "PASSWORD", userId, "");
   return { ok: true };
+}
+
+type ResetRow = { hash: string; userId: string; exp: number };
+
+function resetRows(raw: string | undefined): ResetRow[] {
+  const now = Date.now();
+  try {
+    const parsed = JSON.parse(raw || "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((row): row is ResetRow => Boolean(row) && typeof row === "object" && typeof (row as ResetRow).hash === "string" && typeof (row as ResetRow).userId === "string")
+      .filter((row) => row.exp > now)
+      .slice(-40);
+  } catch {
+    return [];
+  }
+}
+
+export async function adminMailStatus(userId: string) {
+  await requireAdmin(userId);
+  const map = await settingMap();
+  return { from: (map.mail_from || "").slice(0, 160), ready: Boolean((map.resend_key || "").trim() && (map.mail_from || "").includes("@")) };
+}
+
+export async function adminSaveMail(userId: string, data: { from: string; key: string }) {
+  await requireAdmin(userId);
+  const from = data.from.trim().slice(0, 160);
+  if (from && !from.includes("@")) throw new Error("Email");
+  await putSetting("mail_from", from, userId, false);
+  const key = data.key.trim().slice(0, 200);
+  if (key) await putSetting("resend_key", key, userId, false);
+  const map = await settingMap();
+  return { from, ready: Boolean((map.resend_key || "").trim() && from.includes("@")) };
+}
+
+export async function requestPasswordReset(email: string, lang: string) {
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim().slice(0, 80) || "local";
+  const normalized = email.trim().toLowerCase();
+  if (limited(`reset:${normalized}`, 3, 60 * 60 * 1000) || limited(`reset-ip:${ip}`, 20, 60 * 60 * 1000)) throw new Error("Try again later.");
+  const map = await settingMap();
+  if (!(map.resend_key || "").trim() || !(map.mail_from || "").includes("@")) return { sent: false as const, reason: "nomail" as const };
+  const row = (await readSheetRows("Users")).find((item) => (item.email || "").toLowerCase() === normalized && item.isActive !== "false");
+  if (row) {
+    const token = crypto.randomBytes(32).toString("hex");
+    const hash = crypto.createHash("sha256").update(token).digest("hex");
+    const next = resetRows(map.password_resets).filter((item) => item.userId !== row.id);
+    next.push({ hash, userId: row.id, exp: Date.now() + 60 * 60 * 1000 });
+    await putSetting("password_resets", JSON.stringify(next), "reset", false);
+    await deliverMail({
+      key: map.resend_key || "",
+      from: map.mail_from || "",
+      to: row.email,
+      subject: copy(filedLang(lang), "mail_reset_subject"),
+      text: copy(filedLang(lang), "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
+    });
+  }
+  return { sent: true as const };
+}
+
+export async function completePasswordReset(token: string, password: string) {
+  if (password.trim().length < 8) throw new Error("Short");
+  if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error("Expired");
+  const map = await settingMap();
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+  const rows = resetRows(map.password_resets);
+  const hit = rows.find((item) => item.hash === hash);
+  if (!hit) throw new Error("Expired");
+  const users = await readSheetRows("Users");
+  const row = users.find((item) => item.id === hit.userId);
+  if (!row || row.isActive === "false") throw new Error("Expired");
+  const { hashPassword } = await import("@/lib/google/session");
+  await updateSheetRowById("Users", row.id, { ...row, passwordHash: hashPassword(password) });
+  await putSetting("password_resets", JSON.stringify(rows.filter((item) => item.hash !== hash)), "reset", false);
+  await audit(row.id, "PASSWORD_RESET", row.id, "");
+  return { ok: true as const };
 }
 

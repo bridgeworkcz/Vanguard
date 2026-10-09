@@ -30,6 +30,9 @@ import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerR
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { canCancel, citizenshipBlocked, kyivMonth, monthCommission } from "./ops";
+import { copy } from "./i18n";
+import { RESET_LINK, deliverMail } from "./mail";
+import crypto from "node:crypto";
 
 type Profile = {
   userId: string;
@@ -305,6 +308,25 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     processStage: capped.processStage,
     profileComplete: Boolean(row.profileComplete),
   };
+}
+
+async function mailSql(sql: Sql, to: string, kind: "stage" | "due" | "doc", id: string) {
+  try {
+    const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from')`;
+    const map: Record<string, string> = {};
+    for (const row of rows) map[row.key] = row.value;
+    const subjectKey = kind === "due" ? "mail_due_subject" : kind === "doc" ? "mail_doc_subject" : "mail_stage_subject";
+    const bodyKey = kind === "due" ? "mail_due_body" : kind === "doc" ? "mail_doc_body" : "mail_stage_body";
+    await deliverMail({
+      key: map.resend_key || "",
+      from: map.mail_from || "",
+      to,
+      subject: copy("en", subjectKey),
+      text: copy("en", bodyKey).replaceAll("{id}", id),
+    });
+  } catch (err) {
+    console.error("[mail]", err);
+  }
 }
 
 type DocMeta = {
@@ -867,17 +889,20 @@ export const adminSetStage = createServerFn({ method: "POST" })
       await sql`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${Math.max(1, Number(app.productionWeeks) || 8) * 7} * interval '1 day'),
         process_stage = 'IN_PROCESS', updated_at = now() where id = ${app.id}`;
       await audit(sql, profile.userId, data.action, app.id, data.reason);
+      void mailSql(sql, app.clientEmail, "stage", app.id);
       return { ok: true as const, stage: 3 };
     } else if (data.action === "stage4") {
       if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
       if (openedBeforeInvoice2Rule(app.createdAt)) throw new Error("Legacy");
       await sql`update applications set stage = 4, stage4_at = now(), updated_at = now() where id = ${app.id}`;
       await audit(sql, profile.userId, data.action, app.id, data.reason);
+      void mailSql(sql, app.clientEmail, "due", app.id);
       return { ok: true as const, stage: 4 };
     } else {
       throw new Error("Action");
     }
     await audit(sql, profile.userId, data.action, app.id, data.reason);
+    void mailSql(sql, app.clientEmail, data.action === "accept" ? "due" : "stage", app.id);
     return { ok: true as const, stage: data.action === "accept" ? 2 : app.stage };
   });
 
@@ -898,8 +923,11 @@ export const adminSetProcess = createServerFn({ method: "POST" })
     const app = await loadApp(sql, data.id);
     if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
     if (openedBeforeInvoice2Rule(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
+    const before = stageIndex(app.processStage as ProcessStage);
+    const next = stageIndex(data.processStage as ProcessStage);
     await sql`update applications set process_stage = ${data.processStage}, updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "PROCESS", app.id, data.processStage);
+    if (before < stageIndex(INVOICE2_STAGE) && next >= stageIndex(INVOICE2_STAGE)) void mailSql(sql, app.clientEmail, "due", app.id);
   });
 
 export const adminSaveDispatch = createServerFn({ method: "POST" })
@@ -1359,6 +1387,116 @@ export const quoteAgent = createServerFn({ method: "POST" })
     return { percent: id ? await cutForSql(sql, id) : 0 };
   });
 
+export const adminMailStatus = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).adminMailStatus(context.userId);
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from')`;
+    const map: Record<string, string> = {};
+    for (const row of rows) map[row.key] = row.value;
+    const from = (map.mail_from || "").slice(0, 160);
+    return { from, ready: Boolean((map.resend_key || "").trim() && from.includes("@")) };
+  });
+
+export const adminSaveMail = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { from?: string; key?: string }) => ({
+    from: clean(input?.from, 160),
+    key: clean(input?.key, 200),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).adminSaveMail(context.userId, data);
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    if (data.from && !data.from.includes("@")) throw new Error("Email");
+    await sql`insert into settings (key, value, updated_at) values ('mail_from', ${data.from}, now()) on conflict (key) do update set value = ${data.from}, updated_at = now()`;
+    if (data.key) {
+      await sql`insert into settings (key, value, updated_at) values ('resend_key', ${data.key}, now()) on conflict (key) do update set value = ${data.key}, updated_at = now()`;
+    }
+    const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from')`;
+    const map: Record<string, string> = {};
+    for (const row of rows) map[row.key] = row.value;
+    return { from: data.from, ready: Boolean((map.resend_key || "").trim() && data.from.includes("@")) };
+  });
+
+export const requestPasswordReset = createServerFn({ method: "POST" })
+  .validator((input: { email?: string; lang?: string }) => ({
+    email: clean(input?.email, 160).toLowerCase(),
+    lang: clean(input?.lang, 8),
+  }))
+  .handler(async ({ data }) => {
+    if (!data.email.includes("@")) return { sent: true as const };
+    if (sheetsOn()) return (await import("./sheet-backend")).requestPasswordReset(data.email, data.lang);
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim().slice(0, 80) || "local";
+    if (limited(`reset:${data.email}`, 3, 60 * 60 * 1000) || limited(`reset-ip:${ip}`, 20, 60 * 60 * 1000)) throw new Error("Try again later.");
+    const sql = await getSql();
+    const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from', 'password_resets')`;
+    const map: Record<string, string> = {};
+    for (const row of rows) map[row.key] = row.value;
+    if (!(map.resend_key || "").trim() || !(map.mail_from || "").includes("@")) return { sent: false as const, reason: "nomail" as const };
+    const users = await sql<{ id: string; email: string }>`select id, email from "user" where lower(email) = ${data.email} limit 1`;
+    const user = users[0];
+    if (user) {
+      const token = crypto.randomBytes(32).toString("hex");
+      const hash = crypto.createHash("sha256").update(token).digest("hex");
+      const now = Date.now();
+      let book: { hash: string; userId: string; exp: number }[] = [];
+      try {
+        const parsed = JSON.parse(map.password_resets || "[]") as unknown;
+        if (Array.isArray(parsed)) book = parsed.filter((row) => row && typeof row === "object" && (row as { exp?: number }).exp! > now);
+      } catch {
+        book = [];
+      }
+      book = book.filter((row) => row.userId !== user.id).slice(-40);
+      book.push({ hash, userId: user.id, exp: now + 60 * 60 * 1000 });
+      const value = JSON.stringify(book);
+      await sql`insert into settings (key, value, updated_at) values ('password_resets', ${value}, now()) on conflict (key) do update set value = ${value}, updated_at = now()`;
+      const lang = data.lang === "cs" || data.lang === "ur" || data.lang === "uk" || data.lang === "ru" ? data.lang : "en";
+      await deliverMail({
+        key: map.resend_key || "",
+        from: map.mail_from || "",
+        to: user.email,
+        subject: copy(lang, "mail_reset_subject"),
+        text: copy(lang, "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
+      });
+    }
+    return { sent: true as const };
+  });
+
+export const completePasswordReset = createServerFn({ method: "POST" })
+  .validator((input: { token?: string; password?: string }) => ({
+    token: clean(input?.token, 80),
+    password: typeof input?.password === "string" ? input.password.slice(0, 200) : "",
+  }))
+  .handler(async ({ data }) => {
+    if (data.password.trim().length < 8) throw new Error("Short");
+    if (sheetsOn()) return (await import("./sheet-backend")).completePasswordReset(data.token, data.password);
+    if (!/^[a-f0-9]{64}$/i.test(data.token)) throw new Error("Expired");
+    const sql = await getSql();
+    const rows = await sql<{ value: string }>`select value from settings where key = 'password_resets'`;
+    const hash = crypto.createHash("sha256").update(data.token).digest("hex");
+    const now = Date.now();
+    let book: { hash: string; userId: string; exp: number }[] = [];
+    try {
+      const parsed = JSON.parse(rows[0]?.value || "[]") as unknown;
+      if (Array.isArray(parsed)) book = parsed.filter((row) => row && typeof row === "object");
+    } catch {
+      book = [];
+    }
+    const hit = book.find((row) => row.hash === hash && row.exp > now);
+    if (!hit) throw new Error("Expired");
+    const { hashPassword } = await import("better-auth/crypto");
+    const hashed = await hashPassword(data.password);
+    const updated = await sql<{ id: string }>`update "account" set password = ${hashed}, "updatedAt" = now() where "userId" = ${hit.userId} and "providerId" = 'credential' returning id`;
+    if (!updated[0]) throw new Error("Expired");
+    const value = JSON.stringify(book.filter((row) => row.hash !== hash && row.exp > now));
+    await sql`insert into settings (key, value, updated_at) values ('password_resets', ${value}, now()) on conflict (key) do update set value = ${value}, updated_at = now()`;
+    return { ok: true as const };
+  });
+
 export const adminDeleteApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
@@ -1567,6 +1705,11 @@ export const reviewDocument = createServerFn({ method: "POST" })
     if (!found[0]) throw new Error("Not found");
     await sql`update documents set status = ${data.status}, rejection_reason = ${data.status === "REJECTED" ? data.reason : ""} where id = ${data.id}`;
     await audit(sql, context.userId, "DOCUMENT", data.id, data.status);
+    if (data.status === "REJECTED") {
+      const doc = await sql<{ application_id: string }>`select application_id from documents where id = ${data.id}`;
+      const app = doc[0] ? await loadApp(sql, doc[0].application_id) : null;
+      if (app) void mailSql(sql, app.clientEmail, "doc", app.id);
+    }
     return { ok: true };
   });
 

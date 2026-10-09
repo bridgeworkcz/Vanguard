@@ -270,7 +270,7 @@ function SettingsPanel({
       <div className="glass grid gap-3 p-4">
         <p className="text-xs uppercase tracking-widest text-mist">{t("settings_lang")}</p>
         <div className="flex gap-2">
-          {(["en", "cs", "ur"] as Lang[]).map((code) => (
+          {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
             <button key={code} type="button" className={lang === code ? "btn-solid" : "btn"} onClick={() => setLang(code)}>
               {code.toUpperCase()}
             </button>
@@ -290,6 +290,7 @@ function SettingsPanel({
 
 export function PortalPage({ id }: { id: string }) {
   const { t, lang } = useI18n();
+  const paperLang = lang === "cs" || lang === "ur" ? lang : "en";
   const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data: site } = useSite();
@@ -584,7 +585,7 @@ export function PortalPage({ id }: { id: string }) {
   async function invoice(tranche: 1 | 2 | 3) {
     if (!app || !site || !visa) return;
     const url = await buildInvoice({
-      lang,
+      lang: paperLang,
       tranche,
       settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
@@ -605,7 +606,7 @@ export function PortalPage({ id }: { id: string }) {
     const job = site.vacancies.find((item) => item.id === app.vacancyId);
     const person = parseQuestionnaire(app.questionnaire);
     const url = await buildOffer({
-      lang,
+      lang: paperLang,
       settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
       client: clientName(person),
@@ -625,7 +626,7 @@ export function PortalPage({ id }: { id: string }) {
     if (!app || !site || !visa) return;
     const person = parseQuestionnaire(app.questionnaire);
     const url = await buildContract({
-      lang,
+      lang: paperLang,
       settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
       fileId: app.id,
       client: clientName(person),
@@ -1329,7 +1330,7 @@ export function PortalPage({ id }: { id: string }) {
                 .catch(() => ({ number: app.id }))
                 .then((numbered) =>
                   buildInvoice({
-                    lang,
+                    lang: paperLang,
                     tranche: preview.tranche!,
                     settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
                     fileId: app.id,

@@ -18,9 +18,12 @@ import { Route as FilingsRouteImport } from './routes/filings'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PapersRouteImport } from './routes/papers'
 import { Route as PortalRouteImport } from './routes/portal'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ProcessRouteImport } from './routes/process'
 import { Route as QuestionsRouteImport } from './routes/questions'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as CountryCodeRouteImport } from './routes/country.$code'
 import { Route as GoogleDriveRouteImport } from './routes/google.drive'
 import { Route as RCodeRouteImport } from './routes/r.$code'
@@ -73,6 +76,11 @@ const PortalRoute = PortalRouteImport.update({
   path: '/portal',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProcessRoute = ProcessRouteImport.update({
   id: '/process',
   path: '/process',
@@ -86,6 +94,16 @@ const QuestionsRoute = QuestionsRouteImport.update({
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CountryCodeRoute = CountryCodeRouteImport.update({
@@ -129,9 +147,12 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/privacy': typeof PrivacyRoute
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/terms': typeof TermsRoute
   '/country/$code': typeof CountryCodeRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
@@ -149,9 +170,12 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/privacy': typeof PrivacyRoute
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/terms': typeof TermsRoute
   '/country/$code': typeof CountryCodeRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
@@ -170,9 +194,12 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
+  '/privacy': typeof PrivacyRoute
   '/process': typeof ProcessRoute
   '/questions': typeof QuestionsRoute
   '/search': typeof SearchRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/terms': typeof TermsRoute
   '/country/$code': typeof CountryCodeRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
@@ -192,9 +219,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/papers'
     | '/portal'
+    | '/privacy'
     | '/process'
     | '/questions'
     | '/search'
+    | '/sitemap.xml'
+    | '/terms'
     | '/country/$code'
     | '/google/drive'
     | '/r/$code'
@@ -212,9 +242,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/papers'
     | '/portal'
+    | '/privacy'
     | '/process'
     | '/questions'
     | '/search'
+    | '/sitemap.xml'
+    | '/terms'
     | '/country/$code'
     | '/google/drive'
     | '/r/$code'
@@ -232,9 +265,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/papers'
     | '/portal'
+    | '/privacy'
     | '/process'
     | '/questions'
     | '/search'
+    | '/sitemap.xml'
+    | '/terms'
     | '/country/$code'
     | '/google/drive'
     | '/r/$code'
@@ -253,9 +289,12 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   PapersRoute: typeof PapersRoute
   PortalRoute: typeof PortalRoute
+  PrivacyRoute: typeof PrivacyRoute
   ProcessRoute: typeof ProcessRoute
   QuestionsRoute: typeof QuestionsRoute
   SearchRoute: typeof SearchRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  TermsRoute: typeof TermsRoute
   CountryCodeRoute: typeof CountryCodeRoute
   GoogleDriveRoute: typeof GoogleDriveRoute
   RCodeRoute: typeof RCodeRoute
@@ -329,6 +368,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/process': {
       id: '/process'
       path: '/process'
@@ -348,6 +394,20 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/country/$code': {
@@ -405,9 +465,12 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   PapersRoute: PapersRoute,
   PortalRoute: PortalRoute,
+  PrivacyRoute: PrivacyRoute,
   ProcessRoute: ProcessRoute,
   QuestionsRoute: QuestionsRoute,
   SearchRoute: SearchRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
+  TermsRoute: TermsRoute,
   CountryCodeRoute: CountryCodeRoute,
   GoogleDriveRoute: GoogleDriveRoute,
   RCodeRoute: RCodeRoute,
@@ -420,10 +483,11 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
+import type { startInstance } from './start.ts'
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }

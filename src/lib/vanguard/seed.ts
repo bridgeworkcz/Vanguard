@@ -577,21 +577,33 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   hero_title_en: "The permit, prepared properly.",
   hero_title_cs: "Povolení, připravené pořádně.",
   hero_title_ur: "اجازت نامہ، درست طریقے سے تیار۔",
+  hero_title_uk: "Дозвіл, підготовлений як слід.",
+  hero_title_ru: "Разрешение, подготовленное как следует.",
   hero_body_en:
     "Choose your citizenship, the country, the permit, and how fast the file should move. We show the fee and the openings that match. A ministry still decides. We make the case complete.",
   hero_body_cs:
     "Zvolte občanství, zemi, typ povolení a tempo přípravy spisu. Ukážeme honorář a volná místa, která sedí. Rozhoduje ministerstvo. My dodáme úplný spis.",
   hero_body_ur:
     "شہریت، ملک، اجازت نامے کی قسم اور فائل کی رفتار منتخب کریں۔ ہم فیس اور موزوں اسامیاں دکھائیں گے۔ فیصلہ وزارت کرتی ہے۔ ہم فائل مکمل بناتے ہیں۔",
+  hero_body_uk:
+    "Оберіть громадянство, країну, дозвіл і те, як швидко має рухатися справа. Ми покажемо суму і місця, які підходять. Рішення за міністерством. Ми доводимо справу до комплектності.",
+  hero_body_ru:
+    "Выберите гражданство, страну, разрешение и то, как быстро должно идти дело. Мы покажем сумму и подходящие места. Решение за министерством. Мы доводим дело до комплекта.",
   about_lead_en: "A Prague office for people who already know where they are going to work.",
   about_lead_cs: "Pražská kancelář pro lidi, kteří už vědí, kde budou pracovat.",
   about_lead_ur: "پراگ کا دفتر ان لوگوں کے لیے جو پہلے ہی جانتے ہیں کہ وہ کہاں کام کریں گے۔",
+  about_lead_uk: "Празький офіс для людей, які вже знають, де будуть працювати.",
+  about_lead_ru: "Пражский офис для людей, которые уже знают, где будут работать.",
   about_story_en:
     "Vanguard Global Mobility s.r.o. files work permits for clients who have a concrete employer and a concrete country. The work is unglamorous on purpose: identity checked, police clearance in the file, the employer's papers aligned with the permit we actually sell, and a fee split into three parts so nobody is asked for the whole sum on day one.\n\nWe do not promise a visa. Slovakia, Czechia, Germany, Portugal, Bulgaria, Italy, Norway, Serbia, Canada, Hungary, Poland, New Zealand, and Belarus each have their own term and their own speed. Where a faster lane does not exist, we do not invent one.\n\nThe office is in Staré Město. The file is handled by a named person. When the ministry is slow, the case page says so.",
   about_story_cs:
     "Vanguard Global Mobility s.r.o. podává pracovní povolení klientům, kteří mají konkrétního zaměstnavatele a konkrétní zemi. Práce je záměrně střízlivá: ověřená totožnost, výpis z rejstříku trestů ve spise, podklady zaměstnavatele sladěné s povolením, které skutečně nabízíme, a honorář rozdělený na tři části, aby první den nikdo neplatil celou částku.\n\nVíza neslibujeme. Slovensko, Česko, Německo, Portugalsko, Bulharsko, Itálie, Norsko, Srbsko, Kanada, Maďarsko, Polsko, Nový Zéland a Bělorusko mají každý vlastní dobu a vlastní tempo. Kde rychlejší dráha není, nevymýšlíme ji.\n\nKancelář je na Starém Městě. Spis má jméno člověka, který ho vede. Když je ministerstvo pomalé, stránka případu to říká.",
   about_story_ur:
     "Vanguard Global Mobility s.r.o. ان گاہکوں کے ورک پرمٹ جمع کراتی ہے جن کے پاس واضح آجر اور واضح ملک ہو۔ کام جان بوجھ کر سادہ ہے: شناخت کی تصدیق، فائل میں عدمِ جرم کا سرٹیفکیٹ، آجر کے کاغذات اسی اجازت نامے سے ہم آہنگ جسے ہم بیچتے ہیں، اور فیس تین حصوں میں تاکہ پہلے دن پوری رقم نہ مانگی جائے۔\n\nہم ویزے کا وعدہ نہیں کرتے۔ سلوواکیہ، چیکیا، جرمنی، پرتگال، بلغاریہ، اٹلی، ناروے، سربیا، کینیڈا، ہنگری، پولینڈ، نیوزی لینڈ اور بیلاروس ہر ایک کی اپنی مدت اور اپنی رفتار ہے۔ جہاں تیز راستہ نہیں، ہم اسے ایجاد نہیں کرتے۔\n\nدفتر ستارے میستو میں ہے۔ ہر فائل کے ساتھ ایک نام ہے۔ جب وزارت سست ہو، کیس کا صفحہ یہی کہتا ہے۔",
+  about_story_uk:
+    "Vanguard Global Mobility s.r.o. подає дозволи на роботу клієнтам, у яких уже є конкретний роботодавець і конкретна країна. Робота навмисно спокійна: перевірена особа, довідка про несудимість у справі, папери роботодавця зведені з тим дозволом, який ми реально ведемо, і сума на три частини, щоб у перший день ніхто не платив усе одразу.\n\nДозвіл не обіцяємо. Словаччина, Чехія, Німеччина, Португалія, Болгарія, Італія, Норвегія, Сербія, Канада, Угорщина, Польща, Нова Зеландія і Білорусь мають свій строк і свій темп. Де швидшої смуги немає, ми її не вигадуємо.\n\nОфіс у Старому Місті. У справи є ім’я людини, яка її веде. Коли міністерство повільне, сторінка справи про це каже.",
+  about_story_ru:
+    "Vanguard Global Mobility s.r.o. подаёт разрешения на работу клиентам, у которых уже есть конкретный работодатель и конкретная страна. Работа нарочно спокойная: проверенная личность, справка о несудимости в деле, бумаги работодателя сведены с тем разрешением, которое мы реально ведём, и сумма на три части, чтобы в первый день никто не платил всё сразу.\n\nРазрешение не обещаем. Словакия, Чехия, Германия, Португалия, Болгария, Италия, Норвегия, Сербия, Канада, Венгрия, Польша, Новая Зеландия и Беларусь имеют свой срок и свой темп. Где более быстрой полосы нет, мы её не выдумываем.\n\nОфис в Старом Городе. У дела есть имя человека, который его ведёт. Когда министерство медлит, страница дела об этом говорит.",
   motion: "1",
   count_filed: "1",
   count_issued: "1",
@@ -599,6 +611,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   banner_text_en: "",
   banner_text_cs: "",
   banner_text_ur: "",
+  banner_text_uk: "",
+  banner_text_ru: "",
   banner_country: "",
   banner_start: "",
   banner_end: "",

@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { listAgentBook, listPublicFilings } from "@/lib/vanguard/api";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
-import { Shell, rememberAgent, useDesk } from "./chrome";
+import { Shell, rememberAgent, useDesk, usePageMeta } from "./chrome";
 
 function Article({ kicker, title, children }: { kicker: string; title: string; children: ReactNode }) {
   return (
@@ -18,6 +18,7 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
 
 export function QuestionsPage() {
   const { t } = useI18n();
+  usePageMeta("seo_questions_title", "seo_questions_desc");
   const [find, setFind] = useState("");
   useEffect(() => {
     setFind(window.localStorage.getItem("vg-faq") || "");
@@ -144,6 +145,7 @@ export function QuestionsPage() {
 
 export function AgentsPage() {
   const { t } = useI18n();
+  usePageMeta("seo_agents_title", "seo_agents_desc");
   const { signedIn } = useDesk();
   useEffect(() => {
     if (!signedIn) return;
@@ -180,6 +182,7 @@ const PAGE = 15;
 
 export function FilingsPage() {
   const { t } = useI18n();
+  usePageMeta("seo_filings_title", "seo_filings_desc");
   const [rows, setRows] = useState<Awaited<ReturnType<typeof listPublicFilings>>>([]);
   const [country, setCountry] = useState("");
   const [query, setQuery] = useState("");

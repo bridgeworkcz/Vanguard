@@ -6,7 +6,7 @@ import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile, listMyApplications, quoteAgent } from "@/lib/vanguard/api";
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
-import { useI18n, softenError, type Lang } from "@/lib/vanguard/i18n";
+import { useI18n, softenError, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
 import { stageTone } from "@/lib/vanguard/ops";
 import { applyDesktop, desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 
@@ -251,6 +251,21 @@ function CaseNudge({ signedIn, staff }: { signedIn: boolean; staff: boolean }) {
   );
 }
 
+export function usePageMeta(title: CopyKey, desc: CopyKey) {
+  const { t, lang } = useI18n();
+  useEffect(() => {
+    document.title = t(title);
+    document.querySelector('meta[name="description"]')?.setAttribute("content", t(desc));
+    let link = document.querySelector('link[rel="canonical"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.setAttribute("rel", "canonical");
+      document.head.appendChild(link);
+    }
+    link.setAttribute("href", `https://www.vanguardmobility.site${window.location.pathname}`);
+  }, [desc, lang, t, title]);
+}
+
 export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?: "dark" | "light" }) {
   const { t, lang, setLang } = useI18n();
   const { data: site } = useSite();
@@ -259,6 +274,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const [role, setRole] = useState<string | null>(roleCache);
   const [signingOut, setSigningOut] = useState(false);
   const [desk, setDesk] = useState(false);
+  const [cookieOk, setCookieOk] = useState(true);
   const navRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const gate = typeof window !== "undefined" && hasGateSessionMarker();
@@ -266,6 +282,11 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
     const on = desktopOn();
     setDesk(on);
     applyDesktop(on);
+    try {
+      setCookieOk(localStorage.getItem("vg-cookie") === "1");
+    } catch {
+      setCookieOk(true);
+    }
   }, []);
   useLayoutEffect(() => {
     const el = headerRef.current;
@@ -333,16 +354,35 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             </span>
           </Link>
           <div className="ms-auto flex min-w-0 items-center justify-end gap-1 sm:gap-2">
-            {(["en", "cs", "ur"] as Lang[]).map((code) => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => setLang(code)}
-                className={`lang-code inline-flex h-7 min-w-7 items-center justify-center rounded-[10px] border border-white/15 px-1.5 text-[10px] tracking-[0.08em] sm:h-8 sm:px-2 sm:text-[11px] ${lang === code ? "bg-white/10 text-white" : "text-[#aaa]"}`}
+            <label className="sm:hidden">
+              <select
+                aria-label="Language"
+                value={lang}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (next === "en" || next === "cs" || next === "uk" || next === "ru" || next === "ur") setLang(next);
+                }}
+                className="h-8 rounded-[10px] border border-white/15 bg-transparent px-1 text-[11px] tracking-[0.08em] text-paper"
               >
-                {code.toUpperCase()}
-              </button>
-            ))}
+                {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
+                  <option key={code} value={code} className="bg-[#090909]">
+                    {code.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="hidden items-center gap-1 sm:flex">
+              {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setLang(code)}
+                  className={`lang-code inline-flex h-8 min-w-8 items-center justify-center rounded-[10px] border border-white/15 px-2 text-[11px] tracking-[0.08em] ${lang === code ? "bg-white/10 text-white" : "text-[#aaa]"}`}
+                >
+                  {code.toUpperCase()}
+                </button>
+              ))}
+            </div>
             <div className="grid min-h-8 min-w-0 place-items-center">
               {!pending && !signedIn ? (
                 <Link to="/login" className="sign-pill max-w-[5.5rem] truncate sm:max-w-none">
@@ -403,6 +443,10 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <div>
             <p className="latin text-sm font-bold tracking-[0.16em] uppercase">Vanguard</p>
             <p className={`mt-2 max-w-md text-sm ${tone === "light" ? "text-ink/60" : "text-mist"}`}>{t("footer_note")}</p>
+            <p className="mt-3 flex gap-4 text-sm">
+              <Link to="/privacy" className="underline-offset-4 hover:underline">{t("privacy_nav")}</Link>
+              <Link to="/terms" className="underline-offset-4 hover:underline">{t("terms_nav")}</Link>
+            </p>
             {site?.settings.registration_number ? (
               <p className={`mt-2 text-xs ${tone === "light" ? "text-ink/50" : "text-mist"}`}>
                 {t("legal_id")} {site.settings.registration_number} · {t("legal_vat")} {site.settings.vat_number}
@@ -415,6 +459,28 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© 2024 Vanguard Global Mobility s.r.o.</p>
         </div>
       </footer>
+      {cookieOk ? null : (
+        <div className="fixed inset-x-3 bottom-[max(4.75rem,calc(env(safe-area-inset-bottom)+4.25rem))] z-30 flex max-w-lg items-center gap-3 rounded-2xl border border-white/15 bg-[#090909]/95 p-3 text-sm sm:left-4 sm:right-auto">
+          <p className="min-w-0 text-mist">
+            {t("cookie_note")}{" "}
+            <Link to="/privacy" className="text-paper underline-offset-4 hover:underline">{t("privacy_nav")}</Link>
+          </p>
+          <button
+            type="button"
+            className="btn shrink-0"
+            onClick={() => {
+              try {
+                localStorage.setItem("vg-cookie", "1");
+              } catch {
+                /* the bar simply closes */
+              }
+              setCookieOk(true);
+            }}
+          >
+            {t("cookie_ok")}
+          </button>
+        </div>
+      )}
       {site?.settings.support_phone ? (
         <a
           href={whatsAppHref(site.settings.support_phone, typeof window !== "undefined" ? sessionStorage.getItem("vg-route") || "" : "")}

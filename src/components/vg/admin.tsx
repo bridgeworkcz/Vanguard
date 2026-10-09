@@ -18,8 +18,10 @@ import {
   adminGetApplication,
   adminGetSettings,
   adminListApplications,
+  adminMailStatus,
   adminOverview,
   adminSaveDispatch,
+  adminSaveMail,
   adminSaveMedia,
   adminSavePartner,
   adminSaveProduct,
@@ -42,7 +44,7 @@ import {
   type AppRow,
 } from "@/lib/vanguard/api";
 import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, openedBeforeInvoice2Rule, stageIndex, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
-import { useI18n, type CopyKey } from "@/lib/vanguard/i18n";
+import { useI18n, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
 import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
@@ -1735,6 +1737,54 @@ function TeamEditor({
   );
 }
 
+function MailBox({ readOnly }: { readOnly: boolean }) {
+  const t = useAdminT();
+  const [from, setFrom] = useState("");
+  const [key, setKey] = useState("");
+  const [ready, setReady] = useState(false);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    void adminMailStatus()
+      .then((row) => {
+        setFrom(row.from || "");
+        setReady(Boolean(row.ready));
+      })
+      .catch(() => undefined);
+  }, []);
+  return (
+    <form
+      className="glass grid gap-3 p-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (readOnly) return;
+        setNote("");
+        void adminSaveMail({ data: { from, key } })
+          .then((row) => {
+            setReady(Boolean(row.ready));
+            setFrom(row.from || "");
+            setKey("");
+            setNote(t("admin_mail_saved"));
+          })
+          .catch(() => setNote(t("admin_unsaved")));
+      }}
+    >
+      <p className="kicker">{t("admin_mail")}</p>
+      <p className="text-sm text-mist">{t("admin_mail_help")}</p>
+      <p className="text-sm">{ready ? t("admin_mail_ready") : t("admin_mail_missing")}</p>
+      <label className="grid gap-1 text-sm text-mist">
+        {t("admin_mail_from")}
+        <input className="field" type="email" disabled={readOnly} value={from} onChange={(e) => setFrom(e.target.value)} />
+      </label>
+      <label className="grid gap-1 text-sm text-mist">
+        {t("admin_mail_key")}
+        <input className="field" disabled={readOnly} value={key} autoComplete="off" placeholder={t("admin_mail_keep")} onChange={(e) => setKey(e.target.value)} />
+      </label>
+      {note ? <p className="text-sm text-mist">{note}</p> : null}
+      {readOnly ? null : <button className="btn-solid w-fit" type="submit">{t("save")}</button>}
+    </form>
+  );
+}
+
 function ContentEditor({
   settings,
   media,
@@ -1749,7 +1799,7 @@ function ContentEditor({
   media: { id: string; kind: string; title: string; caption?: string; imageData: string }[];
   partners: { id: string; country: string; name: string }[];
   countries: string[];
-  lang: "en" | "cs" | "ur";
+  lang: Lang;
   readOnly: boolean;
   onSettings: (s: Record<string, string>) => void;
   onSaved: () => void;
@@ -1853,6 +1903,7 @@ function ContentEditor({
       }));
   return (
     <div className="mt-8 grid gap-4">
+      <MailBox readOnly={readOnly} />
       <p className="text-sm text-mist">{t("admin_live_note")}</p>
       {mediaErr ? <p className="text-sm text-metal">{mediaErr}</p> : null}
       <form

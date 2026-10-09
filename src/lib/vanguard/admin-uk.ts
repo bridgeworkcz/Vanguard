@@ -1,8 +1,16 @@
 import type { CopyKey } from "./i18n";
 
-/** Admin console only. The public site stays English, Czech, or Urdu. */
+/** Admin console only. Public languages are English, Czech, Ukrainian, Russian, and Urdu. */
 export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   loading: "Завантаження",
+  admin_mail: "Листи клієнтам",
+  admin_mail_from: "Адреса відправника",
+  admin_mail_key: "Ключ пошти",
+  admin_mail_help: "Ключ Resend і адреса, яку поштова служба вже дозволила. Лист іде, коли справа зрушила, скан відхилили, відкрився рахунок, або хтось просить новий пароль. Ключ лишається в реєстрі офісу і на сайті не показується.",
+  admin_mail_saved: "Пошту збережено",
+  admin_mail_ready: "Листи підключено.",
+  admin_mail_missing: "Листи ще не підключено.",
+  admin_mail_keep: "Порожнє поле лишає вже збережений ключ.",
   save: "Зберегти",
   remove: "Прибрати",
   edit: "Змінити",
