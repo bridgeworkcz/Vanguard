@@ -50,10 +50,11 @@ import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { DocScreen } from "./doc-view";
 import { Pager } from "./pages";
+import { AdminGuide } from "./admin-guide";
 
-type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit";
+type Tab = "overview" | "applications" | "vacancies" | "team" | "content" | "pricing" | "audit" | "guide";
 
-const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit"];
+const TABS: Tab[] = ["overview", "applications", "vacancies", "team", "content", "pricing", "audit", "guide"];
 
 function NavGlyph({ tab }: { tab: Tab }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -66,6 +67,7 @@ function NavGlyph({ tab }: { tab: Tab }) {
       {tab === "content" ? <path {...common} d="M5 6h14M5 12h14M5 18h9" /> : null}
       {tab === "pricing" ? <path {...common} d="M12 3v18M16.5 7.5c0-1.6-2-2.5-4.5-2.5S7.5 5.9 7.5 7.5 9.5 10 12 10s4.5.9 4.5 2.5-2 2.5-4.5 2.5-4.5-.9-4.5-2.5" /> : null}
       {tab === "audit" ? <path {...common} d="M8 4h8M7 4.5h10v15.5H7zM9.5 9h5M9.5 13h5M9.5 17h3" /> : null}
+      {tab === "guide" ? <path {...common} d="M6 5.5A2.5 2.5 0 0 1 8.5 3H19v15.5H8.5A2.5 2.5 0 0 0 6 21zM6 5.5V21" /> : null}
     </svg>
   );
 }
@@ -1531,6 +1533,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           </ul>
           </div>
         ) : null}
+
+        {current === "guide" ? <AdminGuide /> : null}
         </div>
       </div>
     </Shell>

@@ -56,6 +56,7 @@ export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   admin_content: "Зміст",
   admin_pricing: "Ціни",
   admin_audit: "Журнал",
+  admin_guide: "Інструкція",
   admin_client_discount: "Знижка для клієнтів субагента",
   admin_client_discount_pick: "Оберіть субагента",
   admin_client_discount_help: "Коли клієнт вводить його код, усі ціни послуг стають меншими на цей відсоток. Від 0 до 90. Нуль вимикає знижку.",
