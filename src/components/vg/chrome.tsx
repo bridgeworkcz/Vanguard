@@ -277,6 +277,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const [cookieOk, setCookieOk] = useState(true);
   const navRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const cookieRef = useRef<HTMLDivElement>(null);
   const gate = typeof window !== "undefined" && hasGateSessionMarker();
   useLayoutEffect(() => {
     const on = desktopOn();
@@ -307,6 +308,21 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
       window.removeEventListener("orientationchange", apply);
     };
   }, []);
+  useLayoutEffect(() => {
+    const el = cookieRef.current;
+    const apply = () => {
+      const height = el ? Math.ceil(el.getBoundingClientRect().height) : 0;
+      document.documentElement.style.setProperty("--cookie-h", `${height}px`);
+    };
+    apply();
+    if (!el) return;
+    const watch = new ResizeObserver(apply);
+    watch.observe(el);
+    return () => {
+      watch.disconnect();
+      document.documentElement.style.setProperty("--cookie-h", "0px");
+    };
+  }, [cookieOk, lang]);
   useLayoutEffect(() => {
     const nav = navRef.current;
     const current = nav?.querySelector<HTMLElement>("[data-active='true']");
@@ -462,21 +478,19 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             {site?.settings.registration_number ? (
               <p className={`mt-2 text-xs ${tone === "light" ? "text-ink/50" : "text-mist"}`}>
                 {t("legal_id")} {site.settings.registration_number} · {t("legal_vat")} {site.settings.vat_number}
-                <a className="ml-2 underline-offset-4 hover:underline" href={`https://or.justice.cz/ias/ui/rejstrik-firma.vysledky?ic=${encodeURIComponent(site.settings.registration_number)}`} target="_blank" rel="noopener noreferrer">
+                <a className="ms-2 underline-offset-4 hover:underline" href={`https://or.justice.cz/ias/ui/rejstrik-firma.vysledky?ic=${encodeURIComponent(site.settings.registration_number)}`} target="_blank" rel="noopener noreferrer">
                   {t("registry")}
                 </a>
               </p>
             ) : null}
           </div>
-          <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© 2024 Vanguard Global Mobility s.r.o.</p>
+          <p className={`latin text-xs ${tone === "light" ? "text-ink/40" : "text-mist"}`}>© 2024–2026 Vanguard Global Mobility s.r.o.</p>
         </div>
       </footer>
       {cookieOk ? null : (
-        <div className="fixed inset-x-3 bottom-[max(4.75rem,calc(env(safe-area-inset-bottom)+4.25rem))] z-30 flex max-w-lg items-center gap-3 rounded-2xl border border-white/15 bg-[#090909]/95 p-3 text-sm sm:left-4 sm:right-auto">
-          <p className="min-w-0 text-mist">
-            {t("cookie_note")}{" "}
-            <Link to="/privacy" className="text-paper underline-offset-4 hover:underline">{t("privacy_nav")}</Link>
-          </p>
+        <div ref={cookieRef} className="cookie-bar fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-white/15 bg-[#090909]/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm">
+          <p className="min-w-0 line-clamp-2 leading-snug text-mist">{t("cookie_note")}</p>
+          <Link to="/privacy" className="shrink-0 text-paper underline-offset-4 hover:underline">{t("privacy_nav")}</Link>
           <button
             type="button"
             className="btn shrink-0"
@@ -498,9 +512,10 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           href={whatsAppHref(site.settings.support_phone, typeof window !== "undefined" ? sessionStorage.getItem("vg-route") || "" : "")}
           target="_blank"
           rel="noopener noreferrer"
-          className="wa-fab fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 inline-flex min-h-12 items-center rounded-full bg-[#f4f5f7] px-4 text-sm font-bold text-[#070809]"
+          className="wa-fab fixed right-4 z-40 inline-flex size-12 items-center justify-center rounded-full bg-[#f4f5f7] text-sm font-bold text-[#070809]"
+          aria-label={t("wa_label")}
         >
-          {t("wa_label")}
+          <span aria-hidden="true">WA</span>
         </a>
       ) : null}
     </div>

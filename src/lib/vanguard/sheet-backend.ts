@@ -1465,6 +1465,7 @@ export async function saveQuestionnaire(userId: string, data: { id: string; ques
   const questionnaire = { ...parseQuestionnaire("{}"), ...data.questionnaire };
   const error = questionnaireError(questionnaire);
   if (error) return { ok: false as const, error };
+  if (sameCountry(questionnaire.citizenship, app.country)) return { ok: false as const, error: "citizenship" };
   const firstComplete = !app.profileComplete;
   await saveApp(app, { ...app.extra, questionnaire, profileComplete: true, citizenship: questionnaire.citizenship });
   await writeDossier(userId, app, clientName(questionnaire), questionnaire.citizenship);
@@ -1508,6 +1509,7 @@ async function storeFile(applicationId: string, userId: string, category: string
     await audit(userId, "UPLOAD", applicationId, category);
   } catch (err) {
     console.error("[file] record", err);
+    throw err;
   }
   return { id, driveFileId: storedPath };
 }
@@ -1518,7 +1520,7 @@ export async function uploadDoc(userId: string, data: { applicationId: string; c
   if (!app || app.userId !== userId) throw new Error("Not found");
   if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
   if (!DOC_CATEGORIES.includes(data.category) || data.category === "FINAL") throw new Error("Category");
-  if (data.category === "PAYMENT_PROOF" && app.stage !== 2) throw new Error("Locked");
+  if (data.category === "PAYMENT_PROOF" && app.stage !== 2 && app.stage < 4) throw new Error("Locked");
   const saved = await storeFile(app.id, userId, data.category, data.fileName, data.mime, data.data, "UPLOADED");
   const questionnaire = parseQuestionnaire(app.questionnaire);
   const { escapeTelegramHtml } = await import("@/lib/google/telegram");
@@ -1724,12 +1726,14 @@ export async function adminSetStage(userId: string, data: { id: string; action: 
     await saveApp(app, app.extra, { status: "CANCELLED" });
   } else if (data.action === "confirm-payment") {
     if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
+    const rawDocs = await readSheetRows("DossierDocuments");
+    const proof = rawDocs.find((doc) => doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status !== "REJECTED");
+    if (!proof) throw new Error("No proof");
     const weeks = Number(app.productionWeeks);
     const deadline = plusDays((Number.isFinite(weeks) && weeks > 0 ? weeks : 8) * 7);
     await saveApp(app, { ...app.extra, stage3At: nowIso() }, { stage: "3", processStage: "IN_PROCESS", documentDeadlineAt: deadline });
     stage = 3;
     try {
-      const rawDocs = await readSheetRows("DossierDocuments");
       for (const doc of rawDocs) {
         if (doc.dossierId === app.id && doc.category === "PAYMENT_PROOF" && doc.status !== "APPROVED") {
           await updateSheetRowById("DossierDocuments", doc.id, { ...doc, status: "APPROVED", reviewedAt: nowIso(), reviewedBy: person.userId });
@@ -1800,7 +1804,7 @@ export async function adminSaveDispatch(userId: string, data: { id: string; note
 export async function adminUploadProof(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.applicationId);
-  if (!app || isHistoryApp(app) || app.status !== "OPEN" || app.stage !== 2) throw new Error("Locked");
+  if (!app || isHistoryApp(app) || app.status !== "OPEN" || (app.stage !== 2 && app.stage < 4)) throw new Error("Locked");
   return storeFile(app.id, userId, "PAYMENT_PROOF", data.fileName, data.mime, data.data, "UPLOADED");
 }
 

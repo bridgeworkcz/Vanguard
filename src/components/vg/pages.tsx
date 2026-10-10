@@ -81,6 +81,7 @@ export function QuestionsPage() {
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
+      {pathHit ? (
       <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
         <h2 className="display text-3xl">{t("process_title")}</h2>
         <ol className="grid gap-4">
@@ -93,8 +94,10 @@ export function QuestionsPage() {
           ))}
         </ol>
       </section>
+      ) : null}
       <input className="field max-w-sm" value={find} placeholder={t("faq_find")} onChange={(e) => { setFind(e.target.value); window.localStorage.setItem("vg-faq", e.target.value); }} />
-      {groups.length === 0 && needle ? <p className="text-mist">{t("faq_none")}</p> : null}
+      {empty && needle ? <p className="text-mist">{t("faq_none")}</p> : null}
+      {papersHit ? (
       <section id="papers" className="scroll-mt-32 grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("papers_title")}</h2>
           <p className="text-mist">{t("papers_intro")}</p>
@@ -106,6 +109,7 @@ export function QuestionsPage() {
             ))}
           </ul>
         </section>
+      ) : null}
       <section id="case" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("sample_case_t")}</h2>
           <p className="text-mist">{t("sample_case_b")}</p>
@@ -123,9 +127,9 @@ export function QuestionsPage() {
       <section id="cards" className="grid gap-3 border-t border-white/10 pt-8">
           <h2 className="display text-3xl">{t("share_cards")}</h2>
           <ul className="grid gap-3">
-            <li className="glass p-4"><p className="text-sm text-mist">01</p><h3 className="display text-2xl">{t("card_steps")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
+            <li className="glass p-4"><p className="text-sm text-mist">01</p><h3 className="display text-2xl">{t("fee_includes_t")}</h3><p className="mt-2 text-sm text-mist">{t("fee_includes_b")}</p></li>
             <li className="glass p-4"><p className="text-sm text-mist">02</p><h3 className="display text-2xl">{t("card_status")}</h3><p className="mt-2 text-sm text-mist">{t("sample_case_b")}</p></li>
-            <li className="glass p-4"><p className="text-sm text-mist">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist">www.vanguardmobility.site/#calc</p></li>
+            <li className="glass p-4"><p className="text-sm text-mist">03</p><h3 className="display text-2xl">{t("card_countries")}</h3><p className="mt-2 text-sm text-mist"><Link to="/" hash="calc">www.vanguardmobility.site/#calc</Link></p></li>
           </ul>
         </section>
       {groups.map((group) => (
@@ -188,10 +192,17 @@ export function FilingsPage() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [err, setErr] = useState("");
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     listPublicFilings()
-      .then(setRows)
-      .catch((e: unknown) => setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy"))));
+      .then((next) => {
+        setRows(next);
+        setReady(true);
+      })
+      .catch((e: unknown) => {
+        setReady(true);
+        setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
+      });
   }, []);
   const filtered = rows.filter((row) => (!query.trim() || row.id.toLowerCase().includes(query.trim().toLowerCase())) && (!country || row.country === country));
   const countries = Array.from(new Set(rows.map((row) => row.country).filter(Boolean))).sort();
@@ -271,7 +282,7 @@ export function FilingsPage() {
             </tbody>
           </table>
         </div>
-        {filtered.length === 0 ? <p className="mt-4 text-mist">{query.trim() ? t("filings_empty") : t("filings_none")}</p> : null}
+        {!ready ? <p className="mt-4 text-mist">{t("loading")}</p> : filtered.length === 0 ? <p className="mt-4 text-mist">{query.trim() || country ? t("filings_empty") : t("filings_none")}</p> : null}
         <Pager page={current} pages={pages} onPage={setPage} />
       </div>
     </Shell>
@@ -289,7 +300,7 @@ export function Pager({ page, pages, onPage }: { page: number; pages: number; on
         {t("filings_prev")}
       </button>
       {nums.map((n) => (
-        <button key={n} type="button" className={n === page ? "btn-solid" : "btn"} onClick={() => onPage(n)}>
+        <button key={n} type="button" className="btn" aria-current={n === page ? "page" : undefined} onClick={() => onPage(n)}>
           {n}
         </button>
       ))}

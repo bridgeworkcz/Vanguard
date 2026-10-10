@@ -1232,12 +1232,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </label>
                 <QuestionnaireBlock raw={detail.app.questionnaire} />
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
-                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("accept")}>{t("admin_accept")}</button>
-                  ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 2 ? (
                     <>
-                      <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
+                      <button type="button" className="btn-solid" disabled={acting || !detail.documents.some((d) => d.category === "PAYMENT_PROOF" && d.status !== "REJECTED")} onClick={() => void act("confirm-payment")}>{t("admin_to3")}</button>
                       <label className="btn relative inline-flex cursor-pointer items-center overflow-hidden">
                         {t("admin_proof_add")}
                         <input
@@ -1269,15 +1266,11 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("stage4")}>{t("admin_to4")}</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
-                    <button type="button" className="btn" disabled={acting} onClick={() => void act("reject")}>{t("admin_reject")}</button>
-                  ) : null}
-                  {detail.app.status === "OPEN" ? (
                     <button type="button" className="btn" disabled={acting} onClick={() => void act("cancel")}>{t("status_cancelled")}</button>
                   ) : null}
                 </div>
                 {openedBeforeInvoice2Rule(detail.app.createdAt) ? <p className="mt-3 text-sm text-mist">{t("admin_legacy_cap")}</p> : null}
                 {stageNote ? <p className="mt-3 text-sm text-metal">{stageNote}</p> : null}
-                <input className="field mt-3" placeholder={t("admin_reason")} value={reason} onChange={(e) => setReason(e.target.value)} />
                 {detail.app.stage >= 3 ? (
                   <label className="mt-4 grid gap-1 text-sm">
                     {t("admin_process")}

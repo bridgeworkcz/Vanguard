@@ -75,7 +75,7 @@ export const ru: Partial<Record<CopyKey, string>> = {
   about_partners: "Работодатели, с которыми подаём",
   partners_hint: "Выберите страну. Откройте работодателя, чтобы увидеть места.",
   employer_empty: "Сейчас у этого работодателя нет свободных мест.",
-  about_team: "Офис",
+  about_team: "Люди",
   team_hint: "Люди, которые ведут дело.",
   legal_id: "Идентификатор",
   legal_vat: "НДС",

@@ -698,6 +698,7 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     const q = { ...parseQuestionnaire("{}"), ...data.questionnaire };
     const err = questionnaireError(q);
     if (err) return { ok: false as const, error: err };
+    if (sameCountry(q.citizenship, app.country)) return { ok: false as const, error: "citizenship" };
     await sql`update applications set questionnaire = ${JSON.stringify(q)}, profile_complete = true, citizenship = ${q.citizenship}, updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "QUESTIONNAIRE", app.id, clientName(q));
     return { ok: true as const };
@@ -720,7 +721,7 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
     if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
     const category = data.category;
     if (!DOC_CATEGORIES.includes(category) || category === "FINAL") throw new Error("Category");
-    if (category === "PAYMENT_PROOF" && app.stage !== 2) throw new Error("Locked");
+    if (category === "PAYMENT_PROOF" && app.stage !== 2 && app.stage < 4) throw new Error("Locked");
     const mime = normalizeUploadMime(data.mime, data.fileName);
     if (!ALLOWED_MIME.has(mime)) throw new Error("File type");
     if (!data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error(data.data?.length > MAX_DATA ? "File size" : "File type");
@@ -885,6 +886,8 @@ export const adminSetStage = createServerFn({ method: "POST" })
       await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${app.id}`;
     } else if (data.action === "confirm-payment") {
       if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
+      const proofs = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'PAYMENT_PROOF' and status <> 'REJECTED' limit 1`;
+      if (!proofs[0]) throw new Error("No proof");
       await sql`update documents set status = 'APPROVED' where application_id = ${app.id} and category = 'PAYMENT_PROOF'`;
       await sql`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${Math.max(1, Number(app.productionWeeks) || 8) * 7} * interval '1 day'),
         process_stage = 'IN_PROCESS', updated_at = now() where id = ${app.id}`;
@@ -980,7 +983,7 @@ export const adminUploadProof = createServerFn({ method: "POST" })
     const sql = await getSql();
     await requireStaff(sql, context.userId);
     const app = await loadApp(sql, clean(data.applicationId, 40));
-    if (!app || app.stage !== 2 || app.status !== "OPEN") throw new Error("Locked");
+    if (!app || (app.stage !== 2 && app.stage < 4) || app.status !== "OPEN") throw new Error("Locked");
     const mime = normalizeUploadMime(data.mime, data.fileName);
     if (!ALLOWED_MIME.has(mime) || !data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error("File");
     const id = newId("DOC");

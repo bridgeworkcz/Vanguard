@@ -259,7 +259,7 @@ export function HomePage() {
                 </table>
               </article>
               <div className="grid gap-3 border-t border-white/10 py-3 md:sticky md:bottom-0 md:z-20 md:col-span-2 md:bg-[#090909]/95">
-                <p className="display ember min-h-14 text-5xl">
+                <p className="display ember min-h-14 pe-16 text-5xl md:pe-0">
                   {product && speed ? (
                     <>
                       {priced(product.basePrice, speed)} <span className="text-2xl text-mist">EUR</span>
@@ -272,8 +272,8 @@ export function HomePage() {
                     <span className="text-lg text-mist">{t("calc_hold")}</span>
                   )}
                 </p>
-                <button className="btn-solid" type="submit" disabled={!data}>
-                  {data ? t("calc_search") : t("loading")}
+                <button className="btn-solid" type="submit" disabled={catalog.length === 0}>
+                  {!data && !error ? t("loading") : t("calc_search")}
                 </button>
               </div>
             </div>
@@ -368,10 +368,10 @@ export function SearchPage({
     return (
       <Shell>
         <div className="mx-auto max-w-3xl px-4 py-12">
-          <Link to="/about" className="text-sm text-mist underline-offset-4 hover:underline">{t("search_back")}</Link>
+          <Link to="/" hash="calc" className="text-sm text-mist underline-offset-4 hover:underline">{t("search_back")}</Link>
           <p className="kicker mt-6 inline-flex items-center gap-2">{country ? <MiniFlag country={country} /> : null}{country}</p>
           <h1 className="display mt-3 text-4xl">{employerName}</h1>
-          {seats.length === 0 ? <p className="mt-6 text-mist">{t("employer_empty")}</p> : null}
+          {!data ? <p className="mt-6 text-mist">{t("loading")}</p> : seats.length === 0 ? <p className="mt-6 text-mist">{t("employer_empty")}</p> : null}
           <ul className="mt-6 grid gap-3">
             {seats.map((job) => {
               const visa = data?.products.find((item) => item.id === job.visaProductId);
@@ -412,7 +412,11 @@ export function SearchPage({
         <Link to="/" className="text-sm text-mist underline-offset-4 hover:underline">
           {t("search_back")}
         </Link>
-        {!ok || !visa || !pace ? (
+        {!data ? (
+          <p className="mt-8 text-mist">{t("loading")}</p>
+        ) : !visa || !pace ? (
+          <p className="mt-8 text-metal">{t("calc_need")}</p>
+        ) : !ok ? (
           <p className="mt-8 text-metal">{t("calc_speed_unavailable")}</p>
         ) : (
           <>
@@ -443,16 +447,15 @@ export function SearchPage({
               </div>
             </div>
             <div className="mt-6 flex flex-wrap gap-2">
-              <button type="button" className={sort === "salary" ? "btn-solid" : "btn"} onClick={() => setSort("salary")}>{t("sort_salary")}</button>
-              <button type="button" className={sort === "seats" ? "btn-solid" : "btn"} onClick={() => setSort("seats")}>{t("sort_seats")}</button>
-              <button type="button" className={sort === "term" ? "btn-solid" : "btn"} onClick={() => setSort("term")}>{t("sort_term")} · {visa.duration}</button>
+              <button type="button" className={sort === "salary" ? "btn ring-1 ring-white" : "btn"} aria-pressed={sort === "salary"} onClick={() => setSort("salary")}>{t("sort_salary")}</button>
+              <button type="button" className={sort === "seats" ? "btn ring-1 ring-white" : "btn"} aria-pressed={sort === "seats"} onClick={() => setSort("seats")}>{t("sort_seats")}</button>
               {houseN > 0 ? (
-                <button type="button" className={houseOnly ? "btn-solid" : "btn"} onClick={() => setHouseOnly((v) => !v)}>
+                <button type="button" className={houseOnly ? "btn ring-1 ring-white" : "btn"} aria-pressed={houseOnly} onClick={() => setHouseOnly((v) => !v)}>
                   {t("filter_house")} · {houseN}
                 </button>
               ) : null}
               {dayN > 0 ? (
-                <button type="button" className={dayOnly ? "btn-solid" : "btn"} onClick={() => setDayOnly((v) => !v)}>
+                <button type="button" className={dayOnly ? "btn ring-1 ring-white" : "btn"} aria-pressed={dayOnly} onClick={() => setDayOnly((v) => !v)}>
                   {t("filter_day")} · {dayN}
                 </button>
               ) : null}
@@ -520,7 +523,7 @@ export function SearchPage({
                         onClick={() =>
                           void joinWaitlist({ data: { vacancyId: job.id, citizenship } })
                             .then(() => setWaitNote(t("search_wait_done")))
-                            .catch(() => setWaitNote(t("search_wait_in")))
+                            .catch(() => setWaitNote(t("sheets_busy")))
                         }
                       >
                         {t("search_wait_btn")}
@@ -541,7 +544,9 @@ export function SearchPage({
                     .map((job) => (
                       <article key={job.id} className="glass p-4">
                         <p className="inline-flex items-center gap-2 text-sm text-mist"><MiniFlag country={job.country} /> {job.country}</p>
-                        <h3 className="display mt-1 text-2xl">{job.title}</h3>
+                        <h3 className="display mt-1 text-2xl">
+                          <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product: job.visaProductId, speed: pace || "STANDARD" }}>{job.title}</Link>
+                        </h3>
                         <p className="text-sm text-mist">{job.employer}</p>
                         <p className="mt-1 text-sm">{job.workingHours}</p>
                         <p className="text-sm text-mist">{job.accommodation}</p>
@@ -619,7 +624,7 @@ export function VacancyPage({
     if (!job) return;
     if (!signedIn) {
       rememberAgent(agentCode);
-      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim() }));
+      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim(), lang }));
       void navigate({ to: "/login" });
       return;
     }
@@ -635,10 +640,20 @@ export function VacancyPage({
       setBusy(false);
     }
   }
-  if (!job || !visa) {
+  if (!data) {
     return (
       <Shell>
         <p className="px-4 py-16 text-mist">{t("loading")}</p>
+      </Shell>
+    );
+  }
+  if (!job || !visa) {
+    return (
+      <Shell>
+        <div className="mx-auto max-w-3xl px-4 py-16">
+          <p className="text-mist">{t("search_empty")}</p>
+          <Link to="/" hash="calc" className="btn mt-6 inline-flex">{t("search_back")}</Link>
+        </div>
       </Shell>
     );
   }
@@ -718,7 +733,7 @@ export function VacancyPage({
             </select>
           </label>
         ) : null}
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
+        <div className="action-dock fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
           <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizen} onClick={() => void apply()}>
             {busy ? t("applying") : t("search_apply")}
           </button>
@@ -752,10 +767,6 @@ export function AboutPage() {
           <p className="mt-2 text-mist">{s.desk_hours || t("desk_hours")}</p>
           <p className="mt-2">{s.legal_entity}</p>
           <p className="mt-1 text-mist">{t("legal_id")} {s.registration_number}</p>
-        </div>
-        <div className="mt-6">
-          <h2 className="display text-3xl">{t("about_license")}</h2>
-          <LicenseWall items={licenses} />
         </div>
         <div className="mt-8 space-y-4 text-base leading-relaxed whitespace-pre-line">{story}</div>
       </article>
@@ -1058,6 +1069,7 @@ export function CountryPage({ code }: { code: string }) {
         </ul>
         <Link
           to="/"
+          hash="calc"
           className="btn-solid mt-8 inline-flex items-center"
           onClick={() => {
             if (!country) return;

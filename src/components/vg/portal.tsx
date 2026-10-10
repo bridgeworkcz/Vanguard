@@ -30,6 +30,7 @@ import {
   invoice2Unlocked,
   parseQuestionnaire,
   questionnaireError,
+  sameCountry,
   tranches,
   whatsAppHref,
   type DocCategory,
@@ -388,8 +389,8 @@ export function PortalPage({ id }: { id: string }) {
       return;
     }
     sessionStorage.removeItem("vg-intent");
-    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string };
-    createApplication({ data: intent })
+    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string; lang?: string };
+    createApplication({ data: { ...intent, lang: intent.lang || lang } })
       .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
   }, [deskId]);
@@ -872,7 +873,9 @@ export function PortalPage({ id }: { id: string }) {
                   type="button"
                   className="btn-solid mt-3"
                   onClick={() =>
-                    void resubmitApplication({ data: app.id }).then((res) => navigate({ to: "/portal", search: { id: res.id } }))
+                    void resubmitApplication({ data: app.id })
+                      .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
+                      .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
                   }
                 >
                   {t("resubmit")}
@@ -886,9 +889,9 @@ export function PortalPage({ id }: { id: string }) {
               ) : null}
               {parts ? (
                 <p className="mt-3 text-sm text-mist">
-                  30% {parts.first} EUR · {app.stage >= 2 ? t("portal_paid") : t("portal_due")}
-                  {" · "}40% {parts.second} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
-                  {" · "}30% {parts.final} EUR · {app.stage >= 4 ? t("portal_paid") : t("portal_due")}
+                  30% {parts.first} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
+                  {" · "}40% {parts.second} EUR · {app.stage >= 4 ? t("portal_paid") : t("portal_due")}
+                  {" · "}30% {parts.final} EUR · {thirdPaid ? t("portal_paid") : t("portal_due")}
                 </p>
               ) : null}
             </div>
@@ -949,10 +952,9 @@ export function PortalPage({ id }: { id: string }) {
                     {t("q_citizen")}
                     <select className="field" value={q.citizenship} onChange={(e) => setQ({ ...q, citizenship: e.target.value })}>
                       <option value="" />
-                      {CITIZENSHIPS.map((c) => (
+                      {CITIZENSHIPS.filter((c) => !sameCountry(c, app.country)).map((c) => (
                         <option key={c}>{c}</option>
                       ))}
-                      <option>Other</option>
                     </select>
                   </label>
                 ) : null}
@@ -1041,7 +1043,7 @@ export function PortalPage({ id }: { id: string }) {
                     ["40%", parts.second, app.stage3At, app.stage >= 3],
                     ["30%", parts.final, app.stage4At, app.stage >= 4],
                   ].map(([label, amount, date], index) => {
-                    const due = !thirdPaid && ((app.stage === 2 && index === 0) || (app.stage === 3 && index === 1) || (app.stage >= 4 && index === 2));
+                    const due = !thirdPaid && ((app.stage === 2 && index === 0) || (app.stage === 3 && index === 1 && invoice2Unlocked(app.processStage)) || (app.stage >= 4 && index === 2));
                     return (
                     <li key={String(label)} className={`border-t pt-2 ${due ? "border-[#ff6a1a]" : "border-white/10"}`}>
                       <p className={due ? "ember" : "text-mist"}>{label}</p>
@@ -1077,7 +1079,9 @@ export function PortalPage({ id }: { id: string }) {
                     type="button"
                     className="btn mt-3"
                     onClick={() =>
-                      void cancelMyApplication({ data: app.id }).then(() => Promise.all([refreshDetail(app.id), refreshList()]))
+                      void cancelMyApplication({ data: app.id })
+                        .then(() => Promise.all([refreshDetail(app.id), refreshList()]))
+                        .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
                     }
                   >
                     {t("cancel_btn")}
