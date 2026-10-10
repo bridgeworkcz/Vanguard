@@ -361,7 +361,6 @@ export function PortalPage({ id }: { id: string }) {
       .then((p) => {
         setContact({ email: p.email, phone: p.phone });
         setRole(p.role);
-        if (p.role === "ADMIN" || p.role === "MANAGER") void navigate({ to: "/admin", search: { tab: "overview", id: "" } });
         if (p.role === "SUBAGENT") {
           return listAgentBook().then((next) => {
             setBook(next);

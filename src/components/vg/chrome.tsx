@@ -439,9 +439,9 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/questions", t("nav_questions"))}
           {item("/agents", t("nav_agents"))}
           {item("/contact", t("nav_contact"))}
-          {signedIn && role && !staff ? item("/portal", t("nav_portal")) : null}
           </nav>
           <div className="flex shrink-0 items-center gap-3 pe-3 pb-2 pt-1">
+            {signedIn ? item("/portal", t("nav_portal")) : null}
             {staff ? item("/admin", t("nav_console")) : null}
             <button type="button" className="min-h-11 shrink-0 px-1 text-sm text-mist" onClick={() => toggleDesktop()}>
               {desk ? "Tel" : "PC"}
