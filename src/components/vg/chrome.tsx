@@ -291,23 +291,33 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
-    const apply = () => document.documentElement.style.setProperty("--vg-bar", `${el.offsetHeight}px`);
+    const apply = () => {
+      const height = Math.ceil(el.getBoundingClientRect().height);
+      if (height > 0) document.documentElement.style.setProperty("--vg-bar", `${height}px`);
+    };
     apply();
     const watch = new ResizeObserver(apply);
     watch.observe(el);
-    return () => watch.disconnect();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      watch.disconnect();
+      viewport?.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+    };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nav = navRef.current;
     const current = nav?.querySelector<HTMLElement>("[data-active='true']");
     if (!nav || !current) return;
-    const left = current.offsetLeft - 16;
-    const right = current.offsetLeft + current.offsetWidth + 16;
-    const viewLeft = nav.scrollLeft;
-    const viewRight = viewLeft + nav.clientWidth;
-    if (left >= viewLeft && right <= viewRight) return;
-    nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
-  }, [path, lang]);
+    const navBox = nav.getBoundingClientRect();
+    const box = current.getBoundingClientRect();
+    const itemLeft = nav.scrollLeft + (box.left - navBox.left);
+    const viewRight = nav.scrollLeft + nav.clientWidth;
+    if (itemLeft >= nav.scrollLeft + 4 && itemLeft + box.width <= viewRight - 4) return;
+    nav.scrollLeft = Math.max(0, itemLeft - 16);
+  }, [path, lang, role]);
   useEffect(() => {
     if (!signedIn) {
       roleCache = null;
@@ -321,7 +331,10 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
         setRole(p.role);
       })
       .catch(() => {
-        roleCache = null;
+        if (roleCache) {
+          setRole(roleCache);
+          return;
+        }
         setRole(null);
       });
   }, [deskId, signedIn]);
@@ -336,7 +349,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   const item = (to: "/" | "/about" | "/contact" | "/filings" | "/questions" | "/agents" | "/portal" | "/admin", label: string) => (
     <Link
       to={to}
-      className={`min-h-11 inline-flex shrink-0 items-center border-b-2 text-sm ${path === to ? "border-paper text-paper" : "border-transparent text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink border-ink" : ""}`}
+      className={`min-h-11 inline-flex shrink-0 items-center whitespace-nowrap border-b-2 text-sm ${path === to ? "border-paper text-paper" : "border-transparent text-mist"} ${tone === "light" && path !== to ? "text-ink/60" : ""} ${tone === "light" && path === to ? "text-ink border-ink" : ""}`}
       data-active={path === to ? "true" : "false"}
     >
       {label}
@@ -344,7 +357,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
   );
   return (
     <div className={`relative z-[1] ${tone === "light" ? "paper min-h-screen" : "min-h-screen text-paper"}`}>
-      <header ref={headerRef} className="sticky top-0 z-30 overflow-x-clip border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
+      <header ref={headerRef} className="sticky top-0 z-50 border-b border-white/10 bg-[rgba(8,9,10,0.78)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl min-w-0 items-center gap-2 px-3 pt-3 sm:gap-3 sm:px-4">
           <Link to="/" className="inline-flex min-h-11 min-w-0 items-center gap-2">
             <Mark className="size-8 shrink-0 sm:size-9" />
@@ -417,9 +430,9 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             </div>
           </div>
         </div>
-        <div className="mx-auto flex max-w-6xl items-center">
+        <div className="mx-auto flex min-w-0 max-w-6xl items-center">
           <div id="vg-admin-burger" className="admin-menu-slot" />
-          <nav ref={navRef} className="nav-scroll flex min-w-0 flex-1 gap-x-4 overflow-x-auto px-4 pb-2 pt-1">
+          <nav ref={navRef} className="nav-scroll flex min-w-0 flex-1 items-center gap-x-4 overflow-x-auto px-4 pb-2 pt-1">
           {item("/", t("nav_home"))}
           {item("/about", t("nav_about"))}
           {item("/filings", t("nav_filings"))}
@@ -427,11 +440,13 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
           {item("/agents", t("nav_agents"))}
           {item("/contact", t("nav_contact"))}
           {signedIn && role && !staff ? item("/portal", t("nav_portal")) : null}
-          {staff ? item("/admin", t("nav_console")) : null}
-          <button type="button" className="min-h-11 shrink-0 px-1 text-sm text-mist" onClick={() => toggleDesktop()}>
-            {desk ? "Tel" : "PC"}
-          </button>
           </nav>
+          <div className="flex shrink-0 items-center gap-3 pe-3 pb-2 pt-1">
+            {staff ? item("/admin", t("nav_console")) : null}
+            <button type="button" className="min-h-11 shrink-0 px-1 text-sm text-mist" onClick={() => toggleDesktop()}>
+              {desk ? "Tel" : "PC"}
+            </button>
+          </div>
         </div>
       </header>
       <PromoBanner site={site} lang={lang} />
