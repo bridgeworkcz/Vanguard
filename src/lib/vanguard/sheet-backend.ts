@@ -113,7 +113,7 @@ async function putSetting(key: string, value: string, actor: string, touchCache 
 }
 
 function filedLang(lang: string) {
-  return lang === "cs" || lang === "ur" || lang === "uk" || lang === "ru" ? lang : "en";
+  return lang === "cs" || lang === "ur" || lang === "ru" ? lang : "en";
 }
 
 async function mailCase(app: { id: string; clientEmail: string; extra: { lang: string } }, kind: "stage" | "due" | "doc") {
@@ -1639,6 +1639,7 @@ export async function adminGet(userId: string, id: string) {
 }
 
 function docNote(lang: string, reason: string): string {
+  lang = filedLang(lang);
   const [code, extra] = reason.split("|");
   const copy: Record<string, Record<string, string>> = {
     en: {
@@ -1659,12 +1660,6 @@ function docNote(lang: string, reason: string): string {
       page: "فائل میں صفحات زیادہ ہیں۔ صرف وہ صفحہ بھیجیں جو کیس مانگتا ہے۔",
       other: "یہ کاغذ مسترد ہوا۔",
     },
-    uk: {
-      blur: "Суму на квитанції не прочитати. Надішліть ближче фото.",
-      name: "Ім’я на папері не збігається з анкетою.",
-      page: "У файлі забагато сторінок. Надішліть лише ту, яку просить справа.",
-      other: "Цей папір відхилено.",
-    },
     ru: {
       blur: "Сумму на квитанции не прочитать. Пришлите фото ближе.",
       name: "Имя на бумаге не совпадает с анкетой.",
@@ -1677,6 +1672,7 @@ function docNote(lang: string, reason: string): string {
 }
 
 function stageNote(lang: string, action: string): string {
+  lang = filedLang(lang);
   const copy: Record<string, Record<string, string>> = {
     en: {
       accept: "The office accepted the file. The first 30% is now due in your case.",
@@ -1698,13 +1694,6 @@ function stageNote(lang: string, action: string): string {
       stage4: "آخری 30% واجب ہیں۔ اس کے بعد اجازت نامہ بھیجا جا سکتا ہے۔",
       reject: "فائل مسترد ہوئی۔ کیس سے اسے دوبارہ کھولا جا سکتا ہے۔",
       cancel: "فائل منسوخ ہوئی۔ جگہ خالی ہے۔",
-    },
-    uk: {
-      accept: "Офіс прийняв справу. Перші 30% тепер у кабінеті.",
-      "confirm-payment": "Перша оплата є. Надішліть папери, яких справа ще просить.",
-      stage4: "Останні 30% до сплати. Після них дозвіл можна надсилати.",
-      reject: "Справу відхилено. Її можна відкрити знову з кабінету.",
-      cancel: "Справу скасовано. Місце вільне.",
     },
     ru: {
       accept: "Офис принял дело. Первые 30% теперь в кабинете.",

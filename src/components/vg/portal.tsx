@@ -35,7 +35,7 @@ import {
   type DocCategory,
   type Questionnaire,
 } from "@/lib/vanguard/domain";
-import { useI18n, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
+import { useI18n, PUBLIC_LANGS, type CopyKey } from "@/lib/vanguard/i18n";
 import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
@@ -270,7 +270,7 @@ function SettingsPanel({
       <div className="glass grid gap-3 p-4">
         <p className="text-xs uppercase tracking-widest text-mist">{t("settings_lang")}</p>
         <div className="flex gap-2">
-          {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
+          {PUBLIC_LANGS.map((code) => (
             <button key={code} type="button" className={lang === code ? "btn-solid" : "btn"} onClick={() => setLang(code)}>
               {code.toUpperCase()}
             </button>

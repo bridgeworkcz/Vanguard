@@ -1,6 +1,6 @@
 import type { CopyKey } from "./i18n";
 
-/** Admin console only. Public languages are English, Czech, Ukrainian, Russian, and Urdu. */
+/** Admin console only. The public site is English, Czech, Russian, and Urdu. */
 export const ADMIN_UK: Partial<Record<CopyKey, string>> = {
   loading: "Завантаження",
   admin_mail: "Листи клієнтам",

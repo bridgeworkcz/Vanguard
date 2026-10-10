@@ -1454,7 +1454,7 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
       book.push({ hash, userId: user.id, exp: now + 60 * 60 * 1000 });
       const value = JSON.stringify(book);
       await sql`insert into settings (key, value, updated_at) values ('password_resets', ${value}, now()) on conflict (key) do update set value = ${value}, updated_at = now()`;
-      const lang = data.lang === "cs" || data.lang === "ur" || data.lang === "uk" || data.lang === "ru" ? data.lang : "en";
+      const lang = data.lang === "cs" || data.lang === "ur" || data.lang === "ru" ? data.lang : "en";
       await deliverMail({
         key: map.resend_key || "",
         from: map.mail_from || "",

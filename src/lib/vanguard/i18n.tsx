@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-export type Lang = "en" | "cs" | "uk" | "ru" | "ur";
+export const PUBLIC_LANGS = ["en", "cs", "ru", "ur"] as const;
+export type Lang = (typeof PUBLIC_LANGS)[number];
 
 export function isLang(value: unknown): value is Lang {
-  return value === "en" || value === "cs" || value === "uk" || value === "ru" || value === "ur";
+  return typeof value === "string" && (PUBLIC_LANGS as readonly string[]).includes(value);
 }
 
 const en = {
@@ -432,7 +433,7 @@ const en = {
   faq_q17: "How do I pay?",
   faq_a17: "In USDT, on the network printed on the invoice, to the wallet we have published. If the network allows a note, put the case number in it. Upload a screenshot or a receipt. We confirm it before the file moves on.",
   faq_q18: "What does the cabinet show from day to day?",
-  faq_a18: "Which of the three parts is paid, and which is not yet. A reminder if a payment or a document deadline falls inside the next three days. The same language you chose on the site: English, Czech, Ukrainian, Russian, or Urdu. A closed file says so. After a refusal you can open the file again, and your answers come with you.",
+  faq_a18: "Which of the three parts is paid, and which is not yet. A reminder if a payment or a document deadline falls inside the next three days. The same language you chose on the site: English, Czech, Russian, or Urdu. A closed file says so. After a refusal you can open the file again, and your answers come with you.",
   faq_q19: "I was given a code.",
   faq_a19: "Type it when you file the opening. The contract is still with Vanguard. The person who sent you sees the status of their own clients only. They do not see your passport or your scans.",
   agents_kicker: "For a monthly book of clients",
@@ -1187,7 +1188,7 @@ const cs: Record<keyof typeof en, string> = {
   faq_q17: "Jak platím?",
   faq_a17: "V USDT, na síti vytištěné na faktuře, na zveřejněnou peněženku. Dovolí-li to síť, do poznámky dejte číslo spisu. Nahrajte snímek nebo potvrzení. Než se spis posune, potvrdíme to.",
   faq_q18: "Co kabinet ukazuje ze dne na den?",
-  faq_a18: "Která ze tří částí je zaplacená a která ještě ne. Připomínku, když termín platby nebo dokladu padá do příštích tří dnů. Stejný jazyk, který jste zvolili na webu: angličtina, čeština, ukrajinština, ruština nebo urdština. Uzavřený spis to řekne. Po zamítnutí lze spis otevřít znovu a odpovědi jdou s vámi.",
+  faq_a18: "Která ze tří částí je zaplacená a která ještě ne. Připomínku, když termín platby nebo dokladu padá do příštích tří dnů. Stejný jazyk, který jste zvolili na webu: angličtina, čeština, ruština nebo urdština. Uzavřený spis to řekne. Po zamítnutí lze spis otevřít znovu a odpovědi jdou s vámi.",
   faq_q19: "Dostal jsem kód.",
   faq_a19: "Napište ho, když podáváte místo. Smlouva je pořád s Vanguardem. Člověk, který vás poslal, vidí stav jen svých klientů. Pas ani skeny nevidí.",
   agents_kicker: "Pro ty, kdo vodí klienty každý měsíc",
@@ -1942,7 +1943,7 @@ const ur: Record<keyof typeof en, string> = {
   faq_q17: "ادائیگی کیسے کروں؟",
   faq_a17: "USDT میں، اسی نیٹ ورک پر جو رسید پر لکھا ہے، شائع شدہ بٹوے پر۔ اگر نیٹ ورک نوٹ دے تو کیس نمبر لکھیں۔ تصویر یا رسید بھیجیں۔ فائل آگے بڑھنے سے پہلے ہم تصدیق کرتے ہیں۔",
   faq_q18: "کابینہ روز کیا دکھاتی ہے؟",
-  faq_a18: "تین حصوں میں سے کون سا ادا ہوا اور کون سا ابھی نہیں۔ یاد دہانی اگر ادائیگی یا دستاویز کی آخری تاریخ اگلے تین دن میں ہو۔ وہی زبان جو سائٹ پر چنی: انگریزی، چیک، یوکرینی، روسی یا اردو۔ بند فائل یہی کہتی ہے۔ رد کے بعد فائل دوبارہ کھول سکتے ہیں، جوابات ساتھ آتے ہیں۔",
+  faq_a18: "تین حصوں میں سے کون سا ادا ہوا اور کون سا ابھی نہیں۔ یاد دہانی اگر ادائیگی یا دستاویز کی آخری تاریخ اگلے تین دن میں ہو۔ وہی زبان جو سائٹ پر چنی: انگریزی، چیک، روسی یا اردو۔ بند فائل یہی کہتی ہے۔ رد کے بعد فائل دوبارہ کھول سکتے ہیں، جوابات ساتھ آتے ہیں۔",
   faq_q19: "مجھے کوڈ ملا ہے۔",
   faq_a19: "اسامی جمع کرتے وقت لکھیں۔ معاہدہ پھر بھی وینگارڈ کے ساتھ ہے۔ جس نے آپ کو بھیجا وہ صرف اپنے کلائنٹس کی حالت دیکھتا ہے۔ پاسپورٹ یا اسکین نہیں دیکھتا۔",
   agents_kicker: "جو ہر مہینے کلائنٹ لاتے ہیں",
@@ -2272,13 +2273,11 @@ const ur: Record<keyof typeof en, string> = {
 };
 
 import { ru } from "./i18n-ru";
-import { uk } from "./i18n-uk";
 
 const DICTS: Record<Lang, Record<keyof typeof en, string>> = {
   en,
   cs,
   ur,
-  uk: { ...en, ...uk },
   ru: { ...en, ...ru },
 };
 
@@ -2300,8 +2299,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       else if (isLang(stored)) next = stored;
       else {
         const nav = navigator.language.toLowerCase();
-        if (nav.startsWith("uk")) next = "uk";
-        else if (nav.startsWith("ru")) next = "ru";
+        if (nav.startsWith("ru")) next = "ru";
         else if (nav.startsWith("cs")) next = "cs";
         else if (nav.startsWith("ur")) next = "ur";
       }
@@ -2309,6 +2307,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       next = "en";
     }
     setLangState(next);
+    try {
+      window.localStorage.setItem("vg-lang", next);
+    } catch {
+      /* storage unavailable */
+    }
     setPicked(true);
   }, []);
   useEffect(() => {

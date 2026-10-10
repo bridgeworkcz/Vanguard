@@ -6,7 +6,7 @@ import { hasGateSessionMarker } from "@/lib/auth/gate-session-marker";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { getPublicSite, getSessionProfile, listMyApplications, quoteAgent } from "@/lib/vanguard/api";
 import { whatsAppHref, countrySlug } from "@/lib/vanguard/domain";
-import { useI18n, softenError, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
+import { useI18n, softenError, isLang, PUBLIC_LANGS, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
 import { stageTone } from "@/lib/vanguard/ops";
 import { applyDesktop, desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 
@@ -359,12 +359,11 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
                 aria-label="Language"
                 value={lang}
                 onChange={(event) => {
-                  const next = event.target.value;
-                  if (next === "en" || next === "cs" || next === "uk" || next === "ru" || next === "ur") setLang(next);
+                  if (isLang(event.target.value)) setLang(event.target.value);
                 }}
                 className="h-8 rounded-[10px] border border-white/15 bg-transparent px-1 text-[11px] tracking-[0.08em] text-paper"
               >
-                {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
+                {PUBLIC_LANGS.map((code) => (
                   <option key={code} value={code} className="bg-[#090909]">
                     {code.toUpperCase()}
                   </option>
@@ -372,7 +371,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
               </select>
             </label>
             <div className="hidden items-center gap-1 sm:flex">
-              {(["en", "cs", "uk", "ru", "ur"] as Lang[]).map((code) => (
+              {PUBLIC_LANGS.map((code) => (
                 <button
                   key={code}
                   type="button"
