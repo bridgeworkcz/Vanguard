@@ -310,4 +310,5 @@ export const ru: Partial<Record<CopyKey, string>> = {
   from_title: "Разрешение в {country}, гражданство {citizenship}",
   from_lead: "Сумма ниже — стандартный темп этого маршрута. Показаны не больше трёх мест. Разрешение решает министерство.",
   admin_today: "Сегодня",
+  seat_mine: "Выбрать эту вакансию",
 };
