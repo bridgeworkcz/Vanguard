@@ -8,9 +8,9 @@ export const vgMiddleware = createMiddleware({ type: "function" })
   .server(async ({ next, context }) => {
     const { assertSameSiteRequest } = await import("@/lib/auth/isolation.server");
     assertSameSiteRequest();
-    const { readSheetSessionUser, sheetsConfigured } = await import("./account.server");
-    if (sheetsConfigured()) {
-      const sheetUser = await readSheetSessionUser();
+    const { readOfficeUser, officeAuth } = await import("./account.server");
+    if (officeAuth()) {
+      const sheetUser = await readOfficeUser();
       if (!sheetUser) throw new Error("Unauthorized");
       return next({ context: { userId: sheetUser.id } });
     }

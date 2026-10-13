@@ -3,9 +3,9 @@ import { createServerFn } from "@tanstack/react-start";
 type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };
 
 export const accountSession = createServerFn({ method: "GET" }).handler(async () => {
-  const { sheetsConfigured, readSheetSessionUser } = await import("./account.server");
-  if (!sheetsConfigured()) return null;
-  return readSheetSessionUser();
+  const { officeAuth, readOfficeUser } = await import("./account.server");
+  if (!officeAuth()) return null;
+  return readOfficeUser();
 });
 
 export const accountSignOut = createServerFn({ method: "POST" }).handler(async () => {
@@ -15,8 +15,8 @@ export const accountSignOut = createServerFn({ method: "POST" }).handler(async (
 });
 
 export const accountBackend = createServerFn({ method: "GET" }).handler(async () => {
-  const { sheetsConfigured } = await import("./account.server");
-  return { kind: sheetsConfigured() ? ("sheet" as const) : ("local" as const) };
+  const { officeAuth } = await import("./account.server");
+  return { kind: officeAuth() ? ("sheet" as const) : ("local" as const) };
 });
 
 export const accountAuth = createServerFn({ method: "POST" })

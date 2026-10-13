@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
+import { officeDatabase } from "@/lib/database-url";
+import { siteFileUrl } from "./files";
 import { vgMiddleware as authMiddleware } from "./vg-middleware";
 import {
   DOC_CATEGORIES,
@@ -55,6 +57,13 @@ async function audit(sql: Sql, actor: string, action: string, target: string, de
 }
 
 async function ensureSeed(sql: Sql) {
+  if (officeDatabase()) {
+    const apps = await sql<{ c: number }>`select count(*)::int as c from applications`;
+    if (Number(apps[0]?.c ?? 0) > 0) {
+      await sql`insert into settings (key, value) values ('seed_version', '2') on conflict (key) do update set value = '2'`;
+    }
+    return;
+  }
   const flag = await sql<{ value: string }>`select value from settings where key = 'seed_version'`;
   if (flag[0]?.value === "2") return;
   const apps = await sql<{ c: number }>`select count(*)::int as c from applications`;
@@ -91,6 +100,10 @@ async function ensureSeed(sql: Sql) {
 }
 
 async function ensurePartnerCatalog(sql: Sql) {
+  if (officeDatabase()) {
+    await sql`insert into settings (key, value) values ('partners_catalog', '6') on conflict (key) do update set value = '6'`;
+    return;
+  }
   const flag = await sql<{ value: string }>`select value from settings where key = 'partners_catalog'`;
   if (flag[0]?.value === "6") return;
   const existing = await sql<{ country: string; name: string }>`select country, name from partners`;
@@ -103,6 +116,10 @@ async function ensurePartnerCatalog(sql: Sql) {
 }
 
 async function ensureEmployerSeats(sql: Sql) {
+  if (officeDatabase()) {
+    await sql`insert into settings (key, value) values ('vacancy_catalog', '4') on conflict (key) do update set value = '4'`;
+    return;
+  }
   const flag = await sql<{ value: string }>`select value from settings where key = 'vacancy_catalog'`;
   if (flag[0]?.value === "4") return;
   const partners = await sql<{ country: string; name: string }>`select country, name from partners where active = true order by country, sort_order`;
@@ -410,8 +427,22 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     settings: toPublicSettings(settingMap(settingsRows)),
     products,
     vacancies,
-    team,
-    media: media.map((item) => ({ ...item, active: true, cover: Boolean(item.cover) })),
+    team: team.map((member) => ({
+      ...member,
+      photoData:
+        member.photoData.startsWith("/") || member.photoData.startsWith("data:") || member.photoData.startsWith("http")
+          ? member.photoData
+          : siteFileUrl("team", member.id, member.photoData),
+    })),
+    media: media.map((item) => ({
+      ...item,
+      active: true,
+      cover: Boolean(item.cover),
+      imageData:
+        item.imageData.startsWith("/") || item.imageData.startsWith("data:") || item.imageData.startsWith("http")
+          ? item.imageData
+          : siteFileUrl("gallery", item.id, item.imageData),
+    })),
     partners,
     counts: { filed: Number(counts[0]?.filed ?? 0), issued: Number(counts[0]?.issued ?? 0) },
   };
@@ -1440,7 +1471,9 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
     const map: Record<string, string> = {};
     for (const row of rows) map[row.key] = row.value;
     if (!(map.resend_key || "").trim() || !(map.mail_from || "").includes("@")) return { sent: false as const, reason: "nomail" as const };
-    const users = await sql<{ id: string; email: string }>`select id, email from "user" where lower(email) = ${data.email} limit 1`;
+    const users = officeDatabase()
+      ? await sql<{ id: string; email: string }>`select id, email from office_users where lower(email) = ${data.email} and is_active = true limit 1`
+      : await sql<{ id: string; email: string }>`select id, email from "user" where lower(email) = ${data.email} limit 1`;
     const user = users[0];
     if (user) {
       const token = crypto.randomBytes(32).toString("hex");
@@ -1491,10 +1524,16 @@ export const completePasswordReset = createServerFn({ method: "POST" })
     }
     const hit = book.find((row) => row.hash === hash && row.exp > now);
     if (!hit) throw new Error("Expired");
-    const { hashPassword } = await import("better-auth/crypto");
-    const hashed = await hashPassword(data.password);
-    const updated = await sql<{ id: string }>`update "account" set password = ${hashed}, "updatedAt" = now() where "userId" = ${hit.userId} and "providerId" = 'credential' returning id`;
-    if (!updated[0]) throw new Error("Expired");
+    if (officeDatabase()) {
+      const { hashPassword } = await import("@/lib/google/session");
+      const updated = await sql<{ id: string }>`update office_users set password_hash = ${hashPassword(data.password)} where id = ${hit.userId} returning id`;
+      if (!updated[0]) throw new Error("Expired");
+    } else {
+      const { hashPassword } = await import("better-auth/crypto");
+      const hashed = await hashPassword(data.password);
+      const updated = await sql<{ id: string }>`update "account" set password = ${hashed}, "updatedAt" = now() where "userId" = ${hit.userId} and "providerId" = 'credential' returning id`;
+      if (!updated[0]) throw new Error("Expired");
+    }
     const value = JSON.stringify(book.filter((row) => row.hash !== hash && row.exp > now));
     await sql`insert into settings (key, value, updated_at) values ('password_resets', ${value}, now()) on conflict (key) do update set value = ${value}, updated_at = now()`;
     return { ok: true as const };
@@ -1643,6 +1682,7 @@ export const adminDriveAuthUrl = createServerFn({ method: "POST" })
   });
 
 function sheetsOn() {
+  if (officeDatabase()) return false;
   return Boolean(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim());
 }
 
@@ -1776,6 +1816,13 @@ export const changeMyPassword = createServerFn({ method: "POST" })
   }))
   .handler(async ({ context, data }) => {
     if (sheetsOn()) return (await import("./sheet-backend")).changeMyPassword(context.userId, data);
-    throw new Error("Password");
+    if (!officeDatabase()) throw new Error("Password");
+    const { hashPassword, verifyPassword } = await import("@/lib/google/session");
+    const sql = await getSql();
+    const rows = await sql<{ passwordHash: string }>`select password_hash as "passwordHash" from office_users where id = ${context.userId}`;
+    const row = rows[0];
+    if (!row || !verifyPassword(data.current, row.passwordHash)) throw new Error("Password");
+    await sql`update office_users set password_hash = ${hashPassword(data.next)} where id = ${context.userId}`;
+    return { ok: true };
   });
 
