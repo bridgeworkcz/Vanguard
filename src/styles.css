@@ -638,6 +638,80 @@ button,
     border-color: rgba(255, 255, 255, 0.34);
   }
 }
+button,
+.btn,
+.btn-solid,
+.btn-ink,
+.sign-pill,
+.admin-nav-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.btn:active:not(:disabled),
+.btn-ink:active:not(:disabled),
+.admin-nav-btn:active {
+  background: rgba(255, 106, 26, 0.28);
+  border-color: #ff6a1a;
+  color: #fff;
+  transform: scale(0.96);
+}
+.btn-solid:active:not(:disabled) {
+  background: #fff;
+  color: #ff6a1a;
+  border-color: #fff;
+  transform: scale(0.96);
+  box-shadow: 0 0 0 4px rgba(255, 106, 26, 0.55);
+}
+.sign-pill:active {
+  background: #ff6a1a;
+  color: #1a0b04;
+  border-color: #ff6a1a;
+  transform: scale(0.96);
+}
+@keyframes tap-ring {
+  0% {
+    transform: scale(0.96);
+    box-shadow: 0 0 0 0 rgba(255, 106, 26, 0.7);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 16px rgba(255, 106, 26, 0);
+  }
+}
+@keyframes tap-solid {
+  0% {
+    background: #fff;
+    color: #ff6a1a;
+    transform: scale(0.94);
+    box-shadow: 0 0 0 0 rgba(255, 106, 26, 0.85);
+  }
+  40% {
+    background: #ffe1d2;
+    color: #1a0b04;
+    transform: scale(1.04);
+    box-shadow: 0 0 0 7px rgba(255, 106, 26, 0.28);
+  }
+  100% {
+    background: #ff6a1a;
+    color: #1a0b04;
+    transform: scale(1);
+    box-shadow: 0 0 0 16px rgba(255, 106, 26, 0);
+  }
+}
+.tap-ack {
+  animation: tap-ring 460ms cubic-bezier(0.16, 0.84, 0.32, 1);
+}
+.btn-solid.tap-ack,
+a.btn-solid.tap-ack {
+  animation: tap-solid 460ms cubic-bezier(0.16, 0.84, 0.32, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tap-ack,
+  .btn-solid.tap-ack,
+  a.btn-solid.tap-ack {
+    animation: none;
+  }
+}
 .vg-page {
   min-height: 70vh;
 }

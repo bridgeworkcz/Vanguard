@@ -1,8 +1,30 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { LanguageProvider } from "@/lib/vanguard/i18n";
 import appCss from "../styles.css?url";
+
+function TapAck() {
+  useEffect(() => {
+    const onDown = (event: PointerEvent) => {
+      const node = event.target instanceof Element
+        ? event.target.closest("button.btn, a.btn, button.btn-solid, a.btn-solid, .btn-ink, .sign-pill, .admin-nav-btn, label.btn")
+        : null;
+      if (!(node instanceof HTMLElement)) return;
+      if (node.matches(":disabled") || node.getAttribute("aria-disabled") === "true") return;
+      node.classList.remove("tap-ack");
+      void node.offsetWidth;
+      node.classList.add("tap-ack");
+      const clear = () => node.classList.remove("tap-ack");
+      node.addEventListener("animationend", clear, { once: true });
+      window.setTimeout(clear, 520);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, []);
+  return null;
+}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -39,6 +61,7 @@ export const Route = createRootRoute({
       </head>
       <body>
         <PreviewHostBridge />
+        <TapAck />
         <AuthProvider>
           <LanguageProvider>
             <Outlet />
