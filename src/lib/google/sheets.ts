@@ -85,6 +85,11 @@ async function sheetsFetch<T>(path: string, options: RequestInit = {}): Promise<
 }
 function col(n:number):string {let s='';while(n>0){const x=(n-1)%26;s=String.fromCharCode(65+x)+s;n=Math.floor((n-1)/26);}return s;}
 
+/** Read past the canonical header. Extra columns are appended in place and must stay visible. */
+function readSpan(name: string): number {
+  return Math.max((SHEET_SCHEMAS[name] || []).length, 36);
+}
+
 async function metadata(): Promise<{ sheets?: { properties?: { title?: string } }[] }> {
   return sheetsFetch("/?fields=sheets.properties");
 }
@@ -179,7 +184,7 @@ export async function readSheetRows(name: string): Promise<SheetRow[]> {
   const job = (async () => {
     const schema = SHEET_SCHEMAS[name];
     if (!schema) throw new Error(`Unknown sheet schema: ${name}`);
-    const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(schema.length)}`);
+    const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(readSpan(name))}`);
     const values = result.values || [];
     const header = (values[0] || []).map(String);
     const rows = values.length ? rowsFrom(header.length ? header : [...schema], values) : [];
@@ -212,7 +217,7 @@ export async function primeSheetRows(names: string[]): Promise<void> {
   if (!need.length) return;
   const seen = new Map(need.map((name) => [name, epochOf(name)]));
   const job = (async () => {
-    const grids = await batchValues(need.map((name) => `${name}!A:${col((SHEET_SCHEMAS[name] || []).length || 1)}`));
+    const grids = await batchValues(need.map((name) => `${name}!A:${col(readSpan(name))}`));
     const out = new Map<string, SheetRow[]>();
     need.forEach((name, index) => {
       const values = grids[index] || [];
@@ -300,12 +305,43 @@ export async function deleteSheetRowsByIds(name: string, ids: string[]): Promise
   return indexes.length;
 }
 
+export async function deleteSheetRowsContaining(name: string, ids: string[]): Promise<number> {
+  const want = new Set(ids.map((id) => id.trim()).filter(Boolean));
+  if (!want.size) return 0;
+  const schema = await ensureSchema(name);
+  const result = await sheetsFetch<{ values?: string[][] }>(`/values/${enc(name)}!A:${col(Math.max(schema.length, readSpan(name)))}`);
+  const values = result.values || [];
+  const indexes: number[] = [];
+  values.forEach((line, index) => {
+    if (index === 0) return;
+    if (line.some((cell) => want.has(String(cell ?? "").trim()))) indexes.push(index);
+  });
+  if (!indexes.length) return 0;
+  indexes.sort((a, b) => b - a);
+  const meta = await sheetsFetch<{ sheets?: { properties?: { title?: string; sheetId?: number } }[] }>("/?fields=sheets.properties(sheetId,title)");
+  const sheetId = meta.sheets?.find((sheet) => sheet.properties?.title === name)?.properties?.sheetId;
+  if (sheetId === undefined) throw new Error("Sheet");
+  await sheetsFetch(":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({
+      requests: indexes.map((start) => ({
+        deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: start, endIndex: start + 1 } },
+      })),
+    }),
+  });
+  invalidateSheet(name);
+  return indexes.length;
+}
+
 export async function updateSheetRowById(name:string,id:string,patch:SheetRow):Promise<void>{
   const schema=await ensureSchema(name);
-  const idIndex=Math.max(0, schema.indexOf('id'));
-  const result=await sheetsFetch<{values?:string[][]}>(`/values/${enc(name)}!A:${col(schema.length)}`);
+  let idIndex = schema.indexOf("id");
+  if (idIndex < 0) idIndex = schema.findIndex((header) => header.replace(/[\s_]/g, "").toLowerCase() === "id");
+  const result=await sheetsFetch<{values?:string[][]}>(`/values/${enc(name)}!A:${col(Math.max(schema.length, readSpan(name)))}`);
   const values=result.values||[];
-  const idx=values.slice(1).findIndex(r=>String(r[idIndex]??'')===id);
+  const wanted = id.trim();
+  let idx = idIndex >= 0 ? values.slice(1).findIndex((row) => String(row[idIndex] ?? "").trim() === wanted) : -1;
+  if (idx < 0) idx = values.slice(1).findIndex((row) => row.some((cell) => String(cell ?? "").trim() === wanted));
   if(idx<0) throw new Error(`Row '${id}' not found in '${name}'.`);
   const rowNumber=idx+2;
   const current=values[rowNumber-1]||[];

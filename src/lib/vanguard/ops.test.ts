@@ -6,6 +6,10 @@ test("tranches add up to the fee", () => {
   const parts = trancheSplit(1000);
   assert.equal(parts[0].amount + parts[1].amount + parts[2].amount, 1000);
   assert.deepEqual(parts.map((part) => part.percent), [30, 40, 30]);
+  const next = trancheSplit(1080, "entry160");
+  assert.equal(next[0].amount, 160);
+  assert.equal(next[0].amount + next[1].amount + next[2].amount, 1080);
+  assert.equal(next[1].amount, Math.round(920 * 0.6));
 });
 
 test("citizenship block is case-insensitive", () => {

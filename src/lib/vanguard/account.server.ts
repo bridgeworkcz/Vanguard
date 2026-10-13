@@ -169,16 +169,92 @@ async function loginInDatabase(data: AccountInput) {
   if (!row || row.isActive === false) throw new Error("Invalid email/phone or password.");
   if (!verifyPassword(data.password, row.passwordHash)) throw new Error("Invalid email/phone or password.");
   const user = publicUser({ id: row.id, email: row.email, phone: row.phone, fullName: row.fullName, roles: row.roles });
+  if (user.role === "ADMIN" || user.role === "MANAGER") {
+    const { hashPassword } = await import("@/lib/google/session");
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    await sql`insert into office_signin (user_id, code_hash, expires_at, attempts)
+      values (${user.id}, ${hashPassword(code)}, now() + interval '10 minutes', 0)
+      on conflict (user_id) do update set code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`;
+    const sent = await officeChannel(`Код входу в офіс для ${user.fullName || user.email}: ${code}. Діє 10 хвилин.`, user.email);
+    if (!sent) throw new Error("The office could not send the sign-in code.");
+    return { needCode: true as const, user: null };
+  }
   await sql`update office_users set last_login_at = now() where id = ${row.id}`;
   writeCookie(createSessionToken({ userId: user.id, email: user.email, roles: user.roles }));
-  return user;
+  return { needCode: false as const, user };
 }
 
 export async function readSheetSessionUser() {
   return readSheetSessionToken(getCookie(COOKIE));
 }
 
-type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };
+type AccountInput = { action: "register" | "login" | "code"; email: string; password: string; fullName?: string; phone?: string; code?: string };
+
+async function dbHit(bucket: string, limit: number, seconds: number) {
+  try {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ hits: number }>`insert into auth_hits (bucket, hits, reset_at)
+      values (${bucket}, 1, now() + (${seconds} * interval '1 second'))
+      on conflict (bucket) do update set
+        hits = case when auth_hits.reset_at <= now() then 1 else auth_hits.hits + 1 end,
+        reset_at = case when auth_hits.reset_at <= now() then now() + (${seconds} * interval '1 second') else auth_hits.reset_at end
+      returning hits`;
+    return Number(rows[0]?.hits ?? 0) > limit;
+  } catch {
+    return false;
+  }
+}
+
+async function officeChannel(message: string, email: string) {
+  let sent = false;
+  try {
+    const { getSql } = await import("@/lib/db");
+    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    const sql = await getSql();
+    const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
+    sent = await sendSafeTelegramAlert(message, chat[0]?.value ? { chatId: chat[0].value } : {});
+    const mail = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from')`;
+    const map: Record<string, string> = {};
+    for (const row of mail) map[row.key] = row.value;
+    const { deliverMail } = await import("./mail");
+    const mailed = await deliverMail({
+      key: map.resend_key || "",
+      from: map.mail_from || "",
+      to: email,
+      subject: "Office sign-in code",
+      text: message,
+    });
+    sent = sent || mailed;
+  } catch (err) {
+    console.error("[office-code]", err);
+  }
+  return sent;
+}
+
+async function confirmOfficeCode(data: AccountInput) {
+  const { getSql } = await import("@/lib/db");
+  const { createSessionToken, verifyPassword } = await import("@/lib/google/session");
+  const sql = await getSql();
+  const email = emailOf(data.email);
+  const users = await sql<{ id: string; email: string; phone: string; fullName: string; roles: string }>`
+    select id, email, phone, full_name as "fullName", roles from office_users where lower(email) = ${email} limit 1`;
+  const userRow = users[0];
+  if (!userRow) throw new Error("Invalid email/phone or password.");
+  const pending = await sql<{ codeHash: string; expires: string; attempts: number }>`
+    select code_hash as "codeHash", expires_at::text as expires, attempts from office_signin where user_id = ${userRow.id}`;
+  const row = pending[0];
+  if (!row || Date.parse(row.expires) < Date.now() || row.attempts >= 5) throw new Error("Expired");
+  if (!verifyPassword(data.code || "", row.codeHash)) {
+    await sql`update office_signin set attempts = attempts + 1 where user_id = ${userRow.id}`;
+    throw new Error("Invalid email/phone or password.");
+  }
+  await sql`delete from office_signin where user_id = ${userRow.id}`;
+  const user = publicUser(userRow);
+  await sql`update office_users set last_login_at = now() where id = ${user.id}`;
+  writeCookie(createSessionToken({ userId: user.id, email: user.email, roles: user.roles }));
+  return { mode: "google" as const, needCode: false, user };
+}
 
 export async function runAccountAuth(data: AccountInput) {
   assertSameSiteRequest();
@@ -187,13 +263,18 @@ export async function runAccountAuth(data: AccountInput) {
     const ip = (req?.headers.get("x-forwarded-for") || "local").split(",")[0]?.trim().slice(0, 80) || "local";
     const emailKey = emailOf(data.email).slice(0, 120);
     if (data.action === "register") {
-      if (limited(`register:${ip}`, 5, 60 * 60 * 1000)) throw new Error("Try again later.");
-    } else if (limited(`login:${emailKey}`, 8, 15 * 60 * 1000) || limited(`login-ip:${ip}`, 30, 15 * 60 * 1000)) {
+      if (limited(`register:${ip}`, 5, 60 * 60 * 1000) || (await dbHit(`register:${ip}`, 5, 3600))) throw new Error("Try again later.");
+    } else if (limited(`login:${emailKey}`, 8, 15 * 60 * 1000) || limited(`login-ip:${ip}`, 30, 15 * 60 * 1000) || (await dbHit(`login:${emailKey}`, 8, 900))) {
       throw new Error("Try again later.");
     }
+    if (data.action === "code") {
+      if (limited(`code:${emailKey}`, 8, 15 * 60 * 1000)) throw new Error("Try again later.");
+      return confirmOfficeCode(data);
+    }
     if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
-    const user = data.action === "register" ? await registerInDatabase(data) : await loginInDatabase(data);
-    return { mode: "google" as const, user };
+    const signed = data.action === "register" ? { needCode: false as const, user: await registerInDatabase(data) } : await loginInDatabase(data);
+    if (signed.needCode) return { mode: "google" as const, needCode: true, user: null };
+    return { mode: "google" as const, needCode: false, user: signed.user };
   }
   if (!sheetsConfigured()) return { mode: "local" as const };
   const req = getRequest();

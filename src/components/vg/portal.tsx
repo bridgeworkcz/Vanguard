@@ -16,6 +16,7 @@ import {
   saveQuestionnaire,
   takeInvoiceNumber,
   noteFunnel,
+  openSpouseCase,
   updateMyContact,
   changeMyPassword,
   uploadMyDocument,
@@ -31,6 +32,8 @@ import {
   parseQuestionnaire,
   questionnaireError,
   sameCountry,
+  shareLabel,
+  normalizeScheme,
   tranches,
   whatsAppHref,
   type DocCategory,
@@ -38,14 +41,14 @@ import {
 } from "@/lib/vanguard/domain";
 import { useI18n, PUBLIC_LANGS, type CopyKey } from "@/lib/vanguard/i18n";
 import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
-import { canCancel, stageTone } from "@/lib/vanguard/ops";
+import { canCancel, hoursUntil, stageTone } from "@/lib/vanguard/ops";
 import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { DocScreen } from "./doc-view";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
   const code = raw.split("|")[0] || "";
   const extra = raw.split("|").slice(1).join("|").trim();
-  const line = code === "blur" ? t("pay_blur") : code === "name" ? t("reject_name") : code === "page" ? t("pass_pages") : code === "other" ? t("reject_other") : raw;
+  const line = code === "blur" ? t("pay_blur") : code === "name" ? t("reject_name") : code === "page" ? t("pass_pages") : code === "expired" ? t("reject_expired") : code === "cropped" ? t("reject_cropped") : code === "other" ? t("reject_other") : raw;
   if (line === raw) return raw;
   return extra ? `${line} ${extra}` : line;
 }
@@ -291,7 +294,7 @@ function SettingsPanel({
 
 export function PortalPage({ id }: { id: string }) {
   const { t, lang } = useI18n();
-  const paperLang = lang === "cs" || lang === "ur" ? lang : "en";
+  const paperLang = "en" as const;
   const { pending, signedIn, deskId } = useDesk();
   const navigate = useNavigate();
   const { data: site } = useSite();
@@ -315,6 +318,9 @@ export function PortalPage({ id }: { id: string }) {
   const [qStep, setQStep] = useState(0);
   const [editing, setEditing] = useState(false);
   const [shot, setShot] = useState<{ url: string; file: File } | null>(null);
+  const [seeSum, setSeeSum] = useState(false);
+  const [seeDate, setSeeDate] = useState(false);
+  const [seePayee, setSeePayee] = useState(false);
   const [codeDraft, setCodeDraft] = useState("");
   const [codeNote, setCodeNote] = useState("");
 
@@ -453,7 +459,8 @@ export function PortalPage({ id }: { id: string }) {
 
   const app = detail?.app;
   const visa = site?.products.find((p) => p.id === app?.visaProductId);
-  const parts = app ? tranches(app.totalCost) : null;
+  const parts = app ? tranches(app.totalCost, normalizeScheme(app.feeScheme)) : null;
+  const scheme = normalizeScheme(app?.feeScheme);
   const proof = detail?.documents.find((d) => d.category === "PAYMENT_PROOF");
   const thirdPaid =
     app?.status === "ISSUED" ||
@@ -597,6 +604,7 @@ export function PortalPage({ id }: { id: string }) {
       total: app.totalCost,
       date: new Date().toISOString().slice(0, 10),
       hold: true,
+      scheme: normalizeScheme(app.feeScheme),
     });
     if (url) showPreview({ url, name: `${app.id}-invoice-${tranche}.pdf`, tranche });
   }
@@ -637,13 +645,14 @@ export function PortalPage({ id }: { id: string }) {
       total: app.totalCost,
       date: new Date().toISOString().slice(0, 10),
       hold: true,
+      scheme: normalizeScheme(app.feeScheme),
     });
     if (url) showPreview({ url, name: `${app.id}-agreement.pdf` });
   }
 
   return (
     <Shell>
-      <div className="mx-auto max-w-5xl px-4 py-12">
+      <div className={`mx-auto max-w-5xl px-4 py-12 ${app && app.status === "OPEN" ? "pb-28" : ""}`}>
         <p className="kicker">{t("portal_kicker")}</p>
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
@@ -889,9 +898,9 @@ export function PortalPage({ id }: { id: string }) {
               ) : null}
               {parts ? (
                 <p className="mt-3 text-sm text-mist">
-                  30% {parts.first} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
-                  {" · "}40% {parts.second} EUR · {app.stage >= 4 ? t("portal_paid") : t("portal_due")}
-                  {" · "}30% {parts.final} EUR · {thirdPaid ? t("portal_paid") : t("portal_due")}
+                  {shareLabel(scheme, 0)} {parts.first} EUR · {app.stage >= 3 ? t("portal_paid") : t("portal_due")}
+                  {" · "}{shareLabel(scheme, 1)} {parts.second} EUR · {app.stage >= 4 ? t("portal_paid") : t("portal_due")}
+                  {" · "}{shareLabel(scheme, 2)} {parts.final} EUR · {thirdPaid ? t("portal_paid") : t("portal_due")}
                 </p>
               ) : null}
             </div>
@@ -1039,9 +1048,9 @@ export function PortalPage({ id }: { id: string }) {
                 <p className="kicker">{t("pay_bar")}</p>
                 <ol className="mt-3 grid gap-2 sm:grid-cols-3">
                   {[
-                    ["30%", parts.first, app.stage2At, app.stage >= 2],
-                    ["40%", parts.second, app.stage3At, app.stage >= 3],
-                    ["30%", parts.final, app.stage4At, app.stage >= 4],
+                    [shareLabel(scheme, 0), parts.first, app.stage2At, app.stage >= 2],
+                    [shareLabel(scheme, 1), parts.second, app.stage3At, app.stage >= 3],
+                    [shareLabel(scheme, 2), parts.final, app.stage4At, app.stage >= 4],
                   ].map(([label, amount, date], index) => {
                     const due = !thirdPaid && ((app.stage === 2 && index === 0) || (app.stage === 3 && index === 1 && invoice2Unlocked(app.processStage)) || (app.stage >= 4 && index === 2));
                     return (
@@ -1072,7 +1081,10 @@ export function PortalPage({ id }: { id: string }) {
               <div className="glass p-5">
                 <p>
                   {t("cancel_on")}{" "}
-                  {app.cancelDeadlineAt ? new Date(app.cancelDeadlineAt).toLocaleDateString() : "—"}
+                  {app.cancelDeadlineAt ? new Date(app.cancelDeadlineAt).toLocaleString() : "—"}
+                  {app.cancelDeadlineAt && hoursUntil(app.cancelDeadlineAt, now) !== null ? (
+                    <span className="mt-1 block text-mist">{Math.max(0, Math.ceil(hoursUntil(app.cancelDeadlineAt, now) || 0))} h</span>
+                  ) : null}
                 </p>
                 {canCancel(app.status, app.stage, app.cancelDeadlineAt, Boolean(proof)) ? (
                   <button
@@ -1095,18 +1107,18 @@ export function PortalPage({ id }: { id: string }) {
                 <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
                 {thirdPaid ? <p className="w-full text-sm text-mist">{t("pay_no_more")}</p> : <p className="w-full text-sm text-mist">{t("open_here")}</p>}
                 {thirdPaid ? null : (
-                  <button type="button" className={app.stage === 2 ? "btn-solid" : "btn"} onClick={() => void invoice(1)}>{t("invoice_1")}</button>
+                  <button type="button" className={app.stage === 2 ? "btn-solid" : "btn"} onClick={() => void invoice(1)}>{t("invoice_1")}{parts ? ` · ${parts.first} EUR` : ""}</button>
                 )}
                 <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
                 <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
                 {!thirdPaid && app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
-                  <button type="button" className={app.stage < 4 ? "btn-solid" : "btn"} onClick={() => void invoice(2)}>{t("invoice_2")}</button>
+                  <button type="button" className={app.stage < 4 ? "btn-solid" : "btn"} onClick={() => void invoice(2)}>{t("invoice_2")}{parts ? ` · ${parts.second} EUR` : ""}</button>
                 ) : null}
                 {!thirdPaid && app.stage >= 3 && !invoice2Unlocked(app.processStage) ? (
                   <p className="w-full text-sm text-mist">{t("invoice_2_when")}</p>
                 ) : null}
                 {!thirdPaid && app.stage >= 4 ? (
-                  <button type="button" className="btn-solid" onClick={() => void invoice(3)}>{t("invoice_3")}</button>
+                  <button type="button" className="btn-solid" onClick={() => void invoice(3)}>{t("invoice_3")} · {parts ? `${parts.final} EUR` : ""}</button>
                 ) : null}
                 {detail?.wallet && !thirdPaid && app.stage >= 2 ? (
                   <p className="w-full break-all text-sm">
@@ -1121,12 +1133,17 @@ export function PortalPage({ id }: { id: string }) {
               <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof && app.stage === 2 ? "" : "step-live"}`}>
                 {t("pay_i_paid")}
                 <span className="text-mist">{t("proof_help")}</span>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={seeSum} onChange={(e) => setSeeSum(e.target.checked)} />{t("proof_see_sum")}</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={seeDate} onChange={(e) => setSeeDate(e.target.checked)} />{t("proof_see_date")}</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={seePayee} onChange={(e) => setSeePayee(e.target.checked)} />{t("proof_see_payee")}</label>
                 <label className="btn relative mt-2 inline-flex w-fit cursor-pointer items-center overflow-hidden">
                   {t("upload")}
                   <input
                     className="absolute inset-0 z-10 cursor-pointer opacity-0"
                     type="file"
                     accept="image/*,application/pdf"
+                    capture="environment"
+                    disabled={!seeSum || !seeDate || !seePayee}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       e.target.value = "";
@@ -1311,6 +1328,19 @@ export function PortalPage({ id }: { id: string }) {
                 <input className="field max-w-xl" value={note} placeholder={t("message_ph")} onChange={(e) => setNote(e.target.value)} />
                 <button className="btn" type="submit">{t("message_send")}</button>
               </form>
+              {app.status === "OPEN" ? (
+                <button
+                  type="button"
+                  className="btn mt-4"
+                  onClick={() =>
+                    void openSpouseCase({ data: app.id })
+                      .then((row) => navigate({ to: "/portal", search: { id: row.id } }))
+                      .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"))
+                  }
+                >
+                  {t("spouse_add")}
+                </button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -1345,6 +1375,7 @@ export function PortalPage({ id }: { id: string }) {
                     total: app.totalCost,
                     date: new Date().toISOString().slice(0, 10),
                     number: numbered.number,
+                    scheme: normalizeScheme(app.feeScheme),
                   }),
                 );
               return;
@@ -1355,6 +1386,17 @@ export function PortalPage({ id }: { id: string }) {
             a.click();
           }}
         />
+      ) : null}
+      {app && app.status === "OPEN" ? (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/15 bg-[#090909]/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <p className="text-sm">{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
+          {app.stage === 2 && app.cancelDeadlineAt ? (
+            <p className="text-xs text-mist">{Math.max(0, Math.ceil(hoursUntil(app.cancelDeadlineAt, now) || 0))} h</p>
+          ) : null}
+          {app.stage === 3 && app.invoice2DueAt ? (
+            <p className="text-xs text-mist">{Math.max(0, Math.ceil(hoursUntil(app.invoice2DueAt, now) || 0))} h</p>
+          ) : null}
+        </div>
       ) : null}
     </Shell>
   );

@@ -326,6 +326,8 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     clientPhone: extra.questionnaire.phone || "",
     accountClosed: extra.accountClosed === true,
     lang: extra.lang || "en",
+    feeScheme: "legacy30" as const,
+    invoice2DueAt: null,
     extra,
     row,
   };
@@ -1287,7 +1289,16 @@ async function buildPublicSite() {
     partners.push({ id: extra.id, country: extra.country, name: extra.name, sortOrder: extra.sort });
   }
   const counts = { filed: filings.length, issued: filings.filter((row) => row.status === "ISSUED").length };
-  return { settings: toPublicSettings(settings), products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts };
+  const countsByCountry: Record<string, { filed: number; issued: number }> = {};
+  for (const row of filings) {
+    const country = String(row.country || "");
+    if (!country) continue;
+    const slot = countsByCountry[country] ?? { filed: 0, issued: 0 };
+    slot.filed += 1;
+    if (row.status === "ISSUED") slot.issued += 1;
+    countsByCountry[country] = slot;
+  }
+  return { settings: toPublicSettings(settings), products: products.filter((item) => item.active), vacancies: vacancies.filter((item) => item.active), team, media, partners, counts, countsByCountry };
 }
 
 export async function listPublicFilings() {
@@ -1677,30 +1688,30 @@ function stageNote(lang: string, action: string): string {
   lang = filedLang(lang);
   const copy: Record<string, Record<string, string>> = {
     en: {
-      accept: "The office accepted the file. The first 30% is now due in your case.",
+      accept: "The office accepted the file. The first payment is now due in your case.",
       "confirm-payment": "The first payment is in. Send the papers the case still lists.",
-      stage4: "The last 30% is due. After it is paid, the permit can be sent.",
+      stage4: "The last part of the fee is due. After it is paid, the permit can be sent.",
       reject: "The file was declined. You can open it again from your case.",
       cancel: "The file was cancelled. The seat is free.",
     },
     cs: {
-      accept: "Kancelář spis přijala. V kauze je splatných prvních 30 %.",
+      accept: "Kancelář spis přijala. Ve spise je splatná první platba.",
       "confirm-payment": "První platba je přijatá. Doplňte doklady, které kauza ještě žádá.",
-      stage4: "Splatných je posledních 30 %. Po zaplacení lze povolení odeslat.",
+      stage4: "Splatný je zbytek honoráře. Po zaplacení lze povolení odeslat.",
       reject: "Spis byl odmítnut. Z kabinetu ho lze otevřít znovu.",
       cancel: "Spis byl zrušen. Místo je volné.",
     },
     ur: {
-      accept: "دفتر نے فائل قبول کر لی۔ پہلے 30% اب آپ کے کیس میں واجب ہیں۔",
+      accept: "دفتر نے فائل قبول کر لی۔ پہلی ادائیگی اب آپ کے کیس میں واجب ہے۔",
       "confirm-payment": "پہلی ادائیگی آ گئی۔ جو کاغذات کیس اب بھی مانگے، وہ بھیجیں۔",
-      stage4: "آخری 30% واجب ہیں۔ اس کے بعد اجازت نامہ بھیجا جا سکتا ہے۔",
+      stage4: "فیس کا آخری حصہ واجب ہے۔ اس کے بعد اجازت نامہ بھیجا جا سکتا ہے۔",
       reject: "فائل مسترد ہوئی۔ کیس سے اسے دوبارہ کھولا جا سکتا ہے۔",
       cancel: "فائل منسوخ ہوئی۔ جگہ خالی ہے۔",
     },
     ru: {
-      accept: "Офис принял дело. Первые 30% теперь в кабинете.",
+      accept: "Офис принял дело. Первая оплата теперь в кабинете.",
       "confirm-payment": "Первая оплата есть. Пришлите бумаги, которые дело ещё просит.",
-      stage4: "Последние 30% к оплате. После них разрешение можно отправлять.",
+      stage4: "Остаток суммы к оплате. После него разрешение можно отправлять.",
       reject: "Дело отклонено. Его можно открыть снова из кабинета.",
       cancel: "Дело отменено. Место свободно.",
     },
@@ -2496,7 +2507,7 @@ export async function adminSaveMail(userId: string, data: { from: string; key: s
   return { from, ready: Boolean((map.resend_key || "").trim() && from.includes("@")) };
 }
 
-export async function requestPasswordReset(email: string, lang: string) {
+export async function requestPasswordReset(email: string, _lang: string) {
   const { getRequest } = await import("@tanstack/react-start/server");
   const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim().slice(0, 80) || "local";
   const normalized = email.trim().toLowerCase();
@@ -2514,8 +2525,8 @@ export async function requestPasswordReset(email: string, lang: string) {
       key: map.resend_key || "",
       from: map.mail_from || "",
       to: row.email,
-      subject: copy(filedLang(lang), "mail_reset_subject"),
-      text: copy(filedLang(lang), "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
+      subject: copy("en", "mail_reset_subject"),
+      text: copy("en", "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
     });
   }
   return { sent: true as const };

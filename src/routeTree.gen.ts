@@ -30,6 +30,7 @@ import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as FilesKindIdRouteImport } from './routes/files.$kind.$id'
+import { Route as FromCitizenshipCountryRouteImport } from './routes/from.$citizenship.$country'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -136,6 +137,11 @@ const FilesKindIdRoute = FilesKindIdRouteImport.update({
   path: '/files/$kind/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FromCitizenshipCountryRoute = FromCitizenshipCountryRouteImport.update({
+  id: '/from/$citizenship/$country',
+  path: '/from/$citizenship/$country',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
+  '/from/$citizenship/$country': typeof FromCitizenshipCountryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -182,6 +189,7 @@ export interface FileRoutesByTo {
   '/vacancies/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
+  '/from/$citizenship/$country': typeof FromCitizenshipCountryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -206,6 +214,7 @@ export interface FileRoutesById {
   '/vacancies_/$id': typeof VacanciesIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/files/$kind/$id': typeof FilesKindIdRoute
+  '/from/$citizenship/$country': typeof FromCitizenshipCountryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
     | '/vacancies/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
+    | '/from/$citizenship/$country'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
     | '/vacancies/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
+    | '/from/$citizenship/$country'
   id:
     | '__root__'
     | '/'
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | '/vacancies_/$id'
     | '/api/auth/$'
     | '/files/$kind/$id'
+    | '/from/$citizenship/$country'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -301,6 +313,7 @@ export interface RootRouteChildren {
   VacanciesIdRoute: typeof VacanciesIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   FilesKindIdRoute: typeof FilesKindIdRoute
+  FromCitizenshipCountryRoute: typeof FromCitizenshipCountryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -452,6 +465,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FilesKindIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/from/$citizenship/$country': {
+      id: '/from/$citizenship/$country'
+      path: '/from/$citizenship/$country'
+      fullPath: '/from/$citizenship/$country'
+      preLoaderRoute: typeof FromCitizenshipCountryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -477,6 +497,7 @@ const rootRouteChildren: RootRouteChildren = {
   VacanciesIdRoute: VacanciesIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   FilesKindIdRoute: FilesKindIdRoute,
+  FromCitizenshipCountryRoute: FromCitizenshipCountryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

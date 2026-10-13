@@ -43,7 +43,7 @@ import {
   reviewDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, openedBeforeInvoice2Rule, stageIndex, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, normalizeScheme, openedBeforeInvoice2Rule, stageIndex, tranches, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
 import { useI18n, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
 import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
@@ -69,6 +69,59 @@ function NavGlyph({ tab }: { tab: Tab }) {
       {tab === "audit" ? <path {...common} d="M8 4h8M7 4.5h10v15.5H7zM9.5 9h5M9.5 13h5M9.5 17h3" /> : null}
       {tab === "guide" ? <path {...common} d="M6 5.5A2.5 2.5 0 0 1 8.5 3H19v15.5H8.5A2.5 2.5 0 0 0 6 21zM6 5.5V21" /> : null}
     </svg>
+  );
+}
+
+function caseRank(a: { status: string; stage: number; profileComplete: boolean; cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
+  if (a.status !== "OPEN") return 400;
+  if (isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) || isOverdue(a.invoice2DueAt)) return 0;
+  if (a.stage === 2) return 10;
+  if (a.stage === 1 && a.profileComplete) return 20;
+  if (a.stage === 3) return 30;
+  if (a.stage === 4) return 40;
+  return 60;
+}
+
+function deadlineMs(a: { cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
+  const n = Date.parse(a.cancelDeadlineAt || a.docDeadlineAt || a.invoice2DueAt || "");
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
+function paidBits(a: { stage: number; totalCost: number; feeScheme?: string }) {
+  const parts = tranches(a.totalCost, normalizeScheme(a.feeScheme));
+  if (a.stage >= 4) return `${parts.first} · ${parts.second} · ${parts.final}`;
+  if (a.stage >= 3) return `${parts.first} · ${parts.second}`;
+  if (a.stage >= 2) return String(parts.first);
+  return "—";
+}
+
+function TodayStrip({
+  rows,
+  label,
+  overdue,
+  onOpen,
+}: {
+  rows: AppRow[];
+  label: string;
+  overdue: string;
+  onOpen: (id: string) => void;
+}) {
+  const today = rows
+    .filter((a) => a.status === "OPEN" && caseRank(a) <= 30)
+    .slice()
+    .sort((a, b) => caseRank(a) - caseRank(b) || deadlineMs(a) - deadlineMs(b))
+    .slice(0, 8);
+  if (!today.length) return null;
+  return (
+    <div className="grid gap-2 sm:col-span-3">
+      <p className="text-sm text-mist">{label}</p>
+      {today.map((a) => (
+        <button key={a.id} type="button" className="btn w-fit" onClick={() => onOpen(a.id)}>
+          {a.id} · {lastNameOf(a.questionnaire) || a.clientEmail} · {a.country}
+          {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) || isOverdue(a.invoice2DueAt) ? ` · ${overdue}` : ""}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -196,7 +249,7 @@ function CaseFiles({
                 onClick={() => {
                   const code = docReason.split("|")[0] || "other";
                   const extra = docReason.split("|").slice(1).join("|");
-                  const reason = ["blur", "name", "page", "other"].includes(code) ? `${code}|${extra}` : `other|${docReason}`;
+                  const reason = ["blur", "name", "page", "expired", "cropped", "other"].includes(code) ? `${code}|${extra}` : `other|${docReason}`;
                   void reviewDocument({ data: { id: doc.id, status: "REJECTED", reason } }).then(onChanged).catch(() => setFileErr(t("admin_unsaved")));
                 }}
               >
@@ -215,6 +268,8 @@ function CaseFiles({
           <option value="blur">{t("reject_blur")}</option>
           <option value="name">{t("reject_name")}</option>
           <option value="page">{t("reject_page")}</option>
+          <option value="expired">{t("reject_expired")}</option>
+          <option value="cropped">{t("reject_cropped")}</option>
           <option value="other">{t("reject_other")}</option>
         </select>
         <input className="field" placeholder={t("reject_line")} value={docReason.includes("|") ? docReason.split("|").slice(1).join("|") : docReason} onChange={(e) => onReason(`${docReason.split("|")[0] || "other"}|${e.target.value}`)} />
@@ -709,6 +764,12 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <p className="display text-5xl">{overview.live}</p>
               <p className="mt-2 text-mist">{t("admin_live")}</p>
             </button>
+            <TodayStrip
+              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me)}
+              label={t("admin_today")}
+              overdue={t("admin_overdue")}
+              onOpen={(caseId) => go("overview", caseId)}
+            />
             {"funnel" in overview && overview.funnel ? (
               <article className="glass p-5 sm:col-span-3">
                 <p className="kicker">{t("funnel_t")}</p>
@@ -870,6 +931,12 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
         {current === "applications" && staff ? (
           <div className="mt-8 grid gap-4">
             <>
+            <TodayStrip
+              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me)}
+              label={t("admin_today")}
+              overdue={t("admin_overdue")}
+              onOpen={(caseId) => go("applications", caseId)}
+            />
             <input
               className="field max-w-md"
               placeholder={t("admin_id_search")}
@@ -1041,7 +1108,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 .filter((a) => !unassignedOnly || !a.assignedManagerId)
                 .filter((a) => !mineOnly || a.assignedManagerId === me)
                 .filter((a) => !hangOnly || (a.stage === 2 && moneyHanging(a)))
-                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)} ${lastNameOf(a.questionnaire)}`.toLowerCase().includes(caseQuery.trim().toLowerCase()));
+                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)} ${lastNameOf(a.questionnaire)} ${a.referrerUserId || ""}`.toLowerCase().includes(caseQuery.trim().toLowerCase()))
+                .slice()
+                .sort((a, b) => caseRank(a) - caseRank(b) || deadlineMs(a) - deadlineMs(b));
               const pages = Math.max(1, Math.ceil(filtered.length / 15));
               const currentPage = Math.min(casePage, pages);
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
@@ -1116,7 +1185,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               {!a.assignedManagerId ? <span className="mt-1 block text-xs text-mist">{t("admin_unassigned")}</span> : null}
                               {a.stage >= 3 && a.status === "OPEN" ? <span className="mt-1 block text-xs text-mist">{t("admin_waiting_doc")}</span> : null}
                             </td>
-                            <td className="latin" data-label={t("portal_paid")}>{a.stage >= 4 ? "30 · 40 · 30" : a.stage >= 3 ? "30 · 40" : a.stage >= 2 ? "30" : "—"}</td>
+                            <td className="latin" data-label={t("portal_paid")}>{paidBits(a)}</td>
                             <td className="latin" data-label={t("admin_assign")}>
                               {(() => {
                                 const person = overview?.users.find((u) => u.userId === a.assignedManagerId);
@@ -1127,7 +1196,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                             <td data-label={t("admin_action")}>
                               {a.status === "OPEN" && a.stage === 1 && a.profileComplete ? (
                                 <button type="button" className="btn" onClick={() => void acceptCase(a.id)}>
-                                  {t("admin_accept")}
+                                  {t("admin_accept")} · {tranches(a.totalCost, normalizeScheme(a.feeScheme)).first} EUR
                                 </button>
                               ) : a.status === "OPEN" && a.stage === 1 ? (
                                 <span className="text-xs text-mist">{t("admin_block_q")}</span>
@@ -1177,7 +1246,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {detail.app.status === "OPEN" && detail.app.stage === 1 && detail.app.profileComplete ? (
-                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("accept")}>{t("admin_accept")}</button>
+                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("accept")}>{t("admin_accept")} · {tranches(detail.app.totalCost, normalizeScheme(detail.app.feeScheme)).first} EUR</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
                     <button type="button" className="btn" disabled={acting} onClick={() => void act("reject")}>{t("admin_reject")}</button>
@@ -1198,6 +1267,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     <option value="blur">{t("reject_blur")}</option>
                     <option value="name">{t("reject_name")}</option>
                     <option value="page">{t("reject_page")}</option>
+                    <option value="expired">{t("reject_expired")}</option>
+                    <option value="cropped">{t("reject_cropped")}</option>
                     <option value="other">{t("reject_other")}</option>
                   </select>
                   <input className="field" placeholder={t("reject_line")} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -1263,7 +1334,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     </>
                   ) : null}
                   {detail.app.status === "OPEN" && detail.app.stage === 3 && !openedBeforeInvoice2Rule(detail.app.createdAt) ? (
-                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("stage4")}>{t("admin_to4")}</button>
+                    <button type="button" className="btn-solid" disabled={acting} onClick={() => void act("stage4")}>{t("admin_to4")} · {tranches(detail.app.totalCost, normalizeScheme(detail.app.feeScheme)).final} EUR</button>
                   ) : null}
                   {detail.app.status === "OPEN" ? (
                     <button type="button" className="btn" disabled={acting} onClick={() => void act("cancel")}>{t("status_cancelled")}</button>

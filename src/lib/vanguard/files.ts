@@ -3,6 +3,10 @@ export function siteFileUrl(kind: "team" | "gallery", id: string, stored: string
   if (!stored) return "";
   const version = stored.includes("#") ? stored.slice(stored.lastIndexOf("#") + 1) : "";
   const plain = stored.split("#")[0] || "";
+  const blob = safePublicBlob(kind, storedDriveId(stored));
+  // A new portrait gets a new pathname. Putting it in the query means the
+  // browser and the edge cache cannot keep serving yesterday's bytes.
+  if (blob) return `/files/${kind}/${encodeURIComponent(id)}?p=${encodeURIComponent(blob)}`;
   if (plain.startsWith("/") || plain.startsWith("data:") || plain.startsWith("http://") || plain.startsWith("https://")) {
     if (!version || !plain.startsWith("/")) return plain;
     return `${plain}${plain.includes("?") ? "&" : "?"}v=${encodeURIComponent(version)}`;
@@ -12,10 +16,18 @@ export function siteFileUrl(kind: "team" | "gallery", id: string, stored: string
   return `/files/${kind}/${encodeURIComponent(id)}?v=${encodeURIComponent(stamp)}`;
 }
 
+/** Public portraits and office shots only. Never a client document. */
+export function safePublicBlob(kind: "team" | "gallery", path: string): string {
+  const clean = path.trim().replace(/^\/+/, "");
+  if (!clean || clean.includes("..") || clean.includes("\\") || clean.includes("?") || clean.includes("#")) return "";
+  const root = kind === "team" ? "docs/team/" : "docs/gallery/";
+  return clean.startsWith(root) ? clean : "";
+}
+
 export function storedDriveId(stored: string): string {
   const clean = (stored.split("#")[0] || "").trim();
   if (!clean || clean.startsWith("/") || clean.startsWith("data:")) return "";
-  if (clean.startsWith("file:")) return clean.slice(5);
+  if (clean.startsWith("file:")) return clean.slice(5).replace(/^\/+/, "");
   const fromQuery = clean.match(/[?&]id=([^&]+)/);
   if (fromQuery?.[1]) return decodeURIComponent(fromQuery[1]);
   const fromPath = clean.match(/\/d\/([a-zA-Z0-9_-]+)/);

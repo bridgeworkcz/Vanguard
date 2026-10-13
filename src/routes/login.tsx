@@ -29,6 +29,8 @@ function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState(false);
   const [resetToken, setResetToken] = useState("");
+  const [needCode, setNeedCode] = useState(false);
+  const [code, setCode] = useState("");
 
   useEffect(() => {
     accountBackend()
@@ -45,7 +47,7 @@ function LoginPage() {
     e.preventDefault();
     setErr("");
     setNote("");
-    if (mode !== "forgot" && password.length < 8) {
+    if (mode !== "forgot" && mode !== "reset" && !needCode && password.length < 8) {
       setErr(t("login_short"));
       return;
     }
@@ -65,6 +67,18 @@ function LoginPage() {
         setBusy(false);
         return;
       }
+      if (needCode) {
+        const account = await accountAuth({
+          data: { action: "code", email, password, code },
+        });
+        if ("needCode" in account && account.needCode) {
+          setNote(t("login_code_help"));
+          setBusy(false);
+          return;
+        }
+        window.location.assign("/portal");
+        return;
+      }
       const account = await accountAuth({
         data: {
           action: mode === "up" ? "register" : "login",
@@ -74,6 +88,12 @@ function LoginPage() {
           phone,
         },
       });
+      if ("needCode" in account && account.needCode) {
+        setNeedCode(true);
+        setNote(t("login_code_help"));
+        setBusy(false);
+        return;
+      }
       if (account.mode === "local") {
         if (mode === "up") {
           const res = await authClient.signUp.email({ email, password, name: name || email });
@@ -111,10 +131,21 @@ function LoginPage() {
                 <input className="field" placeholder={t("contact_phone")} value={phone} onChange={(e) => setPhone(e.target.value)} />
               </>
             ) : null}
-            {mode === "reset" ? null : (
+            {mode === "reset" || needCode ? null : (
               <input className="field" type="email" required placeholder={t("login_email")} value={email} onChange={(e) => setEmail(e.target.value)} />
             )}
-            {mode === "forgot" ? null : (
+            {needCode ? (
+              <input
+                className="field"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                maxLength={6}
+                placeholder={t("login_code")}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+            ) : mode === "forgot" ? null : (
               <input className="field" type="password" required placeholder={mode === "reset" ? t("login_reset_new") : t("login_password")} value={password} onChange={(e) => setPassword(e.target.value)} />
             )}
             {mode === "up" ? (
@@ -128,18 +159,24 @@ function LoginPage() {
             {err ? <p className="text-sm text-metal">{err}</p> : null}
             {note ? <p className="text-sm text-mist">{note}</p> : null}
             <button className="btn-solid" type="submit" disabled={busy}>
-              {mode === "up" ? t("login_create") : mode === "forgot" ? t("login_reset_title") : mode === "reset" ? t("login_reset_save") : t("login_enter")}
+              {needCode ? t("login_code") : mode === "up" ? t("login_create") : mode === "forgot" ? t("login_reset_title") : mode === "reset" ? t("login_reset_save") : t("login_enter")}
             </button>
           </form>
-          {mode === "in" ? (
+          {needCode ? (
+            <button type="button" className="mt-4 text-sm text-mist" onClick={() => { setNeedCode(false); setCode(""); setErr(""); setNote(""); }}>
+              {t("login_switch_have")}
+            </button>
+          ) : mode === "in" ? (
             <button type="button" className="mt-4 text-sm text-mist" onClick={() => { setMode("forgot"); setErr(""); setNote(""); }}>
               {t("login_forgot")}
             </button>
           ) : null}
-          <button type="button" className="mt-4 block text-sm text-mist" onClick={() => { setMode(mode === "in" ? "up" : "in"); setErr(""); setNote(""); }}>
+          {needCode ? null : (
+          <button type="button" className="mt-4 block text-sm text-mist" onClick={() => { setMode(mode === "in" ? "up" : "in"); setNeedCode(false); setErr(""); setNote(""); }}>
             {mode === "in" ? t("login_switch_create") : t("login_switch_have")}
           </button>
-          {sheet || mode !== "in" ? null : (
+          )}
+          {sheet || mode !== "in" || needCode ? null : (
             <>
               <p className="mt-6 text-center text-xs uppercase tracking-widest text-mist">{t("login_or")}</p>
               <div className="mt-3 grid gap-2">

@@ -1,11 +1,12 @@
-export function trancheSplit(total: number) {
-  const first = Math.round(total * 0.3);
-  const second = Math.round(total * 0.4);
-  const final = Math.max(0, total - first - second);
+import { normalizeScheme, tranches, type FeeScheme } from "./domain";
+
+export function trancheSplit(total: number, scheme: FeeScheme = "legacy30") {
+  const parts = tranches(total, scheme);
+  const percent = scheme === "entry160" ? [0, 60, 0] : [30, 40, 30];
   return [
-    { key: "T1", percent: 30, amount: first },
-    { key: "T2", percent: 40, amount: second },
-    { key: "T3", percent: 30, amount: final },
+    { key: "T1" as const, percent: percent[0]!, amount: parts.first },
+    { key: "T2" as const, percent: percent[1]!, amount: parts.second },
+    { key: "T3" as const, percent: percent[2]!, amount: parts.final },
   ];
 }
 
@@ -19,6 +20,14 @@ export function hoursUntil(iso: string | null | undefined, now = Date.now()): nu
 export function dueWithinHours(iso: string | null | undefined, hours: number, now = Date.now()): boolean {
   const left = hoursUntil(iso, now);
   return left !== null && left > 0 && left <= hours;
+}
+
+export function remindBand(iso: string | null | undefined, now = Date.now()): "12" | "48" | null {
+  const left = hoursUntil(iso, now);
+  if (left === null || left <= 0) return null;
+  if (left <= 12) return "12";
+  if (left <= 48) return "48";
+  return null;
 }
 
 export function isOverdue(iso: string | null | undefined, now = Date.now()): boolean {
@@ -57,6 +66,7 @@ export type CommissionCase = {
   stage2At: string | null;
   stage3At: string | null;
   stage4At: string | null;
+  feeScheme?: string;
 };
 
 /** 10% (or the published rate) of the parts marked paid this calendar month, Kyiv time. */
@@ -65,7 +75,7 @@ export function monthCommission(cases: CommissionCase[], ratePct: number, now = 
   let base = 0;
   for (const app of cases) {
     if (app.status === "CANCELLED") continue;
-    const parts = trancheSplit(app.totalCost);
+    const parts = trancheSplit(app.totalCost, normalizeScheme(app.feeScheme));
     if (app.stage >= 2 && sameMonth(app.stage2At, now)) base += parts[0]!.amount;
     if (app.stage >= 3 && sameMonth(app.stage3At, now)) base += parts[1]!.amount;
     if (app.stage >= 4 && sameMonth(app.stage4At, now)) base += parts[2]!.amount;

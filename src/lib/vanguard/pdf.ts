@@ -1,6 +1,6 @@
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { tranches, type Questionnaire } from "./domain";
+import { shareLabel, tranches, type FeeScheme, type Questionnaire } from "./domain";
 
 type Settings = Record<string, string>;
 
@@ -439,9 +439,11 @@ export async function buildInvoice(opts: {
   date: string;
   number?: string;
   hold?: boolean;
+  scheme?: FeeScheme;
 }) {
-  const cs = opts.lang === "cs";
-  const parts = tranches(opts.total);
+  const cs = false;
+  const scheme = opts.scheme ?? "legacy30";
+  const parts = tranches(opts.total, scheme);
   const amount = opts.tranche === 1 ? parts.first : opts.tranche === 2 ? parts.second : parts.final;
   const sheet = await open(opts.settings, cs);
   const number = opts.number || `${opts.fileId}-${opts.tranche}`;
@@ -474,7 +476,7 @@ export async function buildInvoice(opts: {
     cs ? "3. část  ·  odeslání dokumentů" : "Part 3  ·  documents released",
   ];
   const values = [parts.first, parts.second, parts.final];
-  const rates = ["30 %", "40 %", "30 %"];
+  const rates = [shareLabel(scheme, 0), shareLabel(scheme, 1), shareLabel(scheme, 2)];
   sheet.table(
     [cs ? "Popis" : "Description", cs ? "Podíl" : "Share", cs ? "Částka" : "Amount", cs ? "Stav" : "Status"],
     labels.map((label, i) => [
@@ -592,10 +594,12 @@ export async function buildContract(opts: {
   total: number;
   date: string;
   hold?: boolean;
+  scheme?: FeeScheme;
 }) {
-  const cs = opts.lang === "cs";
+  const cs = false;
+  const scheme = opts.scheme ?? "legacy30";
   const sheet = await open(opts.settings, cs);
-  const parts = tranches(opts.total);
+  const parts = tranches(opts.total, scheme);
   sheet.heading(cs ? "Smlouva o spolupráci" : "Cooperation agreement", [
     `${cs ? "Spis" : "File"}\t${opts.fileId}`,
     `${cs ? "Datum" : "Date"}\t${opts.date}`,
@@ -620,9 +624,9 @@ export async function buildContract(opts: {
   sheet.table(
     [cs ? "Část" : "Part", cs ? "Kdy" : "When", cs ? "Částka" : "Amount"],
     [
-      ["30 %", cs ? "při přijetí spisu" : "when the file is accepted", money(parts.first)],
-      ["40 %", cs ? "když zaměstnavatel uvolní ministerstvo" : "when the employer clears the ministry", money(parts.second)],
-      ["30 %", cs ? "před odesláním dokumentů" : "before the documents are sent", money(parts.final)],
+      [shareLabel(scheme, 0), "when the file is accepted", money(parts.first)],
+      [shareLabel(scheme, 1), "when the employer clears the ministry", money(parts.second)],
+      [shareLabel(scheme, 2), "before the documents are sent", money(parts.final)],
       [cs ? "Celkem" : "Total", cs ? "sjednáno při otevření, bez další přirážky" : "fixed when the file opened, nothing added", money(opts.total)],
     ],
     [70, 300, 133],
@@ -632,7 +636,19 @@ export async function buildContract(opts: {
     sheet.write("The binding text of this agreement is English.", 9, sheet.bold);
     sheet.gap(4);
   }
-  for (const [heading, body] of cs ? CONTRACT_CS : CONTRACT_EN) {
+  const articles = (cs ? CONTRACT_CS : CONTRACT_EN).map(([heading, body]) => {
+    if (scheme === "entry160" && heading.startsWith("6.")) {
+      return [
+        heading,
+        body.replace(
+          "30 percent when the Practice accepts the file, 40 percent when the employer has cleared the filing on to the ministry, and 30 percent before originals are posted or access to a state portal is released.",
+          "160 euro when the Practice accepts the file, then 60 percent of what remains when the employer has cleared the filing on to the ministry, and the rest before originals are posted or access to a state portal is released.",
+        ),
+      ] as [string, string];
+    }
+    return [heading, body] as [string, string];
+  });
+  for (const [heading, body] of articles) {
     sheet.need(46);
     sheet.write(heading, 11, sheet.bold);
     sheet.gap(2);
@@ -659,12 +675,12 @@ export async function buildOffer(opts: {
   date: string;
   hold?: boolean;
 }) {
-  const cs = opts.lang === "cs";
+  const cs = false;
   const sheet = await open(opts.settings, cs);
-  sheet.heading(cs ? "Potvrzení místa" : "Confirmation of a place", [
-    `${cs ? "Spis" : "File"}\t${opts.fileId}`,
-    `${cs ? "Datum" : "Date"}\t${opts.date}`,
-    `${cs ? "Místo" : "Place"}\tPraha`,
+  sheet.heading("Confirmation of a place", [
+    `File\t${opts.fileId}`,
+    `Date\t${opts.date}`,
+    `Place\tPraha`,
   ]);
   sheet.write(opts.client || "—", 13, sheet.bold);
   sheet.gap(6);

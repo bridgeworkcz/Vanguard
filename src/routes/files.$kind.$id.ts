@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { storedDriveId } from "@/lib/vanguard/files";
+import { safePublicBlob, storedDriveId } from "@/lib/vanguard/files";
 
 function sheetCell(row: Record<string, string>, names: string[]) {
   const folded = new Map(Object.entries(row).map(([key, value]) => [key.replace(/[\s_]/g, "").toLowerCase(), value]));
@@ -18,12 +18,31 @@ function imageType(pathname: string, fallback: string) {
   return fallback.startsWith("image/") ? fallback : "image/jpeg";
 }
 
+function imageResponse(bytes: Uint8Array, type: string, fresh: boolean) {
+  return new Response(new Blob([bytes as BlobPart]), {
+    headers: {
+      "content-type": type,
+      "cache-control": fresh ? "public, max-age=31536000, immutable" : "public, max-age=60, must-revalidate",
+    },
+  });
+}
+
 export const Route = createFileRoute("/files/$kind/$id")({
   server: {
     handlers: {
-      GET: async ({ params }) => {
+      GET: async ({ params, request }) => {
         const kind = params.kind === "team" ? "team" : params.kind === "gallery" ? "gallery" : "";
         if (!kind) return new Response(null, { status: 404 });
+        const hinted = safePublicBlob(kind, new URL(request.url).searchParams.get("p") || "");
+        if (hinted) {
+          try {
+            const { downloadPrivateDocument } = await import("@/lib/blob");
+            const file = await downloadPrivateDocument(hinted);
+            return imageResponse(new Uint8Array(file.buffer), imageType(hinted, file.contentType), true);
+          } catch (err) {
+            console.error("[file]", err);
+          }
+        }
         const { readSheetRows } = await import("@/lib/google/sheets");
         const { downloadFileFromDrive } = await import("@/lib/google/drive");
         const rows = await readSheetRows(kind === "team" ? "Team" : "Gallery");
@@ -44,27 +63,16 @@ export const Route = createFileRoute("/files/$kind/$id")({
           return new Response(null, { status: 302, headers: { location: dest.toString() } });
         }
         const fileId = storedDriveId(stored);
-        const publicDoc = fileId.startsWith("docs/team/") || fileId.startsWith("docs/gallery/");
-        if (!fileId || fileId.includes("..") || (fileId.startsWith("docs/") && !publicDoc)) return new Response(null, { status: 404 });
+        const direct = safePublicBlob(kind, fileId);
+        if (!fileId || fileId.includes("..") || (fileId.startsWith("docs/") && !direct)) return new Response(null, { status: 404 });
         try {
-          if (fileId.startsWith("docs/")) {
+          if (direct) {
             const { downloadPrivateDocument } = await import("@/lib/blob");
-            const file = await downloadPrivateDocument(fileId);
-            const type = imageType(fileId, file.contentType);
-            return new Response(new Uint8Array(file.buffer), {
-              headers: {
-                "content-type": type,
-                "cache-control": "public, max-age=86400, s-maxage=86400",
-              },
-            });
+            const file = await downloadPrivateDocument(direct);
+            return imageResponse(new Uint8Array(file.buffer), imageType(direct, file.contentType), false);
           }
           const file = await downloadFileFromDrive(fileId);
-          return new Response(new Uint8Array(file.buffer), {
-            headers: {
-              "content-type": imageType(fileId, file.mimeType || ""),
-              "cache-control": "public, max-age=86400, s-maxage=86400",
-            },
-          });
+          return imageResponse(new Uint8Array(file.buffer), imageType(fileId, file.mimeType || ""), false);
         } catch (err) {
           console.error("[file]", err);
           return new Response(null, { status: 404 });

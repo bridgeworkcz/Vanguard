@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { listAgentBook, listPublicFilings } from "@/lib/vanguard/api";
+import { listAgentBook, listPublicFilings, lookupCaseStatus } from "@/lib/vanguard/api";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { Shell, rememberAgent, useDesk, usePageMeta } from "./chrome";
 
@@ -13,6 +13,47 @@ function Article({ kicker, title, children }: { kicker: string; title: string; c
         <div className="mt-8 grid gap-6 text-base leading-relaxed">{children}</div>
       </article>
     </Shell>
+  );
+}
+
+function StatusLookup() {
+  const { t } = useI18n();
+  const [id, setId] = useState("");
+  const [surname, setSurname] = useState("");
+  const [line, setLine] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function go(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setLine("");
+    try {
+      const row = await lookupCaseStatus({ data: { id, surname } });
+      if (!row.found) {
+        setLine(t("lookup_miss"));
+      } else {
+        const label =
+          row.status === "ISSUED"
+            ? t("status_issued")
+            : row.status === "REJECTED"
+              ? t("status_rejected")
+              : row.status === "CANCELLED"
+                ? t("status_cancelled")
+                : t(`stage_${row.stage}` as "stage_1");
+        setLine(t("lookup_hit").replace("{stage}", label));
+      }
+    } catch {
+      setLine(t("lookup_miss"));
+    }
+    setBusy(false);
+  }
+  return (
+    <form className="grid gap-3 border-t border-white/10 pt-8" onSubmit={(e) => void go(e)}>
+      <h2 className="display text-3xl">{t("lookup_title")}</h2>
+      <input className="field max-w-sm" required placeholder={t("lookup_id")} value={id} onChange={(e) => setId(e.target.value)} />
+      <input className="field max-w-sm" required placeholder={t("lookup_name")} value={surname} onChange={(e) => setSurname(e.target.value)} />
+      <button className="btn-solid w-fit" type="submit" disabled={busy}>{t("lookup_go")}</button>
+      {line ? <p className="text-mist">{line}</p> : null}
+    </form>
   );
 }
 
@@ -77,10 +118,27 @@ export function QuestionsPage() {
       items: group.items.filter((item): item is [string, string] => !needle || `${item[0]} ${item[1]}`.toLowerCase().includes(needle)),
     }))
     .filter((group) => group.items.length > 0);
-  const empty = !pathHit && !papersHit && groups.length === 0;
+  const guideItems: [string, string][] = [
+    [t("guide_refund_q"), t("guide_refund_a")],
+    [t("guide_who_q"), t("guide_who_a")],
+    [t("guide_no_q"), t("guide_no_a")],
+  ].filter((item): item is [string, string] => !needle || `${item[0]} ${item[1]}`.toLowerCase().includes(needle));
+  const glossaryHit = !needle || `${t("glossary_title")} ${t("glossary_body")}`.toLowerCase().includes(needle);
+  const empty = !pathHit && !papersHit && groups.length === 0 && guideItems.length === 0 && !glossaryHit;
   return (
     <Article kicker={t("faq_kicker")} title={t("faq_title")}>
       <p className="text-mist">{t("faq_intro")}</p>
+      <StatusLookup />
+      {guideItems.length ? (
+        <section className="grid gap-5 border-t border-white/10 pt-8">
+          {guideItems.map(([q, a]) => (
+            <div key={q}>
+              <h2 className="display text-3xl">{q}</h2>
+              <p className="mt-2 whitespace-pre-line text-mist">{a}</p>
+            </div>
+          ))}
+        </section>
+      ) : null}
       {pathHit ? (
       <section id="path" className="scroll-mt-32 grid gap-4 border-t border-white/10 pt-8">
         <h2 className="display text-3xl">{t("process_title")}</h2>
@@ -143,6 +201,12 @@ export function QuestionsPage() {
           ))}
         </section>
       ))}
+      {glossaryHit ? (
+        <section className="grid gap-3 border-t border-white/10 pt-8">
+          <h2 className="display text-3xl">{t("glossary_title")}</h2>
+          <p className="whitespace-pre-line text-mist">{t("glossary_body")}</p>
+        </section>
+      ) : null}
     </Article>
   );
 }

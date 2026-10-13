@@ -8,6 +8,7 @@ import {
   PROCESS_STAGES,
   capLegacyProgress,
   clientName,
+  declineText,
   INVOICE2_STAGE,
   openedBeforeInvoice2Rule,
   newId,
@@ -21,6 +22,8 @@ import {
   questionnaireError,
   sameCountry,
   stageIndex,
+  tranches,
+  normalizeScheme,
   type DocCategory,
   type Processing,
   type ProcessStage,
@@ -31,7 +34,7 @@ import {
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners, legacyRealPartners } from "./seed";
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
-import { canCancel, citizenshipBlocked, kyivMonth, monthCommission } from "./ops";
+import { canCancel, citizenshipBlocked, kyivMonth, monthCommission, remindBand } from "./ops";
 import { copy } from "./i18n";
 import { RESET_LINK, deliverMail } from "./mail";
 import crypto from "node:crypto";
@@ -300,6 +303,11 @@ export type AppRow = {
   stage4At: string | null;
   clientPhone?: string;
   accountClosed?: boolean;
+  feeScheme?: string;
+  invoice2DueAt?: string | null;
+  payReminded?: string;
+  linkedTo?: string;
+  commissionPaid?: boolean;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -312,7 +320,11 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
     coalesce(a.assigned_manager_id, '') as "assignedManagerId",
     coalesce(a.referrer_user_id, '') as "referrerUserId",
-    a.stage4_at::text as "stage4At"
+    a.stage4_at::text as "stage4At",
+    coalesce(a.fee_scheme, 'legacy30') as "feeScheme",
+    a.invoice2_due_at::text as "invoice2DueAt",
+    coalesce(a.pay_reminded, '') as "payReminded",
+    coalesce(a.linked_to, '') as "linkedTo"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -373,8 +385,75 @@ function settingMap(rows: { key: string; value: string }[]): Record<string, stri
   return out;
 }
 
+async function nudgeOffice(sql: Sql) {
+  try {
+    const stamp = new Date().toISOString();
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const gate = await sql<{ key: string }>`insert into settings (key, value) values ('nudge_at', ${stamp})
+      on conflict (key) do update set value = ${stamp} where settings.value < ${cutoff} returning key`;
+    if (!gate[0]) return;
+    const rows = await sql<{
+      id: string;
+      email: string;
+      phone: string;
+      name: string;
+      stage: number;
+      total: number;
+      scheme: string;
+      cancelAt: string | null;
+      dueAt: string | null;
+      reminded: string;
+      questionnaire: string;
+    }>`select a.id, a.client_email as email, coalesce(p.phone, '') as phone, coalesce(p.full_name, '') as name,
+      a.stage, a.total_cost as total, coalesce(a.fee_scheme, 'legacy30') as scheme,
+      a.cancel_deadline_at::text as "cancelAt", a.invoice2_due_at::text as "dueAt",
+      coalesce(a.pay_reminded, '') as reminded, a.questionnaire
+      from applications a left join profiles p on p.user_id = a.user_id
+      where a.status = 'OPEN' and (
+        (a.stage = 2 and a.cancel_deadline_at > now() and a.cancel_deadline_at < now() + interval '48 hours'
+          and not exists (select 1 from documents d where d.application_id = a.id and d.category = 'PAYMENT_PROOF' and d.status <> 'REJECTED'))
+        or (a.stage >= 3 and a.stage < 4 and a.invoice2_due_at > now() and a.invoice2_due_at < now() + interval '48 hours')
+      )`;
+    const lines: string[] = [];
+    for (const row of rows) {
+      const first = row.stage < 3;
+      const band = remindBand(first ? row.cancelAt : row.dueAt);
+      if (!band) continue;
+      const token = `${first ? "1" : "2"}:${band}`;
+      if (row.reminded.split(",").includes(token)) continue;
+      const person = parseQuestionnaire(row.questionnaire);
+      const who = row.name || clientName(person) || row.email;
+      const phone = row.phone || person.phone || "no phone";
+      const parts = tranches(Number(row.total), normalizeScheme(row.scheme));
+      const amount = first ? parts.first : parts.second;
+      lines.push(`• ${row.id} — ${who} — ${phone} — ${first ? "first payment" : "second payment"} ${amount} EUR, about ${band}h left.`);
+      const next = row.reminded ? `${row.reminded},${token}` : token;
+      await sql`update applications set pay_reminded = ${next} where id = ${row.id}`;
+    }
+    const hour = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Kyiv", hour: "2-digit", hourCycle: "h23" }).format(new Date());
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+    const sent = await sql<{ value: string }>`select value from settings where key = 'digest_day'`;
+    const morning = Number(hour) >= 8 && sent[0]?.value !== day;
+    if (!lines.length && !morning) return;
+    if (morning) {
+      await sql`insert into settings (key, value) values ('digest_day', ${day}) on conflict (key) do update set value = ${day}`;
+    }
+    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
+    const text = [
+      morning ? "Ранок. Один лист, не кожна подія." : "Нагадування по строках.",
+      "Напишіть цим людям з робочого WhatsApp. Сайт сам клієнту не пише.",
+      lines.length ? lines.join("\n") : "Строків на найближчі 48 годин немає.",
+      "Текст клієнту англійською: The payment on your file is due soon. Open the case and upload the receipt.",
+    ].join("\n");
+    await sendSafeTelegramAlert(text, chat[0]?.value ? { chatId: chat[0].value } : {});
+  } catch (err) {
+    console.error("[nudge]", err);
+  }
+}
+
 export const getPublicSite = createServerFn({ method: "GET" }).handler(async () => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.publicSite();
     }
@@ -423,6 +502,11 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
   const partners = await sql<{ id: string; country: string; name: string; sortOrder: number }>`select id, country, name, sort_order as "sortOrder" from partners where active = true order by country, sort_order`;
   const counts = await sql<{ filed: number; issued: number }>`select count(*)::int as filed,
     coalesce(sum(case when status = 'ISSUED' then 1 else 0 end), 0)::int as issued from applications`;
+  const countryRows = await sql<{ country: string; filed: number; issued: number }>`select country, count(*)::int as filed,
+    coalesce(sum(case when status = 'ISSUED' then 1 else 0 end), 0)::int as issued from applications where country <> '' group by country`;
+  const countsByCountry: Record<string, { filed: number; issued: number }> = {};
+  for (const row of countryRows) countsByCountry[row.country] = { filed: Number(row.filed), issued: Number(row.issued) };
+  void nudgeOffice(sql);
   return {
     settings: toPublicSettings(settingMap(settingsRows)),
     products,
@@ -445,11 +529,12 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     })),
     partners,
     counts: { filed: Number(counts[0]?.filed ?? 0), issued: Number(counts[0]?.issued ?? 0) },
+    countsByCountry,
   };
 });
 
 export const listPublicFilings = createServerFn({ method: "GET" }).handler(async () => {
-  if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+  if (sheetsOn()) {
     const mod = await import("./sheet-backend");
     return mod.listPublicFilings();
   }
@@ -470,7 +555,7 @@ export const listPublicFilings = createServerFn({ method: "GET" }).handler(async
 export const takeInvoiceNumber = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.takeInvoiceNumber(context.userId);
     }
@@ -496,7 +581,7 @@ export const joinWaitlist = createServerFn({ method: "POST" })
   }))
   .handler(async ({ context, data }) => {
     if (!data.vacancyId) throw new Error("Opening");
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.joinWaitlist(context.userId, data);
     }
@@ -523,7 +608,9 @@ export const listAgentBook = createServerFn({ method: "GET" })
       coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
       coalesce(a.assigned_manager_id, '') as "assignedManagerId",
       coalesce(a.referrer_user_id, '') as "referrerUserId",
-      a.stage4_at::text as "stage4At"
+      a.stage4_at::text as "stage4At",
+      a.commission_paid as "commissionPaid",
+      coalesce(a.fee_scheme, 'legacy30') as "feeScheme"
       from applications a left join vacancies v on v.id = a.vacancy_id
       where a.referrer_user_id = ${context.userId} order by a.created_at desc`;
     const cases = rows.map((row) => ({
@@ -549,7 +636,7 @@ export const listAgentBook = createServerFn({ method: "GET" })
         total: Number(app.totalCost),
         createdAt: app.createdAt,
         pay: app.stage >= 3 ? "paid" : app.stage >= 2 ? "due" : "wait",
-        commission: app.stage < 2 ? "wait" : "due",
+        commission: app.commissionPaid ? "paid" : app.stage < 2 ? "wait" : "due",
       })),
     };
   });
@@ -557,7 +644,7 @@ export const listAgentBook = createServerFn({ method: "GET" })
 export const getSessionProfile = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.sessionProfile(context.userId);
     }
@@ -568,7 +655,7 @@ export const getSessionProfile = createServerFn({ method: "GET" })
 export const listMyApplications = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.listMine(context.userId);
     }
@@ -583,7 +670,8 @@ export const listMyApplications = createServerFn({ method: "GET" })
       coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
       coalesce(a.assigned_manager_id, '') as "assignedManagerId",
       coalesce(a.referrer_user_id, '') as "referrerUserId",
-      a.stage4_at::text as "stage4At"
+      a.stage4_at::text as "stage4At",
+      coalesce(a.fee_scheme, 'legacy30') as "feeScheme"
       from applications a left join vacancies v on v.id = a.vacancy_id
       where a.user_id = ${context.userId} order by a.created_at desc`;
     return rows.map((r) => {
@@ -603,7 +691,7 @@ export const getMyApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.getMine(context.userId, id);
     }
@@ -649,7 +737,7 @@ export const noteFunnel = createServerFn({ method: "POST" })
     const { getRequest } = await import("@tanstack/react-start/server");
     const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
     if (limited(`funnel:${ip.slice(0, 80)}`, 30, 60_000)) return { ok: true };
-    if (!(process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim())) return { ok: true };
+    if (!sheetsOn()) return { ok: true };
     const mod = await import("./sheet-backend");
     const kind = data.kind === "apply" || data.kind === "question" ? data.kind : "calc";
     return mod.noteFunnel(kind);
@@ -665,7 +753,7 @@ export const createApplication = createServerFn({ method: "POST" })
     lang: clean(input?.lang, 8),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.createApp(context.userId, data);
     }
@@ -703,11 +791,55 @@ export const createApplication = createServerFn({ method: "POST" })
     const total = applyPercent(priceFor(product.basePrice, data.processing), await cutForSql(sql, referrerUserId));
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
     const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: data.citizenship };
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id)
-      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme)
+      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160')`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "APPLICATION_OPENED", id, vacancy.title);
     return { id };
+  });
+
+export const openSpouseCase = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    const profile = await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app || app.userId !== context.userId || app.status !== "OPEN") throw new Error("Not found");
+    const vacancies = await loadVacancies(sql);
+    const products = await loadProducts(sql);
+    const vacancy = vacancies.find((item) => item.id === app.vacancyId && item.active);
+    const product = products.find((item) => item.id === vacancy?.visaProductId && item.active);
+    if (!vacancy || vacancy.quota < 1 || !product) throw new Error("Opening unavailable");
+    const next = newId("VG");
+    const total = applyPercent(priceFor(product.basePrice, app.processing), await cutForSql(sql, app.referrerUserId));
+    const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: app.citizenship };
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
+      values (${next}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${app.citizenship}, ${app.processing}, ${total}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
+    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
+    await audit(sql, context.userId, "SPOUSE_OPENED", next, app.id);
+    return { id: next };
+  });
+
+export const lookupCaseStatus = createServerFn({ method: "POST" })
+  .validator((input: { id?: string; surname?: string }) => ({
+    id: clean(input?.id, 40).toUpperCase(),
+    surname: clean(input?.surname, 80).toLowerCase(),
+  }))
+  .handler(async ({ data }) => {
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    if (limited(`lookup:${ip.slice(0, 80)}`, 12, 15 * 60 * 1000)) return { found: false as const };
+    if (!data.id || !data.surname) return { found: false as const };
+    const sql = await getSql();
+    const rows = await sql<{ stage: number; status: string; country: string; questionnaire: string }>`
+      select stage, status, country, questionnaire from applications where upper(id) = ${data.id} limit 1`;
+    const row = rows[0];
+    if (!row) return { found: false as const };
+    const last = parseQuestionnaire(row.questionnaire).lastName.trim().toLowerCase();
+    if (!last || last !== data.surname) return { found: false as const };
+    return { found: true as const, stage: Number(row.stage), status: row.status, country: row.country };
   });
 
 export const saveQuestionnaire = createServerFn({ method: "POST" })
@@ -717,7 +849,7 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     questionnaire: input?.questionnaire,
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.saveQuestionnaire(context.userId, data);
     }
@@ -730,6 +862,14 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     const err = questionnaireError(q);
     if (err) return { ok: false as const, error: err };
     if (sameCountry(q.citizenship, app.country)) return { ok: false as const, error: "citizenship" };
+    const last = q.lastName.trim().toLowerCase();
+    const birth = q.birthDate.trim().slice(0, 10);
+    if (last.length >= 2 && birth.length >= 8) {
+      const twin = await sql<{ id: string }>`select id from applications where status = 'OPEN' and id <> ${app.id}
+        and lower(questionnaire::jsonb->>'lastName') = ${last}
+        and left(coalesce(questionnaire::jsonb->>'birthDate', ''), 10) = ${birth} limit 1`;
+      if (twin[0]) return { ok: false as const, error: "person" };
+    }
     await sql`update applications set questionnaire = ${JSON.stringify(q)}, profile_complete = true, citizenship = ${q.citizenship}, updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "QUESTIONNAIRE", app.id, clientName(q));
     return { ok: true as const };
@@ -741,7 +881,7 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: UploadInput) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.uploadDoc(context.userId, data);
     }
@@ -770,7 +910,7 @@ export const postMessage = createServerFn({ method: "POST" })
     body: clean(input?.body, 2000),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.postMessage(context.userId, data); return;
     }
@@ -788,7 +928,7 @@ export const downloadDocument = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.downloadDoc(context.userId, id);
     }
@@ -813,7 +953,7 @@ export const downloadDocument = createServerFn({ method: "POST" })
 export const adminOverview = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminOverview(context.userId);
     }
@@ -842,12 +982,12 @@ export const adminListApplications = createServerFn({ method: "POST" })
     includeIncomplete: Boolean(input?.includeIncomplete),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminList(context.userId, data.includeIncomplete);
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
+    const profile = await requireStaff(sql, context.userId);
     const rows = await sql<AppRow>`select a.id, a.user_id as "userId", a.client_email as "clientEmail", a.vacancy_id as "vacancyId",
       a.visa_product_id as "visaProductId", a.country, a.citizenship, a.processing, a.total_cost as "totalCost", a.currency,
       a.production_weeks as "productionWeeks", a.stage, a.status, a.process_stage as "processStage", a.questionnaire,
@@ -857,7 +997,9 @@ export const adminListApplications = createServerFn({ method: "POST" })
       coalesce(v.title, '') as "vacancyTitle", coalesce(v.employer, '') as "employer",
       coalesce(a.assigned_manager_id, '') as "assignedManagerId",
       coalesce(a.referrer_user_id, '') as "referrerUserId",
-      a.stage4_at::text as "stage4At"
+      a.stage4_at::text as "stage4At",
+      coalesce(a.fee_scheme, 'legacy30') as "feeScheme",
+      a.invoice2_due_at::text as "invoice2DueAt"
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
@@ -872,21 +1014,23 @@ export const adminListApplications = createServerFn({ method: "POST" })
           profileComplete: Boolean(r.profileComplete),
         };
       })
-      .filter((r) => data.includeIncomplete || r.profileComplete || r.stage > 1);
+      .filter((r) => data.includeIncomplete || r.profileComplete || r.stage > 1)
+      .filter((r) => profile.role !== "MANAGER" || r.assignedManagerId === profile.userId);
   });
 
 export const adminGetApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminGet(context.userId, id);
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
+    const profile = await requireStaff(sql, context.userId);
     const app = await loadApp(sql, id);
     if (!app) throw new Error("Not found");
+    if (profile.role === "MANAGER" && app.assignedManagerId !== profile.userId) throw new Error("Forbidden");
     return { app, documents: await docsFor(sql, id), messages: await messagesFor(sql, id) };
   });
 
@@ -898,7 +1042,7 @@ export const adminSetStage = createServerFn({ method: "POST" })
     reason: clean(input?.reason, 500),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminSetStage(context.userId, data);
     }
@@ -908,7 +1052,8 @@ export const adminSetStage = createServerFn({ method: "POST" })
     if (!app) throw new Error("Not found");
     if (data.action === "accept") {
       if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
-      await sql`update applications set stage = 2, stage2_at = now(), cancel_deadline_at = now() + interval '5 days', updated_at = now() where id = ${app.id}`;
+      await sql`update applications set stage = 2, stage2_at = now(), cancel_deadline_at = now() + interval '5 days',
+        assigned_manager_id = ${profile.userId}, updated_at = now() where id = ${app.id}`;
     } else if (data.action === "reject") {
       if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
       await sql`update applications set status = 'REJECTED', rejection_reason = ${data.reason}, updated_at = now() where id = ${app.id}`;
@@ -947,7 +1092,7 @@ export const adminSetProcess = createServerFn({ method: "POST" })
     processStage: clean(input?.processStage, 60),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminSetProcess(context.userId, data); return;
     }
@@ -959,7 +1104,10 @@ export const adminSetProcess = createServerFn({ method: "POST" })
     if (openedBeforeInvoice2Rule(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
     const before = stageIndex(app.processStage as ProcessStage);
     const next = stageIndex(data.processStage as ProcessStage);
-    await sql`update applications set process_stage = ${data.processStage}, updated_at = now() where id = ${app.id}`;
+    const opensInvoice = before < stageIndex(INVOICE2_STAGE) && next >= stageIndex(INVOICE2_STAGE);
+    await sql`update applications set process_stage = ${data.processStage},
+      invoice2_due_at = case when ${opensInvoice} then coalesce(invoice2_due_at, now() + interval '14 days') else invoice2_due_at end,
+      updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "PROCESS", app.id, data.processStage);
     if (before < stageIndex(INVOICE2_STAGE) && next >= stageIndex(INVOICE2_STAGE)) void mailSql(sql, app.clientEmail, "due", app.id);
   });
@@ -971,7 +1119,7 @@ export const adminSaveDispatch = createServerFn({ method: "POST" })
     note: clean(input?.note, 2000),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminSaveDispatch(context.userId, data); return;
     }
@@ -985,7 +1133,7 @@ export const adminUploadFinal = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: UploadInput) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminUploadFinal(context.userId, data);
     }
@@ -1007,7 +1155,7 @@ export const adminUploadProof = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { applicationId: string; fileName: string; mime: string; data: string }) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminUploadProof(context.userId, data);
     }
@@ -1033,7 +1181,7 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     processing: input?.processing,
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminCreateApplication(context.userId, data);
     }
@@ -1057,8 +1205,8 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     const id = newId("VG");
     const total = priceFor(product.basePrice, data.processing);
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire)
-      values (${id}, ${user[0]?.id ?? null}, ${data.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire("{}"), citizenship: data.citizenship })})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, fee_scheme)
+      values (${id}, ${user[0]?.id ?? null}, ${data.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire("{}"), citizenship: data.citizenship })}, 'entry160')`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "APPLICATION_CREATED", id, data.email);
     return { id };
@@ -1068,7 +1216,7 @@ export const adminSaveVacancy = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: Vacancy) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminSaveVacancy(context.userId, data);
     }
@@ -1098,7 +1246,7 @@ export const adminDeleteVacancy = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeleteVacancy(context.userId, id); return;
     }
@@ -1115,7 +1263,7 @@ export const adminSaveTeam = createServerFn({ method: "POST" })
       input,
   )
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminSaveTeam(context.userId, data);
     }
@@ -1146,7 +1294,7 @@ export const adminDeleteTeam = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeleteTeam(context.userId, id); return;
     }
@@ -1162,7 +1310,7 @@ export const adminDeleteTeam = createServerFn({ method: "POST" })
 export const adminGetSettings = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminGetSettings(context.userId);
     }
@@ -1176,7 +1324,7 @@ export const adminSaveSettings = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: Record<string, string>) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminSaveSettings(context.userId, data); return;
     }
@@ -1195,7 +1343,7 @@ export const adminSaveProduct = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: VisaProduct) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminSaveProduct(context.userId, data); return;
     }
@@ -1228,7 +1376,7 @@ export const adminSaveMedia = createServerFn({ method: "POST" })
     sortOrder?: number;
   }) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminSaveMedia(context.userId, data);
     }
@@ -1289,7 +1437,7 @@ export const adminDeleteMedia = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeleteMedia(context.userId, id); return;
     }
@@ -1302,7 +1450,7 @@ export const adminDeleteMedia = createServerFn({ method: "POST" })
 export const adminListMedia = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminListMedia(context.userId);
     }
@@ -1331,7 +1479,7 @@ export const adminSavePartner = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { id?: string; country: string; name: string }) => input)
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminSavePartner(context.userId, data);
     }
@@ -1352,7 +1500,7 @@ export const adminDeletePartner = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeletePartner(context.userId, id); return;
     }
@@ -1368,7 +1516,7 @@ export const adminSetRole = createServerFn({ method: "POST" })
     role: clean(input?.role, 20),
   }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminSetRole(context.userId, data); return;
     }
@@ -1455,6 +1603,21 @@ export const adminSaveMail = createServerFn({ method: "POST" })
     return { from: data.from, ready: Boolean((map.resend_key || "").trim() && data.from.includes("@")) };
   });
 
+async function durableHit(bucket: string, limit: number, seconds: number) {
+  try {
+    const sql = await getSql();
+    const rows = await sql<{ hits: number }>`insert into auth_hits (bucket, hits, reset_at)
+      values (${bucket}, 1, now() + (${seconds} * interval '1 second'))
+      on conflict (bucket) do update set
+        hits = case when auth_hits.reset_at <= now() then 1 else auth_hits.hits + 1 end,
+        reset_at = case when auth_hits.reset_at <= now() then now() + (${seconds} * interval '1 second') else auth_hits.reset_at end
+      returning hits`;
+    return Number(rows[0]?.hits ?? 0) > limit;
+  } catch {
+    return false;
+  }
+}
+
 export const requestPasswordReset = createServerFn({ method: "POST" })
   .validator((input: { email?: string; lang?: string }) => ({
     email: clean(input?.email, 160).toLowerCase(),
@@ -1465,7 +1628,12 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
     if (sheetsOn()) return (await import("./sheet-backend")).requestPasswordReset(data.email, data.lang);
     const { getRequest } = await import("@tanstack/react-start/server");
     const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim().slice(0, 80) || "local";
-    if (limited(`reset:${data.email}`, 3, 60 * 60 * 1000) || limited(`reset-ip:${ip}`, 20, 60 * 60 * 1000)) throw new Error("Try again later.");
+    if (
+      limited(`reset:${data.email}`, 3, 60 * 60 * 1000) ||
+      limited(`reset-ip:${ip}`, 20, 60 * 60 * 1000) ||
+      (await durableHit(`reset:${data.email}`, 3, 3600)) ||
+      (await durableHit(`reset-ip:${ip}`, 20, 3600))
+    ) throw new Error("Try again later.");
     const sql = await getSql();
     const rows = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from', 'password_resets')`;
     const map: Record<string, string> = {};
@@ -1490,13 +1658,12 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
       book.push({ hash, userId: user.id, exp: now + 60 * 60 * 1000 });
       const value = JSON.stringify(book);
       await sql`insert into settings (key, value, updated_at) values ('password_resets', ${value}, now()) on conflict (key) do update set value = ${value}, updated_at = now()`;
-      const lang = data.lang === "cs" || data.lang === "ur" || data.lang === "ru" ? data.lang : "en";
       await deliverMail({
         key: map.resend_key || "",
         from: map.mail_from || "",
         to: user.email,
-        subject: copy(lang, "mail_reset_subject"),
-        text: copy(lang, "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
+        subject: copy("en", "mail_reset_subject"),
+        text: copy("en", "mail_reset_body").replaceAll("{link}", `${RESET_LINK}${token}`),
       });
     }
     return { sent: true as const };
@@ -1543,7 +1710,7 @@ export const adminDeleteApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
   .handler(async ({ context, data: id }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeleteApplication(context.userId, id);
       return;
@@ -1563,7 +1730,7 @@ export const adminDeleteAccount = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { userId: string }) => ({ userId: clean(input?.userId, 80) }))
   .handler(async ({ context, data }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       await mod.adminDeleteAccount(context.userId, data.userId);
       return;
@@ -1590,8 +1757,12 @@ export const adminMarkCommission = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { id: string; paid: boolean }) => ({ id: clean(input?.id, 40), paid: Boolean(input?.paid) }))
   .handler(async ({ context, data }) => {
-    if (!sheetsOn()) throw new Error("Unavailable");
-    return (await import("./sheet-backend")).adminMarkCommission(context.userId, data);
+    const sql = await getSql();
+    if (sheetsOn()) return (await import("./sheet-backend")).adminMarkCommission(context.userId, data);
+    const profile = await requireStaff(sql, context.userId);
+    await sql`update applications set commission_paid = ${data.paid}, updated_at = now() where id = ${data.id}`;
+    await audit(sql, profile.userId, "COMMISSION", data.id, data.paid ? "paid" : "due");
+    return { ok: true as const };
   });
 
 export const agentRename = createServerFn({ method: "POST" })
@@ -1624,7 +1795,7 @@ export const adminSetReferrer = createServerFn({ method: "POST" })
 export const adminAudit = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminAudit(context.userId);
     }
@@ -1636,7 +1807,7 @@ export const adminAudit = createServerFn({ method: "GET" })
 export const adminAllTeam = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    if (process.env["GOOGLE_SPREADSHEET_ID"]?.trim() && process.env["GOOGLE_CLIENT_EMAIL"]?.trim()) {
+    if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.adminAllTeam(context.userId);
     }
@@ -1725,8 +1896,8 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
     if (dup[0]) return { id: dup[0].id };
     const next = newId("VG");
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id)
-      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })}, ${app.referrerUserId || ""})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme)
+      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })}, ${app.referrerUserId || ""}, ${normalizeScheme(app.feeScheme)})`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "RESUBMIT", next, id);
     return { id: next };
@@ -1746,7 +1917,7 @@ export const reviewDocument = createServerFn({ method: "POST" })
     if (data.status !== "APPROVED" && data.status !== "REJECTED") throw new Error("Status");
     const found = await sql<{ id: string }>`select id from documents where id = ${data.id}`;
     if (!found[0]) throw new Error("Not found");
-    await sql`update documents set status = ${data.status}, rejection_reason = ${data.status === "REJECTED" ? data.reason : ""} where id = ${data.id}`;
+    await sql`update documents set status = ${data.status}, rejection_reason = ${data.status === "REJECTED" ? declineText(data.reason) : ""} where id = ${data.id}`;
     await audit(sql, context.userId, "DOCUMENT", data.id, data.status);
     if (data.status === "REJECTED") {
       const doc = await sql<{ application_id: string }>`select application_id from documents where id = ${data.id}`;
@@ -1782,6 +1953,10 @@ export const exportOpenCases = createServerFn({ method: "POST" })
     const rows = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
     const count = Number(rows[0]?.c ?? 0);
     await audit(sql, context.userId, "EXPORT", "OpenCases", String(count));
+    if (count >= 20) {
+      const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+      await sendSafeTelegramAlert(`Експорт ${count} відкритих справ. Хто: ${context.userId}`);
+    }
     return { count };
   });
 

@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-type AccountInput = { action: "register" | "login"; email: string; password: string; fullName?: string; phone?: string };
+type AccountInput = { action: "register" | "login" | "code"; email: string; password: string; fullName?: string; phone?: string; code?: string };
 
 export const accountSession = createServerFn({ method: "GET" }).handler(async () => {
   const { officeAuth, readOfficeUser } = await import("./account.server");
@@ -21,11 +21,12 @@ export const accountBackend = createServerFn({ method: "GET" }).handler(async ()
 
 export const accountAuth = createServerFn({ method: "POST" })
   .validator((input: AccountInput) => ({
-    action: input?.action === "register" ? ("register" as const) : ("login" as const),
+    action: input?.action === "register" ? ("register" as const) : input?.action === "code" ? ("code" as const) : ("login" as const),
     email: String(input?.email ?? "").trim(),
     password: String(input?.password ?? ""),
     fullName: String(input?.fullName ?? "").trim(),
     phone: String(input?.phone ?? "").trim(),
+    code: String(input?.code ?? "").replace(/\D/g, "").slice(0, 6),
   }))
   .handler(async ({ data }) => {
     const { runAccountAuth } = await import("./account.server");

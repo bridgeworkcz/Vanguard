@@ -91,7 +91,6 @@ export const EMPTY_QUESTIONNAIRE: Questionnaire = {
 export const CITIZENSHIPS = [
   "Georgia",
   "Moldova",
-  "Ukraine",
   "Belarus",
   "Russia",
   "Armenia",
@@ -121,6 +120,7 @@ export const CITIZENSHIPS = [
   "Norway",
   "Canada",
   "New Zealand",
+  "Ukraine",
   "Other",
 ];
 
@@ -172,11 +172,46 @@ export function productionWeeks(
   return max;
 }
 
-export function tranches(total: number): { first: number; second: number; final: number } {
-  const first = Math.round(total * 0.3);
-  const second = Math.round(total * 0.4);
-  const final = total - first - second;
-  return { first, second, final };
+export type FeeScheme = "legacy30" | "entry160";
+
+/** First payment on files opened after the 160 euro seat. Older files stay on 30/40/30. */
+export const ENTRY_EUR = 160;
+
+export function normalizeScheme(value: unknown): FeeScheme {
+  return value === "entry160" ? "entry160" : "legacy30";
+}
+
+export function tranches(total: number, scheme: FeeScheme = "legacy30"): { first: number; second: number; final: number } {
+  const safe = Math.max(0, Math.round(Number(total) || 0));
+  if (scheme === "entry160") {
+    const first = Math.min(ENTRY_EUR, safe);
+    const rest = safe - first;
+    const second = Math.round(rest * 0.6);
+    return { first, second, final: Math.max(0, rest - second) };
+  }
+  const first = Math.round(safe * 0.3);
+  const second = Math.round(safe * 0.4);
+  return { first, second, final: Math.max(0, safe - first - second) };
+}
+
+export function shareLabel(scheme: FeeScheme, index: 0 | 1 | 2): string {
+  if (scheme === "entry160") return ["160 EUR", "60%", "rest"][index] || "";
+  return ["30%", "40%", "30%"][index] || "";
+}
+
+export function declineText(reason: string): string {
+  const [code, ...rest] = reason.split("|");
+  const extra = rest.join("|").trim();
+  const lines: Record<string, string> = {
+    blur: "The scan is blurry. Send a sharper photo of the whole page.",
+    name: "The name on the paper does not match the questionnaire.",
+    page: "This is the wrong page.",
+    expired: "This paper is out of date.",
+    cropped: "The page is cut off. The whole page has to be in the photo.",
+    other: extra || "The office could not accept this scan.",
+  };
+  const line = lines[code] || lines.other || "The office could not accept this scan.";
+  return extra && code !== "other" ? `${line} ${extra}` : line;
 }
 
 export function stageIndex(stage: ProcessStage): number {

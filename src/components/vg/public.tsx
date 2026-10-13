@@ -40,7 +40,7 @@ function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS"
   return `${t(`speed_${p}`)} · ${n} ${n === 1 ? t("week") : t("weeks")}`;
 }
 
-export function HomePage() {
+export function HomePage({ pinnedAgent = "" }: { pinnedAgent?: string }) {
   const { t, lang } = useI18n();
   usePageMeta("seo_home_title", "seo_home_desc");
   const { data, error } = useSite();
@@ -55,11 +55,25 @@ export function HomePage() {
   const [agentNote, setAgentNote] = useState(false);
   const cut = useAgentCut();
   useEffect(() => {
-    setAgentNote(Boolean(sessionStorage.getItem("vg-agent")));
+    if (pinnedAgent) rememberAgent(pinnedAgent);
+  }, [pinnedAgent]);
+  useEffect(() => {
+    setAgentNote(Boolean(sessionStorage.getItem("vg-agent") || pinnedAgent));
     const raw = window.sessionStorage.getItem("vg-last-calc");
-    if (!raw) return;
+    const url = new URL(window.location.href);
+    const fromUrl = {
+      citizenship: url.searchParams.get("citizenship") || "",
+      country: url.searchParams.get("country") || "",
+      productId: url.searchParams.get("product") || "",
+      speed: (url.searchParams.get("speed") || "") as Processing | "",
+    };
+    const saved = fromUrl.citizenship || fromUrl.country || fromUrl.productId || fromUrl.speed
+      ? fromUrl
+      : raw
+        ? (JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" })
+        : null;
+    if (!saved) return;
     try {
-      const saved = JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" };
       setCitizenship(saved.citizenship || "");
       setCountry(saved.country || "");
       setProductId(saved.productId || "");
@@ -73,6 +87,16 @@ export function HomePage() {
     if (!citizenship && !country && !productId && !speed) return;
     window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ citizenship, country, productId, speed }));
     if (citizenship || country) sessionStorage.setItem("vg-route", [citizenship, country].filter(Boolean).join(" → "));
+    const url = new URL(window.location.href);
+    const set = (key: string, value: string) => {
+      if (value) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    };
+    set("citizenship", citizenship);
+    set("country", country);
+    set("product", productId);
+    set("speed", speed);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   }, [citizenship, country, productId, speed]);
   useEffect(() => {
     if (sessionStorage.getItem("vg-funnel-calc")) return;
@@ -123,7 +147,7 @@ export function HomePage() {
     <Shell>
       <section>
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-12 lg:py-14">
-          <div className="lg:col-span-6">
+          <div className="lg:col-span-6 max-lg:order-2">
             <p className="kicker">{t("hero_kicker")}</p>
             <h1 className="display mt-4 max-w-xl text-4xl sm:text-6xl">{title}</h1>
             <ol className="hero-chain" dir={lang === "ur" ? "rtl" : undefined}>
@@ -147,7 +171,7 @@ export function HomePage() {
           </div>
           <form
             id="calc"
-            className="glass lg:col-span-6 p-5 sm:p-7"
+            className="glass max-lg:order-1 lg:col-span-6 p-5 sm:p-7"
             onSubmit={(e) => {
               e.preventDefault();
               search();
@@ -272,12 +296,23 @@ export function HomePage() {
                     <span className="text-lg text-mist">{t("calc_hold")}</span>
                   )}
                 </p>
+                <p className="text-sm text-mist">{t("banner_split")}</p>
+                {country && data?.countsByCountry?.[country] ? (
+                  <p className="text-sm text-paper">
+                    {country}: {data.countsByCountry[country].filed} {t("counts_filed")} · {data.countsByCountry[country].issued} {t("counts_issued")}
+                  </p>
+                ) : null}
                 <button className="btn-solid" type="submit" disabled={catalog.length === 0}>
                   {!data && !error ? t("loading") : t("calc_search")}
                 </button>
               </div>
             </div>
           </form>
+          {pinnedAgent || agentNote ? (
+            <div className="max-lg:order-1 lg:col-span-12">
+              <AgentSeats cut={cut} citizenship={citizenship} />
+            </div>
+          ) : null}
         </div>
       </section>
       <StepRail />
@@ -441,6 +476,16 @@ export function SearchPage({
                   <span className="block text-mist">{visa.duration}</span>
                 </p>
                 <p className="mt-2 text-sm text-metal">{t(`speed_${pace}`)}</p>
+                {data?.settings.support_phone ? (
+                  <a
+                    className="btn mt-3 inline-flex"
+                    href={whatsAppHref(data.settings.support_phone, `Citizenship: ${citizenship}. Country: ${visa.country}. Fee: ${fee} EUR.`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    WhatsApp
+                  </a>
+                ) : null}
                 <Link to="/country/$code" params={{ code: countrySlug(visa.country) }} className="mt-3 inline-block text-sm text-mist underline-offset-4 hover:underline">
                   {t("country_openings")}
                 </Link>
@@ -570,7 +615,11 @@ export function SearchPage({
                     <p className="mt-2 inline-flex items-center gap-2 text-sm"><MiniFlag country={visa.country} /> {visa.country} · {visa.duration}</p>
                     <p className="mt-1 text-sm">{job.workingHours}</p>
                     <p className="text-sm text-mist">{job.accommodation}</p>
+                    {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : null}
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
+                    <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product, speed: pace }} className="btn-solid mt-4 inline-flex">
+                      {t("seat_mine")} · {fee} EUR
+                    </Link>
                   </div>
                   <p className="text-sm text-paper">
                     <span className="block">{job.salaryNet}</span>
@@ -771,7 +820,7 @@ export function AboutPage() {
         <div className="mt-8 space-y-4 text-base leading-relaxed whitespace-pre-line">{story}</div>
       </article>
       <section className="banner banner-orange">
-        <span>30 · 40 · 30</span>
+        <span>160 · 60%</span>
         <b>{t("banner_split")}</b>
       </section>
       <section className="mx-auto max-w-6xl px-4 py-16">
@@ -873,11 +922,6 @@ export function AboutPage() {
                           {m.position ? <span className="mt-1 block text-sm normal-case tracking-normal text-white/70">{m.position}</span> : null}
                         </figcaption>
                       </figure>
-                    ) : null}
-                    {open && m.phone ? (
-                      <a href={whatsAppHref(m.phone)} target="_blank" rel="noopener noreferrer" className="mb-4 inline-block text-sm">
-                        {m.phone}
-                      </a>
                     ) : null}
                   </div>
                 );
@@ -1000,6 +1044,129 @@ export function ContactPage() {
   );
 }
 
+function AgentSeats({ cut, citizenship }: { cut: number; citizenship: string }) {
+  const { t } = useI18n();
+  const { data } = useSite();
+  if (!data) return null;
+  const jobs = data.vacancies
+    .filter((v) => v.active && v.quota > 0 && !(v.pauseUntil && Date.parse(v.pauseUntil) > Date.now()))
+    .slice(0, 6);
+  if (!jobs.length) return null;
+  return (
+    <div className="pb-2">
+      <h2 className="display text-3xl">{t("country_openings")}</h2>
+      <ul className="mt-4 grid gap-3 md:grid-cols-3">
+        {jobs.map((job) => {
+          const visa = data.products.find((p) => p.id === job.visaProductId);
+          const fee = visa ? applyPercent(visa.basePrice, cut) : 0;
+          return (
+            <li key={job.id} className="glass p-4">
+              <p className="display text-2xl">{job.title}</p>
+              <p className="text-sm text-mist">{job.country} · {job.employer}</p>
+              <p className="mt-2 text-sm">{job.salaryNet}</p>
+              <p className="text-sm text-mist">{job.accommodation}</p>
+              {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : <p className="mt-2 text-sm text-mist">{job.quota} {t("search_quota")}</p>}
+              {fee ? (
+                <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product: job.visaProductId, speed: "STANDARD" }} className="btn-solid mt-3 inline-flex">
+                  {t("seat_mine")} · {fee} EUR
+                </Link>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function nameFromSlug(slug: string, names: string[]) {
+  const want = decodeURIComponent(slug).trim().toLowerCase();
+  return names.find((name) => countrySlug(name) === want) || "";
+}
+
+export function FromPage({ citizenship: citizenSlug, country: countryParam }: { citizenship: string; country: string }) {
+  const { t } = useI18n();
+  const { data } = useSite();
+  const cut = useAgentCut();
+  const products = (data?.products ?? VISA_PRODUCTS).filter((item) => item.active);
+  const citizenship = nameFromSlug(citizenSlug, [...CITIZENSHIPS]);
+  const country = nameFromSlug(countryParam, Array.from(new Set(products.map((item) => item.country))));
+  const title = citizenship && country ? t("from_title").replaceAll("{country}", country).replaceAll("{citizenship}", citizenship) : t("country_empty");
+  useEffect(() => {
+    document.title = citizenship && country ? `${title} · Vanguard` : t("seo_filings_title");
+    document.querySelector('meta[name="description"]')?.setAttribute("content", t("from_lead"));
+  }, [title, citizenship, country, t]);
+  const matched = products.filter((item) => item.country === country);
+  const ids = new Set(matched.map((item) => item.id));
+  const jobs = (data?.vacancies ?? [])
+    .filter((item) => item.active && item.quota > 0 && ids.has(item.visaProductId) && !(item.pauseUntil && Date.parse(item.pauseUntil) > Date.now()) && !citizenshipBlocked(item.blockedCitizenships, citizenship))
+    .slice(0, 3);
+  const fee = matched[0] ? applyPercent(matched[0].basePrice, cut) : 0;
+  const counts = country ? data?.countsByCountry?.[country] : undefined;
+  const phone = data?.settings.support_phone || "";
+  return (
+    <Shell>
+      <article className="mx-auto max-w-5xl px-4 py-14">
+        <p className="kicker">{t("country_kicker")}</p>
+        <h1 className="display mt-3 text-4xl sm:text-5xl">{title}</h1>
+        <p className="mt-4 max-w-2xl text-base leading-relaxed">{t("from_lead")}</p>
+        {fee ? <p className="display ember mt-6 text-5xl">{fee} <span className="text-2xl text-mist">EUR</span></p> : null}
+        <p className="mt-2 text-sm text-mist">{t("banner_split")}</p>
+        {counts ? (
+          <p className="mt-2 text-sm text-paper">
+            {country}: {counts.filed} {t("counts_filed")} · {counts.issued} {t("counts_issued")}
+          </p>
+        ) : null}
+        <h2 className="display mt-10 text-3xl">{t("country_openings")}</h2>
+        {jobs.length === 0 ? <p className="mt-3 text-mist">{t("search_empty")}</p> : null}
+        <ul className="mt-4 grid gap-3">
+          {jobs.map((job) => {
+            const visa = matched.find((item) => item.id === job.visaProductId);
+            const jobFee = visa ? applyPercent(visa.basePrice, cut) : fee;
+            return (
+              <li key={job.id} className="glass p-5">
+                <p className="display text-2xl">{job.title}</p>
+                <p className="text-sm text-mist">{job.employer}</p>
+                <p className="mt-2 text-sm">{job.salaryNet}</p>
+                <p className="text-sm text-mist">{job.accommodation}</p>
+                {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : <p className="mt-2 text-sm text-mist">{job.quota} {t("search_quota")}</p>}
+                <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product: job.visaProductId, speed: "STANDARD" }} className="btn-solid mt-4 inline-flex">
+                  {t("seat_mine")} · {jobFee} EUR
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            to="/"
+            hash="calc"
+            className="btn"
+            onClick={() => {
+              if (!country || !citizenship) return;
+              const raw = window.sessionStorage.getItem("vg-last-calc");
+              let prev: Record<string, string> = {};
+              try {
+                prev = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+              } catch {
+                prev = {};
+              }
+              window.sessionStorage.setItem("vg-last-calc", JSON.stringify({ ...prev, citizenship, country }));
+            }}
+          >
+            {t("country_file")}
+          </Link>
+          {phone ? (
+            <a className="btn-solid" href={whatsAppHref(phone, `${title}. Fee: ${fee} EUR.`)} target="_blank" rel="noopener noreferrer">
+              WhatsApp
+            </a>
+          ) : null}
+        </div>
+      </article>
+    </Shell>
+  );
+}
+
 export function CountryPage({ code }: { code: string }) {
   const { t } = useI18n();
   const { data } = useSite();
@@ -1007,7 +1174,7 @@ export function CountryPage({ code }: { code: string }) {
   const products = (data?.products ?? VISA_PRODUCTS).filter((item) => item.active && countrySlug(item.country) === code);
   const country = products[0]?.country ?? "";
   useEffect(() => {
-    document.title = country ? `${country} · Vanguard` : t("seo_filings_title");
+    document.title = country ? `${t("permit")} · ${country} · Vanguard` : t("seo_filings_title");
     document.querySelector('meta[name="description"]')?.setAttribute("content", t("country_lead"));
   }, [country, t]);
   const ids = new Set(products.map((item) => item.id));
@@ -1032,6 +1199,7 @@ export function CountryPage({ code }: { code: string }) {
             {cut > 0 ? <span className="ml-2">{t("fee_cut")} −{cut}%</span> : null}
           </p>
         ) : null}
+        {products.length ? <p className="mt-2 text-sm text-mist">{t("banner_split")}</p> : null}
         {blocked ? <p className="mt-3 text-sm text-mist">{t("country_blocked")}: {blocked}</p> : null}
         {country ? <CountryStill country={country} /> : null}
         {products.length === 0 ? <p className="mt-6 text-mist">{t("country_empty")}</p> : null}
