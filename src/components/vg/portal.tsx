@@ -47,10 +47,9 @@ import {
 } from "@/lib/vanguard/domain";
 import { useI18n, PUBLIC_LANGS, type CopyKey } from "@/lib/vanguard/i18n";
 import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
-import { canCancel, hoursUntil, stageTone } from "@/lib/vanguard/ops";
+import { canCancel, hasLiveProof, hoursUntil, stageTone } from "@/lib/vanguard/ops";
 import { buildAgentStatement, buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { docsForCountry } from "@/lib/vanguard/round";
-import { DocScreen } from "./doc-view";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
   const code = raw.split("|")[0] || "";
@@ -171,7 +170,7 @@ function fileGuide(app: AppRow, docs: { category: string; status: string }[], t:
   const papers = docs.filter((doc) => doc.category !== "PAYMENT_PROOF" && doc.category !== "FINAL");
   const accepted = papers.filter((doc) => doc.status === "APPROVED").length;
   const rejected = papers.some((doc) => doc.status === "REJECTED");
-  const proof = docs.some((doc) => doc.category === "PAYMENT_PROOF");
+  const proof = hasLiveProof(docs);
   const needed = docsForCountry(app.country).filter((cat) => cat !== "OTHER");
   const missing = needed.filter((cat) => !papers.some((doc) => doc.category === cat)).map((cat) => t(`cat_${cat}`));
   if (app.status === "ISSUED") return { done: t("guide_done_issued"), miss: t("guide_none"), when: t("guide_when_issued") };
@@ -317,7 +316,7 @@ export function PortalPage({ id }: { id: string }) {
   const [role, setRole] = useState("");
   const [book, setBook] = useState<Awaited<ReturnType<typeof listAgentBook>> | null>(null);
   const [share, setShare] = useState("");
-  const [preview, setPreview] = useState<{ url: string; name: string; tranche?: 1 | 2 | 3 } | null>(null);
+  const [paperBusy, setPaperBusy] = useState(false);
   const [pendingDocs, setPendingDocs] = useState<Partial<Record<DocCategory, File>>>({});
   const [docNote, setDocNote] = useState("");
   const [docBusy, setDocBusy] = useState(false);
@@ -477,7 +476,7 @@ export function PortalPage({ id }: { id: string }) {
   const visa = site?.products.find((p) => p.id === app?.visaProductId);
   const parts = app ? tranches(app.totalCost, normalizeScheme(app.feeScheme)) : null;
   const scheme = normalizeScheme(app?.feeScheme);
-  const proof = detail?.documents.find((d) => d.category === "PAYMENT_PROOF");
+  const livePay = hasLiveProof(detail?.documents ?? []);
   const papers = app ? docsForCountry(app.country) : [];
   const thirdPaid =
     app?.status === "ISSUED" ||
@@ -607,77 +606,100 @@ export function PortalPage({ id }: { id: string }) {
     setProofNote(t("docs_saved"));
   }
 
-  function showPreview(next: { url: string; name: string; tranche?: 1 | 2 | 3 }) {
-    setPreview((cur) => {
-      if (cur?.url) URL.revokeObjectURL(cur.url);
-      return next;
-    });
+  function saveFile(url: string, name: string) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function withPaper(work: () => Promise<void>) {
+    if (paperBusy) return;
+    setPaperBusy(true);
+    try {
+      await work();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Error");
+    } finally {
+      setPaperBusy(false);
+    }
   }
 
   async function invoice(tranche: 1 | 2 | 3) {
     if (!app || !site || !visa) return;
-    const url = await buildInvoice({
-      lang: paperLang,
-      tranche,
-      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
-      fileId: app.id,
-      client: clientName(parseQuestionnaire(app.questionnaire)),
-      country: app.country,
-      permit: visa.name,
-      duration: visa.duration,
-      employer: app.employer,
-      total: app.totalCost,
-      date: new Date().toISOString().slice(0, 10),
-      hold: true,
-      scheme: normalizeScheme(app.feeScheme),
+    await withPaper(async () => {
+      const numbered = await takeInvoiceNumber().catch(() => ({ number: `${app.id}-${tranche}` }));
+      const url = await buildInvoice({
+        lang: paperLang,
+        tranche,
+        settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
+        fileId: app.id,
+        client: clientName(parseQuestionnaire(app.questionnaire)),
+        country: app.country,
+        permit: visa.name,
+        duration: visa.duration,
+        employer: app.employer,
+        total: app.totalCost,
+        date: new Date().toISOString().slice(0, 10),
+        number: numbered.number,
+        hold: true,
+        scheme: normalizeScheme(app.feeScheme),
+      });
+      if (url) saveFile(url, `${app.id}-invoice-${tranche}.pdf`);
     });
-    if (url) showPreview({ url, name: `${app.id}-invoice-${tranche}.pdf`, tranche });
   }
 
   async function offer() {
     if (!app || !site) return;
-    const job = site.vacancies.find((item) => item.id === app.vacancyId);
-    const person = parseQuestionnaire(app.questionnaire);
-    const url = await buildOffer({
-      lang: paperLang,
-      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
-      fileId: app.id,
-      client: clientName(person),
-      country: app.country,
-      title: app.vacancyTitle,
-      employer: app.employer,
-      salary: job?.salaryNet || "",
-      hours: job?.workingHours || "",
-      housing: job?.accommodation || "",
-      date: new Date().toISOString().slice(0, 10),
-      hold: true,
+    await withPaper(async () => {
+      const job = site.vacancies.find((item) => item.id === app.vacancyId);
+      const person = parseQuestionnaire(app.questionnaire);
+      const url = await buildOffer({
+        lang: paperLang,
+        settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
+        fileId: app.id,
+        client: clientName(person),
+        country: app.country,
+        title: app.vacancyTitle,
+        employer: app.employer,
+        salary: job?.salaryNet || "",
+        hours: job?.workingHours || "",
+        housing: job?.accommodation || "",
+        date: new Date().toISOString().slice(0, 10),
+        hold: true,
+      });
+      if (url) saveFile(url, `${app.id}-offer.pdf`);
     });
-    if (url) showPreview({ url, name: `${app.id}-offer.pdf` });
   }
 
   async function contract() {
     if (!app || !site || !visa) return;
-    const person = parseQuestionnaire(app.questionnaire);
-    const url = await buildContract({
-      lang: paperLang,
-      settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
-      fileId: app.id,
-      client: clientName(person),
-      q: person,
-      country: app.country,
-      permit: visa.name,
-      duration: visa.duration,
-      total: app.totalCost,
-      date: new Date().toISOString().slice(0, 10),
-      hold: true,
-      scheme: normalizeScheme(app.feeScheme),
+    await withPaper(async () => {
+      const person = parseQuestionnaire(app.questionnaire);
+      const url = await buildContract({
+        lang: paperLang,
+        settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
+        fileId: app.id,
+        client: clientName(person),
+        q: person,
+        country: app.country,
+        permit: visa.name,
+        duration: visa.duration,
+        total: app.totalCost,
+        date: new Date().toISOString().slice(0, 10),
+        hold: true,
+        scheme: normalizeScheme(app.feeScheme),
+      });
+      if (url) saveFile(url, `${app.id}-agreement.pdf`);
     });
-    if (url) showPreview({ url, name: `${app.id}-agreement.pdf` });
   }
 
   return (
     <Shell>
-      <div className={`mx-auto max-w-5xl px-4 py-12 ${app && app.status === "OPEN" ? "pb-28" : ""}`}>
+      <div className={`mx-auto max-w-5xl px-4 py-12 ${app && app.status === "OPEN" ? "pb-40" : ""}`}>
         <p className="kicker">{t("portal_kicker")}</p>
         <h1 className="display mt-3 text-5xl">{t("portal_title")}</h1>
         {err ? <p className="mt-4 text-metal">{err}</p> : null}
@@ -781,7 +803,7 @@ export function PortalPage({ id }: { id: string }) {
                     opened: row.createdAt || "",
                   })),
                 }).then((url) => {
-                  if (url) showPreview({ url, name: `vanguard-${book.month}.pdf` });
+                  if (url) saveFile(url, `vanguard-${book.month}.pdf`);
                 });
               }}
             >
@@ -866,7 +888,7 @@ export function PortalPage({ id }: { id: string }) {
               </button>
               <h2 className="display mt-2 text-4xl">{app.vacancyTitle}</h2>
               <a href="#case-next" className="btn-solid mt-4 inline-flex">
-                {nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
+                {nextAction(app, livePay, Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
               </a>
               <p className="mt-2 text-mist">
                 {app.employer} · {app.country} · {app.totalCost} EUR · {t(`speed_${app.processing}`)}
@@ -899,7 +921,7 @@ export function PortalPage({ id }: { id: string }) {
                         <span className="stage-name">{label}</span>
                         {here ? (
                           <span className="stage-now-line">
-                            {nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
+                            {nextAction(app, livePay, Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}
                           </span>
                         ) : null}
                       </span>
@@ -1182,7 +1204,7 @@ export function PortalPage({ id }: { id: string }) {
                     <span className="mt-1 block text-mist">{Math.max(0, Math.ceil(hoursUntil(app.cancelDeadlineAt, now) || 0))} h</span>
                   ) : null}
                 </p>
-                {canCancel(app.status, app.stage, app.cancelDeadlineAt, Boolean(proof)) ? (
+                {canCancel(app.status, app.stage, app.cancelDeadlineAt, livePay) ? (
                   <button
                     type="button"
                     className="btn mt-3"
@@ -1199,25 +1221,42 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
 
             {app.status === "OPEN" && app.stage >= 2 ? (
-              <div id="case-next" className="flex flex-wrap gap-3">
-                <h3 className="w-full display text-3xl">{t("portal_folder")}</h3>
-                {thirdPaid ? <p className="w-full text-sm text-mist">{t("pay_no_more")}</p> : <p className="w-full text-sm text-mist">{t("open_here")}</p>}
-                {thirdPaid ? null : (
-                  <button type="button" className={app.stage === 2 ? "btn-solid" : "btn"} onClick={() => void invoice(1)}>{t("invoice_1")}{parts ? ` · ${parts.first} EUR` : ""}</button>
-                )}
-                <button type="button" className="btn" onClick={() => void offer()}>{t("offer")}</button>
-                <button type="button" className="btn" onClick={() => void contract()}>{t("contract")}</button>
-                {!thirdPaid && app.stage >= 3 && invoice2Unlocked(app.processStage) ? (
-                  <button type="button" className={app.stage < 4 ? "btn-solid" : "btn"} onClick={() => void invoice(2)}>{t("invoice_2")}{parts ? ` · ${parts.second} EUR` : ""}</button>
-                ) : null}
-                {!thirdPaid && app.stage >= 3 && !invoice2Unlocked(app.processStage) ? (
-                  <p className="w-full text-sm text-mist">{t("invoice_2_when")}</p>
-                ) : null}
-                {!thirdPaid && app.stage >= 4 ? (
-                  <button type="button" className="btn-solid" onClick={() => void invoice(3)}>{t("invoice_3")} · {parts ? `${parts.final} EUR` : ""}</button>
-                ) : null}
+              <div id="case-next" className="grid gap-2">
+                <h3 className="display text-3xl">{t("portal_folder")}</h3>
+                {thirdPaid ? <p className="text-sm text-mist">{t("pay_no_more")}</p> : <p className="text-sm text-mist">{t("open_here")}</p>}
+                {(parts
+                  ? [
+                      { n: 1 as const, label: t("invoice_1"), amount: parts.first, open: true, paid: app.stage >= 3, due: app.stage === 2 && !thirdPaid },
+                      { n: 2 as const, label: t("invoice_2"), amount: parts.second, open: (app.stage >= 3 && invoice2Unlocked(app.processStage)) || app.stage >= 4, paid: app.stage >= 4, due: app.stage === 3 && invoice2Unlocked(app.processStage) && !thirdPaid },
+                      { n: 3 as const, label: t("invoice_3"), amount: parts.final, open: app.stage >= 4, paid: thirdPaid, due: app.stage >= 4 && !thirdPaid },
+                    ]
+                  : []
+                )
+                  .filter((row) => row.open)
+                  .map((row) => (
+                    <div key={row.n} className={`flex items-center justify-between gap-3 border px-3 py-3 ${row.due ? "border-[#ff6a1a]" : "border-white/15"}`}>
+                      <div className="min-w-0">
+                        <button type="button" className={`${row.due ? "btn-solid" : "btn"} max-w-full`} disabled={paperBusy} onClick={() => void invoice(row.n)}>
+                          {row.label} · {row.amount} EUR
+                        </button>
+                        <p className={`mt-1 text-xs ${row.due ? "text-[#ff6a1a]" : "text-mist"}`}>{row.paid ? t("portal_paid") : row.due ? t("invoice_now") : t("portal_due")}</p>
+                      </div>
+                      <button type="button" className="btn shrink-0" disabled={paperBusy} onClick={() => void invoice(row.n)}>
+                        {t("preview_download")}
+                      </button>
+                    </div>
+                  ))}
+                {app.stage >= 3 && app.stage < 4 && !invoice2Unlocked(app.processStage) ? <p className="text-sm text-mist">{t("invoice_2_when")}</p> : null}
+                <div className="flex items-center justify-between gap-3 border border-white/15 px-3 py-3">
+                  <button type="button" className="btn min-w-0" disabled={paperBusy} onClick={() => void offer()}>{t("offer")}</button>
+                  <button type="button" className="btn shrink-0" disabled={paperBusy} onClick={() => void offer()}>{t("preview_download")}</button>
+                </div>
+                <div className="flex items-center justify-between gap-3 border border-white/15 px-3 py-3">
+                  <button type="button" className="btn min-w-0" disabled={paperBusy} onClick={() => void contract()}>{t("contract")}</button>
+                  <button type="button" className="btn shrink-0" disabled={paperBusy} onClick={() => void contract()}>{t("preview_download")}</button>
+                </div>
                 {detail?.wallet && !thirdPaid && app.stage >= 2 ? (
-                  <p className="w-full break-all text-sm">
+                  <p className="break-all text-sm">
                     {t("contact_wallet")}: {detail.wallet}
                     {detail.network ? <span className="mt-1 block text-mist">{detail.network}</span> : null}
                   </p>
@@ -1225,8 +1264,8 @@ export function PortalPage({ id }: { id: string }) {
               </div>
             ) : null}
 
-            {app.status === "OPEN" && (app.stage === 2 || (app.stage >= 4 && !thirdPaid)) ? (
-              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof && app.stage === 2 ? "" : "step-live"}`}>
+            {app.status === "OPEN" && !thirdPaid && (app.stage === 2 || (app.stage === 3 && invoice2Unlocked(app.processStage)) || app.stage >= 4) ? (
+              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${livePay && app.stage === 2 ? "" : "step-live"}`}>
                 {t("pay_i_paid")}
                 <span className="text-mist">{t("ack_need")}</span>
                 {([
@@ -1252,7 +1291,7 @@ export function PortalPage({ id }: { id: string }) {
                 <label className="flex items-center gap-2"><input type="checkbox" checked={seeSum} onChange={(e) => setSeeSum(e.target.checked)} />{t("proof_see_sum")}</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={seeDate} onChange={(e) => setSeeDate(e.target.checked)} />{t("proof_see_date")}</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={seePayee} onChange={(e) => setSeePayee(e.target.checked)} />{t("proof_see_payee")}</label>
-                <label className="btn relative mt-2 inline-flex w-fit cursor-pointer items-center overflow-hidden">
+                <label className={`btn relative mt-2 inline-flex w-fit items-center overflow-hidden ${acksDone({ acks }) && seeSum && seeDate && seePayee ? "cursor-pointer" : "pointer-events-none opacity-40"}`}>
                   {t("upload")}
                   <input
                     className="absolute inset-0 z-10 cursor-pointer opacity-0"
@@ -1273,8 +1312,8 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
 
             {app.status === "OPEN" && app.stage >= 2 ? (
-              <div className={app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? "" : proof || app.stage > 2 ? "step-live rounded-2xl p-4" : ""}>
-                {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : proof || app.stage > 2 ? <p className="kicker mb-3">{t("hint_here")}</p> : null}
+              <div className={app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? "" : livePay || app.stage > 2 ? "step-live rounded-2xl p-4" : ""}>
+                {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : livePay || app.stage > 2 ? <p className="kicker mb-3">{t("hint_here")}</p> : null}
                 <h3 className="display text-3xl">{t("checklist_title")}</h3>
                 <ul className="mt-3 grid gap-2 text-sm">
                   {papers.map((cat) => {
@@ -1478,49 +1517,9 @@ export function PortalPage({ id }: { id: string }) {
           <p className="mt-8">{t("loading")}</p>
         )}
       </div>
-      {preview ? (
-        <DocScreen
-          url={preview.url}
-          title={preview.name}
-          closeLabel={t("preview_close")}
-          downloadLabel={t("preview_download")}
-          onClose={() => {
-            URL.revokeObjectURL(preview.url);
-            setPreview(null);
-          }}
-          onDownload={() => {
-            if (preview.tranche && app && site && visa) {
-              void takeInvoiceNumber()
-                .catch(() => ({ number: app.id }))
-                .then((numbered) =>
-                  buildInvoice({
-                    lang: paperLang,
-                    tranche: preview.tranche!,
-                    settings: { ...site.settings, usdt_wallet: detail?.wallet || "", usdt_network: detail?.network || site.settings.usdt_network },
-                    fileId: app.id,
-                    client: clientName(parseQuestionnaire(app.questionnaire)),
-                    country: app.country,
-                    permit: visa.name,
-                    duration: visa.duration,
-                    employer: app.employer,
-                    total: app.totalCost,
-                    date: new Date().toISOString().slice(0, 10),
-                    number: numbered.number,
-                    scheme: normalizeScheme(app.feeScheme),
-                  }),
-                );
-              return;
-            }
-            const a = document.createElement("a");
-            a.href = preview.url;
-            a.download = preview.name;
-            a.click();
-          }}
-        />
-      ) : null}
       {app && app.status === "OPEN" ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/15 bg-[#090909]/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <p className="text-sm">{nextAction(app, Boolean(proof), Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
+        <div className="action-dock fixed inset-x-0 bottom-0 z-30 border-t border-white/15 bg-[#090909]/95 px-4 py-3 pr-20 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <p className="text-sm">{nextAction(app, livePay, Boolean(detail?.documents.some((d) => d.status === "REJECTED")), t)}</p>
           {app.stage === 2 && app.cancelDeadlineAt ? (
             <p className="text-xs text-mist">{Math.max(0, Math.ceil(hoursUntil(app.cancelDeadlineAt, now) || 0))} h</p>
           ) : null}

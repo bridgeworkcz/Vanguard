@@ -21,7 +21,8 @@ const securityHeaders = createMiddleware().server(async ({ next }) => {
       "font-src 'self' https://fonts.gstatic.com data:",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "script-src 'self' 'unsafe-inline' https://grok.com",
-      "frame-src 'self' https://maps.google.com https://www.google.com https://www.google.com/maps",
+      "worker-src 'self' blob:",
+      "frame-src 'self' blob: https://maps.google.com https://www.google.com https://www.google.com/maps",
       "connect-src 'self' https://grok.com",
     ].join("; ");
   }

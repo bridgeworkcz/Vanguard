@@ -109,7 +109,15 @@ function variableSymbol(fileId: string, tranche: number) {
   return `${body}${tranche}`;
 }
 
-/** Letters follow a circle. `top` reads left to right across the crown; the foot of the bottom arc faces the centre. */
+/** Letters follow a circle. Feet point at the centre on both arcs, so the foot of the bottom line is upside down when the page is upright. */
+function arcLayout(text: string, font: PDFFont, size: number) {
+  const chars = Array.from(text);
+  const widths = chars.map((ch) => (ch === " " ? size * 0.33 : font.widthOfTextAtSize(ch, size)));
+  const gap = size * 0.04;
+  const total = widths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, chars.length - 1);
+  return { chars, widths, gap, total };
+}
+
 function arcText(
   page: PDFPage,
   text: string,
@@ -121,30 +129,46 @@ function arcText(
   color: ReturnType<typeof rgb>,
   top: boolean,
 ) {
-  const chars = Array.from(text);
-  const widths = chars.map((ch) => font.widthOfTextAtSize(ch, size));
-  const gap = size * 0.12;
-  const total = widths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, chars.length - 1);
+  let face = size;
+  let laid = arcLayout(text, font, face);
+  while (face > 4.2 && laid.total / radius > 2.2) {
+    face -= 0.15;
+    laid = arcLayout(text, font, face);
+  }
+  const { chars, widths, gap, total } = laid;
   let cursor = -total / 2;
   chars.forEach((ch, i) => {
     const w = widths[i]!;
     const mid = cursor + w / 2;
     const delta = mid / radius;
     const theta = top ? Math.PI / 2 - delta : -Math.PI / 2 - delta;
-    const rot = ((theta * 180) / Math.PI - 90) * (top ? 1 : -1);
+    const rot = (theta * 180) / Math.PI - 90;
     const read = (rot * Math.PI) / 180;
     const mx = cx + Math.cos(theta) * radius;
     const my = cy + Math.sin(theta) * radius;
     page.drawText(ch, {
       x: mx - Math.cos(read) * (w / 2),
       y: my - Math.sin(read) * (w / 2),
-      size,
+      size: face,
       font,
       color,
       rotate: degrees(rot),
     });
     cursor += w + gap;
   });
+}
+
+function sealStar(page: PDFPage, cx: number, cy: number, aim: number, r: number, color: ReturnType<typeof rgb>) {
+  const pts: [number, number][] = [];
+  for (let i = 0; i < 5; i += 1) {
+    const a = aim + (i * 2 * Math.PI) / 5;
+    pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  for (let i = 0; i < 5; i += 1) {
+    const a = pts[i]!;
+    const b = pts[(i + 2) % 5]!;
+    page.drawLine({ start: { x: a[0], y: a[1] }, end: { x: b[0], y: b[1] }, thickness: 0.45, color });
+  }
 }
 
 class Sheet {
@@ -318,7 +342,7 @@ class Sheet {
   }
 
   seal() {
-    this.need(124);
+    this.need(132);
     const page = this.page();
     const y = this.y - 6;
     page.drawLine({ start: { x: L, y: y - 22 }, end: { x: L + 188, y: y - 22 }, thickness: 0.6, color: INK });
@@ -339,26 +363,32 @@ class Sheet {
       color: MUTED,
     });
 
-    const cx = R - 62;
-    const cy = y - 52;
+    const cx = R - 64;
+    const cy = y - 56;
     const ico = this.settings.registration_number || ICO;
-    page.drawEllipse({ x: cx, y: cy, xScale: 54, yScale: 54, borderColor: SEAL, borderWidth: 1.6 });
-    page.drawEllipse({ x: cx, y: cy, xScale: 50, yScale: 50, borderColor: SEAL, borderWidth: 0.45 });
-    page.drawEllipse({ x: cx, y: cy, xScale: 34, yScale: 34, borderColor: SEAL, borderWidth: 0.45 });
-    arcText(page, "VANGUARD GLOBAL MOBILITY", cx, cy, 43.5, this.bold, 6.2, SEAL, true);
-    arcText(page, "* PRAHA 1  ·  ČESKÁ REPUBLIKA *", cx, cy, 43.5, this.font, 5.1, SEAL, false);
+    page.drawEllipse({ x: cx, y: cy, xScale: 56, yScale: 56, borderColor: SEAL, borderWidth: 1.35 });
+    page.drawEllipse({ x: cx, y: cy, xScale: 52.2, yScale: 52.2, borderColor: SEAL, borderWidth: 0.35 });
+    page.drawEllipse({ x: cx, y: cy, xScale: 31, yScale: 31, borderColor: SEAL, borderWidth: 0.45 });
+    arcText(page, "VANGUARD GLOBAL MOBILITY", cx, cy, 44.6, this.bold, 6.15, SEAL, true);
+    arcText(page, "PRAHA 1   ·   ČESKÁ REPUBLIKA", cx, cy, 44.2, this.font, 4.7, SEAL, false);
+    sealStar(page, cx + 47.4, cy, 0, 3.4, SEAL);
+    sealStar(page, cx - 47.4, cy, Math.PI, 3.4, SEAL);
     const centre: [string, number, PDFFont][] = [
-      ["s.r.o.", 8, this.bold],
-      [`IČO ${ico}`, 6.5, this.bold],
-      ["C 392810", 5.5, this.font],
+      ["s.r.o.", 7.2, this.bold],
+      [`IČO ${ico}`, 5.7, this.bold],
+      ["C 392810", 5.2, this.font],
     ];
-    let ty = cy + 10;
+    const lead = 2.1;
+    const block = centre.reduce((sum, row) => sum + row[1], 0) + lead * (centre.length - 1);
+    let ty = cy + block / 2 - centre[0]![1] + 1.2;
+    page.drawLine({ start: { x: cx - 18, y: ty + centre[0]![1] + 2.4 }, end: { x: cx + 18, y: ty + centre[0]![1] + 2.4 }, thickness: 0.35, color: SEAL });
     for (const [text, size, face] of centre) {
       const tw = face.widthOfTextAtSize(text, size);
       page.drawText(text, { x: cx - tw / 2, y: ty, size, font: face, color: SEAL });
-      ty -= size + 2;
+      ty -= size + lead;
     }
-    this.y = y - 112;
+    page.drawLine({ start: { x: cx - 18, y: ty + lead + 1.6 }, end: { x: cx + 18, y: ty + lead + 1.6 }, thickness: 0.35, color: SEAL });
+    this.y = y - 120;
   }
 
   close() {

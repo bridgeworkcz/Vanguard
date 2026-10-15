@@ -345,7 +345,7 @@ html.lang-ur .shot-name {
   background: rgba(0, 0, 0, 0.35);
   color: #fff;
   padding: 0 0.9rem;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -365,6 +365,7 @@ select.field option {
   background: rgba(0, 0, 0, 0.35);
   color: #fff;
   padding: 0.6rem 0.9rem;
+  font-size: 16px;
 }
 textarea.field,
 textarea.field-light {
@@ -583,6 +584,15 @@ html[dir="rtl"] .nav-scroll {
 body:has(.cookie-bar) .wa-fab {
   bottom: calc(var(--cookie-h, 4.75rem) + 0.75rem);
 }
+body:has(.action-dock) .wa-fab {
+  bottom: calc(6.5rem + env(safe-area-inset-bottom));
+}
+body:has(.cookie-bar):has(.action-dock) .wa-fab {
+  bottom: calc(var(--cookie-h, 4.75rem) + 6.5rem);
+}
+body:has(.cookie-bar) .action-dock {
+  bottom: var(--cookie-h, 4.75rem);
+}
 #calc,
 #case-next,
 #case-detail {
@@ -591,15 +601,6 @@ body:has(.cookie-bar) .wa-fab {
 @media (max-width: 767px) {
   .vg-page {
     padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
-  }
-  body:has(.action-dock) .wa-fab {
-    bottom: calc(5.5rem + env(safe-area-inset-bottom));
-  }
-  body:has(.cookie-bar):has(.action-dock) .wa-fab {
-    bottom: calc(var(--cookie-h, 4.75rem) + 5.5rem);
-  }
-  body:has(.cookie-bar) .action-dock {
-    bottom: var(--cookie-h, 4.75rem);
   }
 }
 

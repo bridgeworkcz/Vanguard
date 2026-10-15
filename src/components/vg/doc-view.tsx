@@ -36,7 +36,7 @@ export function DocScreen({
         const response = await fetch(url);
         const buffer = (await response.arrayBuffer()) as ArrayBuffer;
         const data = new Uint8Array(buffer);
-        const doc = await pdfjs.getDocument({ data }).promise;
+        const doc = await pdfjs.getDocument({ data, isEvalSupported: false, useWorkerFetch: false }).promise;
         const width = Math.min(window.innerWidth - 16, 860);
         const out: string[] = [];
         for (let index = 1; index <= doc.numPages; index += 1) {
@@ -78,7 +78,7 @@ export function DocScreen({
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         {failed ? (
-          <iframe title={title} src={`${url}#view=FitH&toolbar=0`} className="h-full w-full bg-white" />
+          <p className="px-3 py-10 text-sm text-mist">{downloadLabel}</p>
         ) : pages.length === 0 ? (
           <p className="px-3 py-10 text-sm text-mist">...</p>
         ) : (
