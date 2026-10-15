@@ -54,6 +54,7 @@ import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
 import { isOverdue } from "@/lib/vanguard/ops";
 import { DocScreen } from "./doc-view";
+import { downloadPdf } from "@/lib/vanguard/download";
 import { Pager } from "./pages";
 import { AdminGuide } from "./admin-guide";
 
@@ -77,9 +78,16 @@ function NavGlyph({ tab }: { tab: Tab }) {
   );
 }
 
+function dueStamp(a: { stage: number; cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
+  if (a.stage === 2) return a.cancelDeadlineAt;
+  if (a.stage === 3) return a.invoice2DueAt || null;
+  if (a.stage >= 4) return a.docDeadlineAt;
+  return null;
+}
+
 function caseRank(a: { status: string; stage: number; profileComplete: boolean; cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
   if (a.status !== "OPEN") return 400;
-  if (isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) || isOverdue(a.invoice2DueAt)) return 0;
+  if (isOverdue(dueStamp(a))) return 0;
   if (a.stage === 2) return 10;
   if (a.stage === 1 && a.profileComplete) return 20;
   if (a.stage === 3) return 30;
@@ -87,16 +95,15 @@ function caseRank(a: { status: string; stage: number; profileComplete: boolean; 
   return 60;
 }
 
-function deadlineMs(a: { cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
-  const n = Date.parse(a.cancelDeadlineAt || a.docDeadlineAt || a.invoice2DueAt || "");
+function deadlineMs(a: { stage: number; cancelDeadlineAt: string | null; docDeadlineAt: string | null; invoice2DueAt?: string | null }) {
+  const n = Date.parse(dueStamp(a) || "");
   return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
 }
 
 function paidBits(a: { stage: number; totalCost: number; feeScheme?: string }) {
   const parts = tranches(a.totalCost, normalizeScheme(a.feeScheme));
-  if (a.stage >= 4) return `${parts.first} · ${parts.second} · ${parts.final}`;
-  if (a.stage >= 3) return `${parts.first} · ${parts.second}`;
-  if (a.stage >= 2) return String(parts.first);
+  if (a.stage >= 4) return `${parts.first} · ${parts.second}`;
+  if (a.stage >= 3) return String(parts.first);
   return "—";
 }
 
@@ -124,7 +131,7 @@ function TodayStrip({
         <button key={a.id} type="button" className="btn w-fit" onClick={() => onOpen(a.id)}>
           {a.id} · {lastNameOf(a.questionnaire) || a.clientEmail} · {a.country}
           {parseQuestionnaire(a.questionnaire).contactHour ? ` · ${parseQuestionnaire(a.questionnaire).contactHour}:00` : ""}
-          {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) || isOverdue(a.invoice2DueAt) ? ` · ${overdue}` : ""}
+          {isOverdue(dueStamp(a)) ? ` · ${overdue}` : ""}
         </button>
       ))}
     </div>
@@ -292,10 +299,7 @@ function CaseFiles({
             setViewer(null);
           }}
           onDownload={() => {
-            const link = document.createElement("a");
-            link.href = viewer.url;
-            link.download = viewer.fileName;
-            link.click();
+            downloadPdf(viewer.url, viewer.fileName || "document.pdf");
           }}
         />
       ) : null}
@@ -1007,18 +1011,23 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 type="button"
                 className="btn"
                 onClick={() => {
-                  const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
-                  for (const row of apps.filter((item) => item.status === "OPEN")) {
-                    const phone = row.clientPhone || phoneOf(row.questionnaire);
-                    lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
-                  }
-                  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = "open-cases.csv";
-                  link.click();
-                  URL.revokeObjectURL(url);
+                  const rows = apps.filter((item) => item.status === "OPEN");
+                  void exportOpenCases({ data: { ids: rows.map((item) => item.id) } })
+                    .then(() => {
+                      const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
+                      for (const row of rows) {
+                        const phone = row.clientPhone || phoneOf(row.questionnaire);
+                        lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
+                      }
+                      const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = "open-cases.csv";
+                      link.click();
+                      URL.revokeObjectURL(url);
+                    })
+                    .catch(() => setExportNote(t("admin_unsaved")));
                 }}
               >
                 {t("admin_export")}
@@ -1058,6 +1067,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             </div>
             </div>
             <p className="text-sm text-mist">{t("admin_pick_hint")}</p>
+            {isAdmin ? (
             <div className="flex flex-wrap gap-2">
               <select className="field max-w-xs" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
                 <option value="">{t("admin_assign")}</option>
@@ -1077,23 +1087,31 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               >
                 {t("admin_assign")} · {picked.length}
               </button>
+            </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 className="btn"
                 disabled={picked.length === 0}
                 onClick={() => {
-                  const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
-                  for (const row of apps.filter((item) => picked.includes(item.id))) {
-                    const phone = row.clientPhone || phoneOf(row.questionnaire);
-                    lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
-                  }
-                  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = "selected-cases.csv";
-                  link.click();
-                  URL.revokeObjectURL(url);
+                  const rows = apps.filter((item) => picked.includes(item.id));
+                  void exportOpenCases({ data: { ids: rows.map((item) => item.id) } })
+                    .then(() => {
+                      const lines = [["id", "email", "phone", "country", "stage", "status"].join(",")];
+                      for (const row of rows) {
+                        const phone = row.clientPhone || phoneOf(row.questionnaire);
+                        lines.push([row.id, row.clientEmail, phone, row.country, String(row.stage), row.status].map((cell) => `"${String(cell).replace(/"/g, "")}"`).join(","));
+                      }
+                      const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = "selected-cases.csv";
+                      link.click();
+                      URL.revokeObjectURL(url);
+                    })
+                    .catch(() => setErr(t("admin_unsaved")));
                 }}
               >
                 {t("admin_export_picked")} · {picked.length}
@@ -1154,11 +1172,18 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 .filter((a) => role !== "MANAGER" || a.assignedManagerId === me || coverIds.has(a.assignedManagerId))
                 .filter((a) => !qCountry || a.country === qCountry)
                 .filter((a) => !qStage || String(a.stage) === qStage)
-                .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
+                .filter((a) => !overdueOnly || isOverdue(dueStamp(a)))
                 .filter((a) => !unassignedOnly || !a.assignedManagerId)
                 .filter((a) => !mineOnly || a.assignedManagerId === me)
                 .filter((a) => !hangOnly || (a.stage === 2 && moneyHanging(a)))
-                .filter((a) => !caseQuery.trim() || `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)} ${lastNameOf(a.questionnaire)} ${a.referrerUserId || ""}`.toLowerCase().includes(caseQuery.trim().toLowerCase()))
+                .filter((a) => {
+                  const q = caseQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  const hay = `${a.id} ${a.clientEmail} ${a.clientPhone || ""} ${phoneOf(a.questionnaire)} ${lastNameOf(a.questionnaire)} ${a.referrerUserId || ""}`.toLowerCase();
+                  if (hay.includes(q)) return true;
+                  const digits = phoneKey(q);
+                  return digits.length >= 4 && phoneKey(`${a.clientPhone || ""} ${phoneOf(a.questionnaire)}`).includes(digits);
+                })
                 .slice()
                 .sort((a, b) => caseRank(a) - caseRank(b) || deadlineMs(a) - deadlineMs(b));
               const pages = Math.max(1, Math.ceil(filtered.length / 15));

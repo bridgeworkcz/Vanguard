@@ -2,6 +2,7 @@ import { PDFDocument, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { shareLabel, tranches, type FeeScheme, type Questionnaire } from "./domain";
 import { caseLoginPath } from "./round";
+import { downloadPdf } from "./download";
 
 type Settings = Record<string, string>;
 
@@ -74,13 +75,8 @@ function wrap(text: string, font: PDFFont, size: number, max: number): string[] 
 
 function save(bytes: Uint8Array, name: string, hold = false): string {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  if (hold) return url;
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
+  if (hold) return URL.createObjectURL(blob);
+  downloadPdf(blob, name);
   return "";
 }
 

@@ -49,6 +49,7 @@ import { useI18n, PUBLIC_LANGS, type CopyKey } from "@/lib/vanguard/i18n";
 import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, hasLiveProof, hoursUntil, stageTone } from "@/lib/vanguard/ops";
 import { buildAgentStatement, buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
+import { downloadPdf } from "@/lib/vanguard/download";
 import { docsForCountry } from "@/lib/vanguard/round";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
@@ -607,13 +608,7 @@ export function PortalPage({ id }: { id: string }) {
   }
 
   function saveFile(url: string, name: string) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadPdf(url, name);
   }
 
   async function withPaper(work: () => Promise<void>) {
