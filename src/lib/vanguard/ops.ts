@@ -83,6 +83,10 @@ export function monthCommission(cases: CommissionCase[], ratePct: number, now = 
   return Math.round(base * rate);
 }
 
+export function hasLiveProof(docs: { category: string; status?: string }[]): boolean {
+  return docs.some((doc) => doc.category === "PAYMENT_PROOF" && doc.status !== "REJECTED");
+}
+
 export function canCancel(status: string, stage: number, deadline: string | null, hasProof: boolean, now = Date.now()): boolean {
   if (status !== "OPEN" || stage !== 2 || hasProof || !deadline) return false;
   const left = hoursUntil(deadline, now);
