@@ -56,9 +56,15 @@ export type Vacancy = {
   quota: number;
   active: boolean;
   blockedCitizenships?: string;
+  /** room, hostel, none, or blank when the old free-text line is all we have. */
+  housingKind?: string;
   /** ISO time. While this is in the future the opening stays off the public list. */
   pauseUntil?: string;
 };
+
+export type ChildRow = { name: string; age: string };
+
+export type PayAcks = { room: boolean; night: boolean; fee: boolean; country: boolean };
 
 export type Questionnaire = {
   firstName: string;
@@ -71,7 +77,12 @@ export type Questionnaire = {
   criminalRecord: string;
   phone: string;
   previousVisa: string;
+  visaRefusal: string;
+  passportExpiry: string;
   travelWithFamily: string;
+  children: ChildRow[];
+  contactHour: string;
+  acks: PayAcks;
 };
 
 export const EMPTY_QUESTIONNAIRE: Questionnaire = {
@@ -85,7 +96,12 @@ export const EMPTY_QUESTIONNAIRE: Questionnaire = {
   criminalRecord: "",
   phone: "",
   previousVisa: "",
+  visaRefusal: "",
+  passportExpiry: "",
   travelWithFamily: "",
+  children: [],
+  contactHour: "",
+  acks: { room: false, night: false, fee: false, country: false },
 };
 
 export const CITIZENSHIPS = [
@@ -245,12 +261,67 @@ export function invoice2Unlocked(processStage: string): boolean {
   return stageIndex(processStage as ProcessStage) >= stageIndex("EMPLOYER_APPROVED_FOR_MINISTRY");
 }
 
+export const CONTACT_HOURS = ["08", "10", "12", "14", "16", "18", "20", "22"] as const;
+
+/** Office rule for opening a file. Not a statement of what a ministry requires. */
+export const PASSPORT_MIN_MONTHS = 12;
+
+export function passportShort(iso: string, now = new Date()): boolean {
+  const end = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(end.getTime())) return true;
+  const min = new Date(now.getTime());
+  min.setUTCMonth(min.getUTCMonth() + PASSPORT_MIN_MONTHS);
+  return end.getTime() < min.getTime();
+}
+
+export function openBlock(row: { criminalRecord?: string; visaRefusal?: string; passportExpiry?: string }): "record" | "refusal" | "passport" | null {
+  if (row.criminalRecord === "yes") return "record";
+  if (row.visaRefusal === "yes") return "refusal";
+  if (!row.passportExpiry || passportShort(row.passportExpiry)) return "passport";
+  return null;
+}
+
+export function childrenOk(q: Pick<Questionnaire, "travelWithFamily" | "children">): boolean {
+  if (q.travelWithFamily !== "family") return true;
+  if (!q.children?.length) return false;
+  return q.children.every((child) => child.name.trim().length >= 2 && /^\d{1,2}$/.test(child.age) && Number(child.age) <= 24);
+}
+
+export function acksDone(q: Pick<Questionnaire, "acks">): boolean {
+  return Boolean(q.acks?.room && q.acks?.night && q.acks?.fee && q.acks?.country);
+}
+
+function cleanChildren(value: unknown): ChildRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).map((item) => {
+    const row = item && typeof item === "object" ? (item as { name?: unknown; age?: unknown }) : {};
+    return {
+      name: String(row.name || "").slice(0, 80),
+      age: String(row.age || "").replace(/\D/g, "").slice(0, 2),
+    };
+  });
+}
+
+function cleanAcks(value: unknown): PayAcks {
+  const row = value && typeof value === "object" ? (value as Partial<PayAcks>) : {};
+  return { room: Boolean(row.room), night: Boolean(row.night), fee: Boolean(row.fee), country: Boolean(row.country) };
+}
+
 export function parseQuestionnaire(raw: string): Questionnaire {
   try {
     const v = JSON.parse(raw) as Partial<Questionnaire>;
-    return { ...EMPTY_QUESTIONNAIRE, ...v };
+    const hour = String(v.contactHour || "");
+    return {
+      ...EMPTY_QUESTIONNAIRE,
+      ...v,
+      children: cleanChildren(v.children),
+      acks: cleanAcks(v.acks),
+      passportExpiry: String(v.passportExpiry || "").slice(0, 10),
+      contactHour: (CONTACT_HOURS as readonly string[]).includes(hour) ? hour : "",
+      visaRefusal: v.visaRefusal === "yes" || v.visaRefusal === "no" ? v.visaRefusal : "",
+    };
   } catch {
-    return { ...EMPTY_QUESTIONNAIRE };
+    return { ...EMPTY_QUESTIONNAIRE, children: [], acks: { room: false, night: false, fee: false, country: false } };
   }
 }
 
@@ -271,7 +342,14 @@ export function questionnaireError(q: Questionnaire): string | null {
   const code = CALLING[q.citizenship];
   if (code && !digits.startsWith(code)) return "phone_code";
   if (q.previousVisa !== "yes" && q.previousVisa !== "no") return "visa";
+  if (q.visaRefusal !== "yes" && q.visaRefusal !== "no") return "refusal";
+  const block = openBlock(q);
+  if (block === "record") return "gate_record";
+  if (block === "refusal") return "gate_refusal";
+  if (block === "passport") return "passport";
   if (q.travelWithFamily !== "alone" && q.travelWithFamily !== "family") return "family";
+  if (!childrenOk(q)) return "child";
+  if (!(CONTACT_HOURS as readonly string[]).includes(q.contactHour)) return "hour";
   return null;
 }
 

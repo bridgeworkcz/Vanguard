@@ -328,6 +328,7 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     lang: extra.lang || "en",
     feeScheme: "legacy30" as const,
     invoice2DueAt: null,
+    campaign: "",
     extra,
     row,
   };

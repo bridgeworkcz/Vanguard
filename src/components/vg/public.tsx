@@ -1,8 +1,9 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell, rememberAgent, storyKey, useAgentCut, useDesk, usePageMeta, useSite } from "./chrome";
-import { createApplication, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, applyPercent, countrySlug, hasHousing, isNightShift, netMark, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
+import { createApplication, fxRates, joinWaitlist, noteFunnel } from "@/lib/vanguard/api";
+import { CITIZENSHIPS, applyPercent, countrySlug, isNightShift, netMark, openBlock, priceFor, productionWeeks, salaryNumber, sameCountry, termMonths, whatsAppHref, type Processing } from "@/lib/vanguard/domain";
+import { HOME_CURRENCY, homeApprox, seatHasHouse } from "@/lib/vanguard/round";
 import { VISA_PRODUCTS, DEFAULT_SETTINGS } from "@/lib/vanguard/seed";
 import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
@@ -33,6 +34,20 @@ function Reviews({ settings }: { settings: Record<string, string> }) {
       </ul>
     </section>
   );
+}
+
+function useRates() {
+  const [rates, setRates] = useState<Record<string, number>>({});
+  useEffect(() => {
+    fxRates().then((row) => setRates(row || {})).catch(() => undefined);
+  }, []);
+  return rates;
+}
+
+function moneyAside(euros: number, citizenship: string, rates: Record<string, number>, about: string, rate: string) {
+  const line = homeApprox(euros, HOME_CURRENCY[citizenship] || "", rates);
+  if (!line) return null;
+  return <span className="mt-1 block text-xs text-mist">{about} {line}. {rate}</span>;
 }
 
 function speedLabel(t: (k: "speed_STANDARD" | "speed_PRIORITY" | "speed_EXPRESS" | "weeks" | "week") => string, p: Processing, min: number, max: number) {
@@ -350,6 +365,7 @@ export function SearchPage({
 }) {
   const { t } = useI18n();
   usePageMeta("seo_search_title", "seo_search_desc");
+  const rates = useRates();
   const { signedIn } = useDesk();
   const { data } = useSite();
   const [waitNote, setWaitNote] = useState("");
@@ -370,10 +386,10 @@ export function SearchPage({
   };
   const jobs = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const full = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
-  const houseN = jobs.filter((job) => hasHousing(job.accommodation)).length;
+  const houseN = jobs.filter((job) => seatHasHouse(job.housingKind || "", job.accommodation)).length;
   const dayN = jobs.filter((job) => !isNightShift(job.workingHours)).length;
   const shown = [...jobs]
-    .filter((job) => (!houseOnly || hasHousing(job.accommodation)) && (!dayOnly || !isNightShift(job.workingHours)))
+    .filter((job) => (!houseOnly || seatHasHouse(job.housingKind || "", job.accommodation)) && (!dayOnly || !isNightShift(job.workingHours)))
     .sort((a, b) => {
       if (sort === "seats") return b.quota - a.quota;
       if (sort === "term") return termMonths(visa?.duration || "") - termMonths(visa?.duration || "");
@@ -614,7 +630,7 @@ export function SearchPage({
                     <p className="mt-1 text-sm text-mist">{job.employer}</p>
                     <p className="mt-2 inline-flex items-center gap-2 text-sm"><MiniFlag country={visa.country} /> {visa.country} · {visa.duration}</p>
                     <p className="mt-1 text-sm">{job.workingHours}</p>
-                    <p className="text-sm text-mist">{job.accommodation}</p>
+                    <p className="text-sm text-mist">{job.accommodation}{job.housingKind === "room" || job.housingKind === "hostel" || job.housingKind === "none" ? ` · ${t(`house_${job.housingKind}`)}` : ""}</p>
                     {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : null}
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                     <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product, speed: pace }} className="btn-solid mt-4 inline-flex">
@@ -623,6 +639,7 @@ export function SearchPage({
                   </div>
                   <p className="text-sm text-paper">
                     <span className="block">{job.salaryNet}</span>
+                    {moneyAside(salaryNumber(job.salaryNet), citizenship, rates, t("pay_about"), t("pay_rate"))}
                     <span className="mt-1 block text-mist">{job.accommodation}</span>
                     {payLine(job.salaryNet) ? <span className="mt-1 block text-xs text-mist">{payLine(job.salaryNet)}</span> : null}
                   </p>
@@ -660,7 +677,11 @@ export function VacancyPage({
   const [err, setErr] = useState("");
   const [citizen, setCitizen] = useState(citizenship);
   const [agentCode, setAgentCode] = useState("");
+  const [record, setRecord] = useState("");
+  const [refusal, setRefusal] = useState("");
+  const [expiry, setExpiry] = useState("");
   const cut = useAgentCut();
+  const rates = useRates();
   useEffect(() => {
     setAgentCode(sessionStorage.getItem("vg-agent") || "");
   }, []);
@@ -671,9 +692,16 @@ export function VacancyPage({
   const fee = applyPercent(listFee, cut);
   async function apply() {
     if (!job) return;
+    const block = openBlock({ criminalRecord: record, visaRefusal: refusal, passportExpiry: expiry });
+    if (block) {
+      setErr(block === "record" ? t("q_err_gate_record") : block === "refusal" ? t("q_err_gate_refusal") : t("q_err_passport"));
+      return;
+    }
+    const campaign = sessionStorage.getItem("vg-campaign") || "";
+    const intent = { vacancyId: job.id, citizenship: citizen, processing: pace as Processing, agentCode: agentCode.trim(), lang, record, refusal, passportExpiry: expiry, campaign };
     if (!signedIn) {
       rememberAgent(agentCode);
-      sessionStorage.setItem("vg-intent", JSON.stringify({ vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim(), lang }));
+      sessionStorage.setItem("vg-intent", JSON.stringify(intent));
       void navigate({ to: "/login" });
       return;
     }
@@ -682,10 +710,11 @@ export function VacancyPage({
     try {
       void noteFunnel({ data: { kind: "apply" } }).catch(() => undefined);
       rememberAgent(agentCode);
-      const res = await createApplication({ data: { vacancyId: job.id, citizenship: citizen, processing: pace, agentCode: agentCode.trim(), lang } });
+      const res = await createApplication({ data: intent });
       void navigate({ to: "/portal", search: { id: res.id } });
     } catch (e) {
-      setErr(softenError(e instanceof Error ? e.message : "Error", t("sheets_busy")));
+      const message = e instanceof Error ? e.message : "Error";
+      setErr(message.includes("record") ? t("q_err_gate_record") : message.includes("refusal") ? t("q_err_gate_refusal") : message.includes("passport") ? t("q_err_passport") : softenError(message, t("sheets_busy")));
       setBusy(false);
     }
   }
@@ -722,7 +751,7 @@ export function VacancyPage({
           {[
             [t("field_salary"), job.salaryNet],
             [t("field_hours"), job.workingHours],
-            [t("field_housing"), job.accommodation],
+            [t("field_housing"), `${job.accommodation}${job.housingKind === "room" || job.housingKind === "hostel" || job.housingKind === "none" ? ` · ${t(`house_${job.housingKind}`)}` : ""}`],
             [t("permit"), `${visa.name}, ${visa.duration}`],
             [t("fee"), "fee"],
           ].map(([k, v]) => (
@@ -738,7 +767,10 @@ export function VacancyPage({
                     </>
                   ) : ""
                 ) : (
-                  v
+                  <>
+                    {v}
+                    {k === t("field_salary") ? moneyAside(salaryNumber(job.salaryNet), citizen, rates, t("pay_about"), t("pay_rate")) : null}
+                  </>
                 )}
               </dd>
             </div>
@@ -782,6 +814,19 @@ export function VacancyPage({
             </select>
           </label>
         ) : null}
+        <fieldset className="mt-6 grid max-w-sm gap-3 text-sm">
+          <legend className="text-mist">{t("q_record")}</legend>
+          <label className="flex gap-2"><input type="radio" name="gate-rec" checked={record === "no"} onChange={() => setRecord("no")} />{t("q_no")}</label>
+          <label className="flex gap-2"><input type="radio" name="gate-rec" checked={record === "yes"} onChange={() => setRecord("yes")} />{t("q_yes")}</label>
+          <legend className="mt-2 text-mist">{t("q_refusal")}</legend>
+          <label className="flex gap-2"><input type="radio" name="gate-ref" checked={refusal === "no"} onChange={() => setRefusal("no")} />{t("q_no")}</label>
+          <label className="flex gap-2"><input type="radio" name="gate-ref" checked={refusal === "yes"} onChange={() => setRefusal("yes")} />{t("q_yes")}</label>
+          <label className="grid gap-1 text-mist">
+            {t("q_passport")}
+            <input className="field" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
+            <span className="text-xs">{t("q_passport_hint")}</span>
+          </label>
+        </fieldset>
         <div className="action-dock fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#090909]/95 p-3 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
           <button type="button" className="btn-solid w-full md:w-fit" disabled={busy || !citizen} onClick={() => void apply()}>
             {busy ? t("applying") : t("search_apply")}

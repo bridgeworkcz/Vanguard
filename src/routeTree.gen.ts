@@ -15,6 +15,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FilingsRouteImport } from './routes/filings'
+import { Route as LimitsRouteImport } from './routes/limits'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PapersRouteImport } from './routes/papers'
 import { Route as PortalRouteImport } from './routes/portal'
@@ -24,7 +25,11 @@ import { Route as QuestionsRouteImport } from './routes/questions'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as WallRouteImport } from './routes/wall'
+import { Route as AfterCitizenshipRouteImport } from './routes/after.$citizenship'
 import { Route as CountryCodeRouteImport } from './routes/country.$code'
+import { Route as ETokenRouteImport } from './routes/e.$token'
+import { Route as GoSlugRouteImport } from './routes/go.$slug'
 import { Route as GoogleDriveRouteImport } from './routes/google.drive'
 import { Route as RCodeRouteImport } from './routes/r.$code'
 import { Route as VacanciesIdRouteImport } from './routes/vacancies_.$id'
@@ -60,6 +65,11 @@ const ContactRoute = ContactRouteImport.update({
 const FilingsRoute = FilingsRouteImport.update({
   id: '/filings',
   path: '/filings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LimitsRoute = LimitsRouteImport.update({
+  id: '/limits',
+  path: '/limits',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -107,9 +117,29 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WallRoute = WallRouteImport.update({
+  id: '/wall',
+  path: '/wall',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AfterCitizenshipRoute = AfterCitizenshipRouteImport.update({
+  id: '/after/$citizenship',
+  path: '/after/$citizenship',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CountryCodeRoute = CountryCodeRouteImport.update({
   id: '/country/$code',
   path: '/country/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ETokenRoute = ETokenRouteImport.update({
+  id: '/e/$token',
+  path: '/e/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoSlugRoute = GoSlugRouteImport.update({
+  id: '/go/$slug',
+  path: '/go/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GoogleDriveRoute = GoogleDriveRouteImport.update({
@@ -150,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
   '/filings': typeof FilingsRoute
+  '/limits': typeof LimitsRoute
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
@@ -159,7 +190,11 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
+  '/wall': typeof WallRoute
+  '/after/$citizenship': typeof AfterCitizenshipRoute
   '/country/$code': typeof CountryCodeRoute
+  '/e/$token': typeof ETokenRoute
+  '/go/$slug': typeof GoSlugRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
@@ -174,6 +209,7 @@ export interface FileRoutesByTo {
   '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
   '/filings': typeof FilingsRoute
+  '/limits': typeof LimitsRoute
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
@@ -183,7 +219,11 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
+  '/wall': typeof WallRoute
+  '/after/$citizenship': typeof AfterCitizenshipRoute
   '/country/$code': typeof CountryCodeRoute
+  '/e/$token': typeof ETokenRoute
+  '/go/$slug': typeof GoSlugRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies/$id': typeof VacanciesIdRoute
@@ -199,6 +239,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRoute
   '/contact': typeof ContactRoute
   '/filings': typeof FilingsRoute
+  '/limits': typeof LimitsRoute
   '/login': typeof LoginRoute
   '/papers': typeof PapersRoute
   '/portal': typeof PortalRoute
@@ -208,7 +249,11 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
+  '/wall': typeof WallRoute
+  '/after/$citizenship': typeof AfterCitizenshipRoute
   '/country/$code': typeof CountryCodeRoute
+  '/e/$token': typeof ETokenRoute
+  '/go/$slug': typeof GoSlugRoute
   '/google/drive': typeof GoogleDriveRoute
   '/r/$code': typeof RCodeRoute
   '/vacancies_/$id': typeof VacanciesIdRoute
@@ -225,6 +270,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/contact'
     | '/filings'
+    | '/limits'
     | '/login'
     | '/papers'
     | '/portal'
@@ -234,7 +280,11 @@ export interface FileRouteTypes {
     | '/search'
     | '/sitemap.xml'
     | '/terms'
+    | '/wall'
+    | '/after/$citizenship'
     | '/country/$code'
+    | '/e/$token'
+    | '/go/$slug'
     | '/google/drive'
     | '/r/$code'
     | '/vacancies/$id'
@@ -249,6 +299,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/contact'
     | '/filings'
+    | '/limits'
     | '/login'
     | '/papers'
     | '/portal'
@@ -258,7 +309,11 @@ export interface FileRouteTypes {
     | '/search'
     | '/sitemap.xml'
     | '/terms'
+    | '/wall'
+    | '/after/$citizenship'
     | '/country/$code'
+    | '/e/$token'
+    | '/go/$slug'
     | '/google/drive'
     | '/r/$code'
     | '/vacancies/$id'
@@ -273,6 +328,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/contact'
     | '/filings'
+    | '/limits'
     | '/login'
     | '/papers'
     | '/portal'
@@ -282,7 +338,11 @@ export interface FileRouteTypes {
     | '/search'
     | '/sitemap.xml'
     | '/terms'
+    | '/wall'
+    | '/after/$citizenship'
     | '/country/$code'
+    | '/e/$token'
+    | '/go/$slug'
     | '/google/drive'
     | '/r/$code'
     | '/vacancies_/$id'
@@ -298,6 +358,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRoute
   ContactRoute: typeof ContactRoute
   FilingsRoute: typeof FilingsRoute
+  LimitsRoute: typeof LimitsRoute
   LoginRoute: typeof LoginRoute
   PapersRoute: typeof PapersRoute
   PortalRoute: typeof PortalRoute
@@ -307,7 +368,11 @@ export interface RootRouteChildren {
   SearchRoute: typeof SearchRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsRoute: typeof TermsRoute
+  WallRoute: typeof WallRoute
+  AfterCitizenshipRoute: typeof AfterCitizenshipRoute
   CountryCodeRoute: typeof CountryCodeRoute
+  ETokenRoute: typeof ETokenRoute
+  GoSlugRoute: typeof GoSlugRoute
   GoogleDriveRoute: typeof GoogleDriveRoute
   RCodeRoute: typeof RCodeRoute
   VacanciesIdRoute: typeof VacanciesIdRoute
@@ -358,6 +423,13 @@ declare module '@tanstack/react-router' {
       path: '/filings'
       fullPath: '/filings'
       preLoaderRoute: typeof FilingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/limits': {
+      id: '/limits'
+      path: '/limits'
+      fullPath: '/limits'
+      preLoaderRoute: typeof LimitsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -423,11 +495,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/wall': {
+      id: '/wall'
+      path: '/wall'
+      fullPath: '/wall'
+      preLoaderRoute: typeof WallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/after/$citizenship': {
+      id: '/after/$citizenship'
+      path: '/after/$citizenship'
+      fullPath: '/after/$citizenship'
+      preLoaderRoute: typeof AfterCitizenshipRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/country/$code': {
       id: '/country/$code'
       path: '/country/$code'
       fullPath: '/country/$code'
       preLoaderRoute: typeof CountryCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/e/$token': {
+      id: '/e/$token'
+      path: '/e/$token'
+      fullPath: '/e/$token'
+      preLoaderRoute: typeof ETokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/go/$slug': {
+      id: '/go/$slug'
+      path: '/go/$slug'
+      fullPath: '/go/$slug'
+      preLoaderRoute: typeof GoSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/google/drive': {
@@ -482,6 +582,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRoute,
   ContactRoute: ContactRoute,
   FilingsRoute: FilingsRoute,
+  LimitsRoute: LimitsRoute,
   LoginRoute: LoginRoute,
   PapersRoute: PapersRoute,
   PortalRoute: PortalRoute,
@@ -491,7 +592,11 @@ const rootRouteChildren: RootRouteChildren = {
   SearchRoute: SearchRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsRoute: TermsRoute,
+  WallRoute: WallRoute,
+  AfterCitizenshipRoute: AfterCitizenshipRoute,
   CountryCodeRoute: CountryCodeRoute,
+  ETokenRoute: ETokenRoute,
+  GoSlugRoute: GoSlugRoute,
   GoogleDriveRoute: GoogleDriveRoute,
   RCodeRoute: RCodeRoute,
   VacanciesIdRoute: VacanciesIdRoute,

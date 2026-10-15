@@ -36,6 +36,10 @@ import {
   adminUploadFinal,
   adminUploadProof,
   adminListMedia,
+  adminAskDocument,
+  adminEmployerLink,
+  adminSetCover,
+  listCovers,
   assignManagers,
   downloadDocument,
   exportOpenCases,
@@ -43,7 +47,8 @@ import {
   reviewDocument,
   type AppRow,
 } from "@/lib/vanguard/api";
-import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, normalizeScheme, openedBeforeInvoice2Rule, stageIndex, tranches, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
+import { CITIZENSHIPS, DOC_CATEGORIES, INVOICE2_STAGE, PROCESS_STAGES, normalizeScheme, openedBeforeInvoice2Rule, parseQuestionnaire, stageIndex, tranches, type DocCategory, type Processing, type Vacancy, type VisaProduct } from "@/lib/vanguard/domain";
+import { clashingPhones, docsForCountry, phoneKey } from "@/lib/vanguard/round";
 import { useI18n, type CopyKey, type Lang } from "@/lib/vanguard/i18n";
 import { ADMIN_UK } from "@/lib/vanguard/admin-uk";
 import { stepField, writeStep, type Slot } from "./media";
@@ -118,6 +123,7 @@ function TodayStrip({
       {today.map((a) => (
         <button key={a.id} type="button" className="btn w-fit" onClick={() => onOpen(a.id)}>
           {a.id} · {lastNameOf(a.questionnaire) || a.clientEmail} · {a.country}
+          {parseQuestionnaire(a.questionnaire).contactHour ? ` · ${parseQuestionnaire(a.questionnaire).contactHour}:00` : ""}
           {isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt) || isOverdue(a.invoice2DueAt) ? ` · ${overdue}` : ""}
         </button>
       ))}
@@ -307,7 +313,11 @@ const QUESTION_LABELS: [string, string][] = [
   ["criminalRecord", "Судимість"],
   ["phone", "Телефон"],
   ["previousVisa", "Попередня віза"],
+  ["visaRefusal", "Відмова"],
+  ["passportExpiry", "Паспорт до"],
   ["travelWithFamily", "Їде з родиною"],
+  ["children", "Діти"],
+  ["contactHour", "Писати після"],
 ];
 
 function QuestionnaireBlock({ raw }: { raw: string }) {
@@ -321,6 +331,10 @@ function QuestionnaireBlock({ raw }: { raw: string }) {
   const rows = QUESTION_LABELS.map(([key, label]) => {
     const value = data[key];
     if (key === "middleName" && data.middleNameAbsent === true) return [label, "немає"] as const;
+    if (key === "children" && Array.isArray(value)) {
+      const line = value.map((item) => (item && typeof item === "object" ? `${(item as { name?: string }).name || ""} ${(item as { age?: string }).age || ""}`.trim() : "")).filter(Boolean).join(", ");
+      return line ? ([label, line] as const) : null;
+    }
     if (value === undefined || value === null || value === "") return null;
     return [label, String(value)] as const;
   }).filter((row): row is readonly [string, string] => Boolean(row));
@@ -516,6 +530,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [caseQuery, setCaseQuery] = useState("");
   const [casePage, setCasePage] = useState(1);
   const [hangOnly, setHangOnly] = useState(false);
+  const [coverFor, setCoverFor] = useState("");
+  const [coverWho, setCoverWho] = useState("");
+  const [coverIds, setCoverIds] = useState<Set<string>>(new Set());
+  const [deskNote, setDeskNote] = useState("");
   const [rejectCode, setRejectCode] = useState("other");
   const [focusUser, setFocusUser] = useState("");
   const [appsReady, setAppsReady] = useState(false);
@@ -608,6 +626,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           setAppsReady(true);
           setErr(e instanceof Error ? e.message : "Error");
         });
+      listCovers().then((rows) => setCoverIds(new Set(rows.map((row) => row.managerId)))).catch(() => undefined);
     }
     if (current === "team" && (role === "ADMIN" || role === "MANAGER")) void adminAllTeam().then(setTeam);
     if (current === "audit") void adminAudit().then(setAudit);
@@ -765,11 +784,12 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               <p className="mt-2 text-mist">{t("admin_live")}</p>
             </button>
             <TodayStrip
-              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me)}
+              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me || coverIds.has(a.assignedManagerId))}
               label={t("admin_today")}
               overdue={t("admin_overdue")}
               onOpen={(caseId) => go("overview", caseId)}
             />
+            <a href="/wall" className="btn w-fit sm:col-span-3">{t("wall_open")}</a>
             {"funnel" in overview && overview.funnel ? (
               <article className="glass p-5 sm:col-span-3">
                 <p className="kicker">{t("funnel_t")}</p>
@@ -932,7 +952,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
           <div className="mt-8 grid gap-4">
             <>
             <TodayStrip
-              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me)}
+              rows={apps.filter((a) => role !== "MANAGER" || a.assignedManagerId === me || coverIds.has(a.assignedManagerId))}
               label={t("admin_today")}
               overdue={t("admin_overdue")}
               onOpen={(caseId) => go("applications", caseId)}
@@ -1005,6 +1025,36 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               </button>
               {exportNote ? <span className="text-sm text-mist">{exportNote}</span> : null}
               {role === "MANAGER" ? <p className="text-sm text-mist">{t("admin_only_mine")}</p> : null}
+              <form
+                className="flex flex-wrap items-end gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void adminSetCover({ data: { managerId: role === "ADMIN" ? (coverWho || me) : me, coverId: coverFor } })
+                    .then(() => listCovers().then((rows) => setCoverIds(new Set(rows.map((row) => row.managerId)))))
+                    .then(() => setDeskNote(coverFor ? t("cover_on") : t("cover_clear")))
+                    .catch(() => setDeskNote(t("admin_unsaved")));
+                }}
+              >
+                <label className="grid gap-1 text-xs text-mist">
+                  {t("cover_title")}
+                  {role === "ADMIN" ? (
+                    <select className="field" value={coverWho} onChange={(e) => setCoverWho(e.target.value)}>
+                      <option value="">{me}</option>
+                      {overview?.users.filter((u) => u.role === "ADMIN" || u.role === "MANAGER").map((u) => (
+                        <option key={u.userId} value={u.userId}>{u.email || u.fullName}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <select className="field" value={coverFor} onChange={(e) => setCoverFor(e.target.value)}>
+                    <option value="">{t("cover_clear")}</option>
+                    {overview?.users.filter((u) => (u.role === "ADMIN" || u.role === "MANAGER") && u.userId !== me).map((u) => (
+                      <option key={u.userId} value={u.userId}>{u.email || u.fullName}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className="btn" type="submit">{coverFor ? t("cover_set") : t("cover_clear")}</button>
+              </form>
+              {deskNote ? <p className="text-sm text-mist">{deskNote}</p> : null}
             </div>
             </div>
             <p className="text-sm text-mist">{t("admin_pick_hint")}</p>
@@ -1101,7 +1151,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
             </form>
             {(() => {
               const filtered = apps
-                .filter((a) => role !== "MANAGER" || a.assignedManagerId === me)
+                .filter((a) => role !== "MANAGER" || a.assignedManagerId === me || coverIds.has(a.assignedManagerId))
                 .filter((a) => !qCountry || a.country === qCountry)
                 .filter((a) => !qStage || String(a.stage) === qStage)
                 .filter((a) => !overdueOnly || isOverdue(a.cancelDeadlineAt) || isOverdue(a.docDeadlineAt))
@@ -1114,10 +1164,10 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               const pages = Math.max(1, Math.ceil(filtered.length / 15));
               const currentPage = Math.min(casePage, pages);
               const slice = filtered.slice((currentPage - 1) * 15, currentPage * 15);
-              const phones = new Map<string, number>();
+              const clash = clashingPhones(apps.map((row) => ({ status: row.status, phone: row.clientPhone || phoneOf(row.questionnaire), lastName: lastNameOf(row.questionnaire) })));
+              const films = new Map<string, number>();
               for (const row of apps) {
-                const digits = (row.clientPhone || phoneOf(row.questionnaire)).replace(/\D/g, "");
-                if (digits.length >= 8) phones.set(digits, (phones.get(digits) || 0) + 1);
+                if (row.status === "OPEN" && row.campaign) films.set(row.campaign, (films.get(row.campaign) || 0) + 1);
               }
               const hanging = apps.filter((row) => moneyHanging(row));
               return (
@@ -1133,6 +1183,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       ))}
                     </div>
                   ) : null}
+                  {films.size ? <p className="text-sm text-mist">{t("films_title")}: {[...films.entries()].map(([name, count]) => `${name} ${count}`).join(" · ")}</p> : null}
                   <div className="sheet-wrap min-w-0 max-w-full">
                     <table className="sheet w-full text-left text-sm md:min-w-[880px]">
                       <thead className="text-mist">
@@ -1151,8 +1202,9 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       </thead>
                       <tbody>
                         {slice.map((a) => {
-                          const digits = (a.clientPhone || phoneOf(a.questionnaire)).replace(/\D/g, "");
-                          const twin = digits.length >= 8 && (phones.get(digits) || 0) > 1;
+                          const digits = phoneKey(a.clientPhone || phoneOf(a.questionnaire));
+                          const twin = clash.has(digits);
+                          const hour = parseQuestionnaire(a.questionnaire).contactHour;
                           return (
                           <tr key={a.id} className="border-t border-white/10">
                             <td className="py-3" data-label="">
@@ -1172,6 +1224,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               {a.clientEmail || "—"}
                               {lastNameOf(a.questionnaire) ? <span className="mt-1 block text-xs text-mist">{lastNameOf(a.questionnaire)}</span> : null}
                               {twin ? <span className="mt-1 block text-xs">{t("phone_same")}</span> : null}
+                              {hour ? <span className="mt-1 block text-xs text-mist">{t("write_after")} {hour}:00</span> : null}
                               {a.accountClosed ? <span className="mt-1 block text-xs text-mist">{t("account_closed")}</span> : null}
                             </td>
                             <td data-label={t("admin_country")}>{a.country}</td>
@@ -1261,7 +1314,38 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       {t("agent_comm")} · {t("agent_pay_paid")}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      void adminEmployerLink({ data: detail.app.id })
+                        .then((row) => {
+                          const url = `${window.location.origin}/e/${row.token}`;
+                          setDeskNote(url);
+                          void navigator.clipboard.writeText(url).catch(() => undefined);
+                        })
+                        .catch(() => setDeskNote(t("admin_unsaved")))
+                    }
+                  >
+                    {t("employer_open")}
+                  </button>
+                  {docsForCountry(detail.app.country).filter((cat) => cat !== "OTHER").map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        void adminAskDocument({ data: { id: detail.app.id, category: cat } })
+                          .then(() => setDeskNote(t("ask_sent")))
+                          .catch(() => setDeskNote(t("admin_unsaved")))
+                      }
+                    >
+                      {t("ask_doc")} · {t(`cat_${cat}`)}
+                    </button>
+                  ))}
                 </div>
+                {deskNote ? <p className="mt-2 break-all text-sm text-mist">{deskNote}</p> : null}
+                {detail.app.campaign ? <p className="mt-2 text-sm text-mist">{t("campaign_from")}: {detail.app.campaign}</p> : null}
                 <div className="mt-3 grid max-w-md gap-2">
                   <select className="field" value={rejectCode} onChange={(e) => setRejectCode(e.target.value)}>
                     <option value="blur">{t("reject_blur")}</option>
@@ -1499,6 +1583,16 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                     />
                   </div>
                   <div className="flex min-w-0 flex-wrap items-end gap-2">
+                    <select
+                      className="field max-w-[10rem]"
+                      value={v.housingKind || ""}
+                      onChange={(e) => void adminSaveVacancy({ data: { ...v, housingKind: e.target.value } }).then(reload).catch(() => setErr(t("admin_unsaved")))}
+                    >
+                      <option value="">{t("field_housing")}</option>
+                      <option value="room">{t("house_room")}</option>
+                      <option value="hostel">{t("house_hostel")}</option>
+                      <option value="none">{t("house_none")}</option>
+                    </select>
                     <label className="flex items-center gap-1 text-xs">
                       <input
                         type="checkbox"
@@ -1670,6 +1764,12 @@ function VacancyForm({
       </select>
       <input className="field" placeholder={t("salary")} value={v.salaryNet} onChange={(e) => setV({ ...v, salaryNet: e.target.value })} />
       <input className="field" placeholder={t("housing")} value={v.accommodation} onChange={(e) => setV({ ...v, accommodation: e.target.value })} />
+      <select className="field" value={v.housingKind || ""} onChange={(e) => setV({ ...v, housingKind: e.target.value })}>
+        <option value="">{t("field_housing")}</option>
+        <option value="room">{t("house_room")}</option>
+        <option value="hostel">{t("house_hostel")}</option>
+        <option value="none">{t("house_none")}</option>
+      </select>
       <input className="field" placeholder={t("hours")} value={v.workingHours} onChange={(e) => setV({ ...v, workingHours: e.target.value })} />
       <textarea className="field md:col-span-2" placeholder={t("description")} value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} />
       <textarea className="field md:col-span-2" placeholder={t("field_requirements")} value={v.requirements} onChange={(e) => setV({ ...v, requirements: e.target.value })} />

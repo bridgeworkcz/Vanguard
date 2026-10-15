@@ -1,6 +1,7 @@
 import { PDFDocument, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { shareLabel, tranches, type FeeScheme, type Questionnaire } from "./domain";
+import { caseLoginPath } from "./round";
 
 type Settings = Record<string, string>;
 
@@ -425,6 +426,27 @@ function euroWords(n: number, cs: boolean): string {
   return cs ? `${cz(whole)} eur` : `${en(whole)} euro`;
 }
 
+async function drawQr(sheet: Sheet, fileId: string) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://www.vanguardmobility.site";
+  const url = `${origin}${caseLoginPath(fileId)}`;
+  const QR = await import("qrcode");
+  const dataUrl = await QR.toDataURL(url, {
+    margin: 0,
+    width: 180,
+    errorCorrectionLevel: "M",
+    color: { dark: "#07080a", light: "#f4f5f7" },
+  });
+  const png = await sheet.pdf.embedPng(dataUrl.split(",")[1] || dataUrl);
+  const size = 72;
+  sheet.need(size + 8);
+  const page = sheet.page();
+  page.drawImage(png, { x: L, y: sheet.y - size, width: size, height: size });
+  page.drawText("Sign in to open this file", { x: L + size + 12, y: sheet.y - 28, size: 10, font: sheet.bold, color: INK });
+  const line = fit(url, sheet.font, 8, COL - size - 20);
+  page.drawText(line, { x: L + size + 12, y: sheet.y - 44, size: 8, font: sheet.font, color: MUTED });
+  sheet.y -= size + 8;
+}
+
 export async function buildInvoice(opts: {
   lang: "en" | "cs" | "ur";
   tranche: 1 | 2 | 3;
@@ -539,9 +561,44 @@ export async function buildInvoice(opts: {
     9,
   );
   sheet.gap(8);
+  await drawQr(sheet, opts.fileId);
   sheet.seal();
   sheet.close();
   return save(await sheet.pdf.save(), `${opts.fileId}-invoice-${opts.tranche}.pdf`, Boolean(opts.hold));
+}
+
+export async function buildAgentStatement(opts: {
+  settings: Settings;
+  month: string;
+  agent: string;
+  rate: number;
+  total: number;
+  rows: { id: string; country: string; fee: number; commission: string; opened: string }[];
+}) {
+  const sheet = await open(opts.settings, false);
+  const monthRows = opts.rows.filter((row) => (row.opened || "").slice(0, 7) === opts.month);
+  sheet.heading("MONTH SHEET", [
+    `Month\t${opts.month}`,
+    `Agent\t${opts.agent}`,
+    `Rate\t${opts.rate}%`,
+  ]);
+  sheet.write("This is the office mark for the month. It is not an invoice and it is not a payment order.", 10, sheet.font);
+  sheet.gap(8);
+  sheet.table(
+    ["File", "Country", "Opened", "Fee", "Commission"],
+    monthRows.length
+      ? monthRows.map((row) => [row.id, row.country, (row.opened || "").slice(0, 10), `${row.fee} EUR`, row.commission])
+      : [["—", "—", "—", "—", "No files this month"]],
+    [120, 110, 88, 82, 103],
+    -1,
+  );
+  sheet.dueBox("Marked this month", `${Math.round(opts.total)} EUR`);
+  sheet.write("Paid: the office has marked the commission. Due: the file is accepted and the mark is still open. Waiting: the file is not accepted yet.", 9);
+  sheet.gap(6);
+  sheet.write("Vanguard Global Mobility · the same paper as the invoice. The fee on each line is the client's fee, not the commission.", 8);
+  sheet.seal();
+  sheet.close();
+  return save(await sheet.pdf.save(), `vanguard-${opts.month}.pdf`, true);
 }
 
 const CONTRACT_EN: [string, string][] = [
@@ -656,6 +713,7 @@ export async function buildContract(opts: {
     sheet.gap(7);
   }
   sheet.gap(2);
+  await drawQr(sheet, opts.fileId);
   sheet.seal();
   sheet.close();
   return save(await sheet.pdf.save(), `${opts.fileId}-agreement.pdf`, Boolean(opts.hold));
@@ -789,3 +847,54 @@ export async function downloadStamped(dataUrl: string, fileName: string, mime: s
   a.download = fileName;
   a.click();
 }
+
+export async function buildCommission(opts: {
+  settings: Settings;
+  month: string;
+  code: string;
+  email: string;
+  rate: number;
+  commission: number;
+  cases: { id: string; country: string; total: number; pay: string; commission: string; createdAt: string }[];
+}) {
+  const sheet = await open(opts.settings, false);
+  const monthRows = opts.cases.filter((row) => (row.createdAt || "").slice(0, 7) === opts.month);
+  const paid = monthRows.filter((row) => row.commission === "paid");
+  const due = monthRows.filter((row) => row.commission === "due");
+  const fees = monthRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  sheet.heading("COMMISSION", [
+    `Month\t${opts.month}`,
+    `Code\t${opts.code}`,
+    `Rate\t${opts.rate}%`,
+  ]);
+  sheet.boxes(
+    "Agent",
+    [opts.email || "—", opts.code],
+    "This month",
+    [
+      `${monthRows.length} files`,
+      `Fees ${money(fees)}`,
+      `Commission marked ${money(opts.commission)}`,
+      `${paid.length} paid · ${due.length} due`,
+    ],
+  );
+  sheet.write("Paid means the office has marked the commission paid. Due means it is owed and not yet marked. Wait means the file has not reached that point.", 9, sheet.font, MUTED);
+  sheet.gap(8);
+  const body = monthRows.length
+    ? monthRows.map((row) => [
+        row.id,
+        row.country,
+        money(row.total),
+        row.pay,
+        row.commission,
+      ])
+    : [["—", "No files opened this month", "", "", ""]];
+  sheet.table(["File", "Country", "Fee", "Client", "Commission"], body, [110, 120, 90, 80, 103]);
+  sheet.gap(8);
+  sheet.write("This sheet is the month's record. It is not an invoice to the client and it does not change a file.", 9);
+  sheet.gap(6);
+  sheet.seal();
+  sheet.close();
+  return save(await sheet.pdf.save(), `commission-${opts.month}.pdf`);
+}
+

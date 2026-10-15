@@ -14,6 +14,7 @@ import {
   postMessage,
   resubmitApplication,
   saveQuestionnaire,
+  savePayAcks,
   takeInvoiceNumber,
   noteFunnel,
   openSpouseCase,
@@ -25,10 +26,15 @@ import {
 import {
   CALLING,
   CITIZENSHIPS,
+  CONTACT_HOURS,
   DOC_CATEGORIES,
   EMPTY_QUESTIONNAIRE,
+  acksDone,
+  childrenOk,
   clientName,
+  countrySlug,
   invoice2Unlocked,
+  passportShort,
   parseQuestionnaire,
   questionnaireError,
   sameCountry,
@@ -42,7 +48,8 @@ import {
 import { useI18n, PUBLIC_LANGS, type CopyKey } from "@/lib/vanguard/i18n";
 import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, hoursUntil, stageTone } from "@/lib/vanguard/ops";
-import { buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
+import { buildAgentStatement, buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
+import { docsForCountry } from "@/lib/vanguard/round";
 import { DocScreen } from "./doc-view";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
@@ -165,7 +172,7 @@ function fileGuide(app: AppRow, docs: { category: string; status: string }[], t:
   const accepted = papers.filter((doc) => doc.status === "APPROVED").length;
   const rejected = papers.some((doc) => doc.status === "REJECTED");
   const proof = docs.some((doc) => doc.category === "PAYMENT_PROOF");
-  const needed = DOC_CATEGORIES.filter((cat) => cat !== "PAYMENT_PROOF" && cat !== "FINAL" && cat !== "OTHER");
+  const needed = docsForCountry(app.country).filter((cat) => cat !== "OTHER");
   const missing = needed.filter((cat) => !papers.some((doc) => doc.category === cat)).map((cat) => t(`cat_${cat}`));
   if (app.status === "ISSUED") return { done: t("guide_done_issued"), miss: t("guide_none"), when: t("guide_when_issued") };
   if (app.status === "CANCELLED" || app.status === "REJECTED") {
@@ -318,6 +325,8 @@ export function PortalPage({ id }: { id: string }) {
   const [qStep, setQStep] = useState(0);
   const [editing, setEditing] = useState(false);
   const [shot, setShot] = useState<{ url: string; file: File } | null>(null);
+  const [frame, setFrame] = useState<{ url: string; file: File } | null>(null);
+  const [acks, setAcks] = useState({ room: false, night: false, fee: false, country: false });
   const [seeSum, setSeeSum] = useState(false);
   const [seeDate, setSeeDate] = useState(false);
   const [seePayee, setSeePayee] = useState(false);
@@ -342,6 +351,7 @@ export function PortalPage({ id }: { id: string }) {
     } else {
       setQ(parsed);
     }
+    setAcks(parsed.acks);
   }
 
   useEffect(() => {
@@ -395,8 +405,8 @@ export function PortalPage({ id }: { id: string }) {
       return;
     }
     sessionStorage.removeItem("vg-intent");
-    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string; lang?: string };
-    createApplication({ data: { ...intent, lang: intent.lang || lang } })
+    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string; lang?: string; record?: string; refusal?: string; passportExpiry?: string; campaign?: string };
+    createApplication({ data: { ...intent, lang: intent.lang || lang, campaign: intent.campaign || sessionStorage.getItem("vg-campaign") || "" } })
       .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
   }, [deskId]);
@@ -442,9 +452,15 @@ export function PortalPage({ id }: { id: string }) {
       if (code && !digits.startsWith(code)) return "phone_code";
     }
     if (step === 5 && q.criminalRecord !== "yes" && q.criminalRecord !== "no") return "record";
+    if (step === 5 && q.criminalRecord === "yes") return "gate_record";
     if (step === 6 && q.previousVisa !== "yes" && q.previousVisa !== "no") return "visa";
-    if (step === 7 && q.travelWithFamily !== "alone" && q.travelWithFamily !== "family") return "family";
-    if (step >= 8) return questionnaireError(q);
+    if (step === 7 && q.visaRefusal !== "yes" && q.visaRefusal !== "no") return "refusal";
+    if (step === 7 && q.visaRefusal === "yes") return "gate_refusal";
+    if (step === 8 && (!q.passportExpiry || passportShort(q.passportExpiry))) return "passport";
+    if (step === 9 && q.travelWithFamily !== "alone" && q.travelWithFamily !== "family") return "family";
+    if (step === 9 && q.travelWithFamily === "family" && !childrenOk(q)) return "child";
+    if (step === 10 && !(CONTACT_HOURS as readonly string[]).includes(q.contactHour)) return "hour";
+    if (step >= 11) return questionnaireError(q);
     return null;
   }
 
@@ -462,6 +478,7 @@ export function PortalPage({ id }: { id: string }) {
   const parts = app ? tranches(app.totalCost, normalizeScheme(app.feeScheme)) : null;
   const scheme = normalizeScheme(app?.feeScheme);
   const proof = detail?.documents.find((d) => d.category === "PAYMENT_PROOF");
+  const papers = app ? docsForCountry(app.country) : [];
   const thirdPaid =
     app?.status === "ISSUED" ||
     Boolean(
@@ -550,6 +567,14 @@ export function PortalPage({ id }: { id: string }) {
         setDocNote(t("pass_pages"));
         return;
       }
+    }
+    if (cat === "PHOTO" && (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) {
+      const url = URL.createObjectURL(next);
+      setFrame((cur) => {
+        if (cur) URL.revokeObjectURL(cur.url);
+        return { url, file: next };
+      });
+      return;
     }
     if (cat === "PASSPORT" && (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) {
       const url = URL.createObjectURL(next);
@@ -736,6 +761,32 @@ export function PortalPage({ id }: { id: string }) {
             >
               {t("agent_csv")}
             </button>
+            <button
+              type="button"
+              className="btn w-fit"
+              onClick={() => {
+                if (!site) return;
+                const monthRows = book.cases.filter((row) => (row.createdAt || "").slice(0, 7) === book.month);
+                void buildAgentStatement({
+                  settings: site.settings,
+                  month: book.month,
+                  agent: book.code,
+                  rate: book.rate,
+                  total: book.commission,
+                  rows: monthRows.map((row) => ({
+                    id: row.id,
+                    country: row.country,
+                    fee: row.total,
+                    commission: row.commission === "paid" ? "Paid" : row.commission === "due" ? "Due" : "Waiting",
+                    opened: row.createdAt || "",
+                  })),
+                }).then((url) => {
+                  if (url) showPreview({ url, name: `vanguard-${book.month}.pdf` });
+                });
+              }}
+            >
+              {t("agent_pdf")}
+            </button>
             <div className="sheet-wrap">
               <table className="sheet w-full min-w-[640px] text-left text-sm">
                 <thead className="text-mist">
@@ -890,6 +941,7 @@ export function PortalPage({ id }: { id: string }) {
                   {t("resubmit")}
                 </button>
               ) : null}
+              {app.status === "REJECTED" ? <p className="mt-2 text-sm text-mist">{t("resubmit_note")}</p> : null}
               {parts ? (
                 <p className="mt-3 text-sm">
                   {t("pay_left")} {app.stage >= 4 ? parts.first + parts.second : app.stage >= 3 ? parts.first : 0} EUR · {t("pay_still")}{" "}
@@ -919,15 +971,15 @@ export function PortalPage({ id }: { id: string }) {
                     return;
                   }
                   setMsg("");
-                  if (qStep < 8) {
+                  if (qStep < 11) {
                     setQStep(qStep + 1);
                     return;
                   }
                   void saveQ();
                 }}
               >
-                <p className="text-xs uppercase tracking-widest text-mist">{qStep + 1} / 9</p>
-                <h3 className="display text-3xl">{qStep === 8 ? t("q_review") : t("q_title")}</h3>
+                <p className="text-xs uppercase tracking-widest text-mist">{qStep + 1} / 12</p>
+                <h3 className="display text-3xl">{qStep === 11 ? t("q_review") : t("q_title")}</h3>
                 {qStep === 0 ? (
                   <div className="grid gap-3">
                     <input className="field" placeholder={t("q_first")} value={q.firstName} onChange={(e) => setQ({ ...q, firstName: e.target.value })} />
@@ -989,12 +1041,49 @@ export function PortalPage({ id }: { id: string }) {
                 ) : null}
                 {qStep === 7 ? (
                   <fieldset className="grid gap-2 text-sm">
-                    <legend>{t("q_family")}</legend>
-                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "alone"} onChange={() => setQ({ ...q, travelWithFamily: "alone" })} />{t("q_alone")}</label>
-                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "family"} onChange={() => setQ({ ...q, travelWithFamily: "family" })} />{t("q_with")}</label>
+                    <legend>{t("q_refusal")}</legend>
+                    <label className="flex gap-2"><input type="radio" name="ref" checked={q.visaRefusal === "no"} onChange={() => setQ({ ...q, visaRefusal: "no" })} />{t("q_no")}</label>
+                    <label className="flex gap-2"><input type="radio" name="ref" checked={q.visaRefusal === "yes"} onChange={() => setQ({ ...q, visaRefusal: "yes" })} />{t("q_yes")}</label>
                   </fieldset>
                 ) : null}
                 {qStep === 8 ? (
+                  <label className="grid gap-1 text-sm text-mist">
+                    {t("q_passport")}
+                    <input className="field" type="date" value={q.passportExpiry} onChange={(e) => setQ({ ...q, passportExpiry: e.target.value })} />
+                    <span>{t("q_passport_hint")}</span>
+                  </label>
+                ) : null}
+                {qStep === 9 ? (
+                  <fieldset className="grid gap-2 text-sm">
+                    <legend>{t("q_family")}</legend>
+                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "alone"} onChange={() => setQ({ ...q, travelWithFamily: "alone", children: [] })} />{t("q_alone")}</label>
+                    <label className="flex gap-2"><input type="radio" name="fam" checked={q.travelWithFamily === "family"} onChange={() => setQ({ ...q, travelWithFamily: "family", children: q.children.length ? q.children : [{ name: "", age: "" }] })} />{t("q_with")}</label>
+                    {q.travelWithFamily === "family" ? (
+                      <div className="grid gap-2">
+                        {q.children.map((child, index) => (
+                          <div key={index} className="grid grid-cols-[1fr_5rem] gap-2">
+                            <input className="field" placeholder={t("q_child_name")} value={child.name} onChange={(e) => setQ({ ...q, children: q.children.map((item, i) => i === index ? { ...item, name: e.target.value } : item) })} />
+                            <input className="field" inputMode="numeric" placeholder={t("q_child_age")} value={child.age} onChange={(e) => setQ({ ...q, children: q.children.map((item, i) => i === index ? { ...item, age: e.target.value.replace(/\D/g, "").slice(0, 2) } : item) })} />
+                          </div>
+                        ))}
+                        <button type="button" className="btn w-fit" onClick={() => setQ({ ...q, children: [...q.children, { name: "", age: "" }] })}>{t("q_child_add")}</button>
+                      </div>
+                    ) : null}
+                  </fieldset>
+                ) : null}
+                {qStep === 10 ? (
+                  <label className="grid gap-1 text-sm text-mist">
+                    {t("q_hour")}
+                    <select className="field" value={q.contactHour} onChange={(e) => setQ({ ...q, contactHour: e.target.value })}>
+                      <option value="" />
+                      {CONTACT_HOURS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}:00</option>
+                      ))}
+                    </select>
+                    <span>{t("q_hour_hint")}</span>
+                  </label>
+                ) : null}
+                {qStep === 11 ? (
                   <ul className="grid gap-2 text-sm">
                     <li>{q.firstName} {q.middleNameAbsent ? "" : q.middleName} {q.lastName}</li>
                     <li>{q.birthDate}</li>
@@ -1003,7 +1092,10 @@ export function PortalPage({ id }: { id: string }) {
                     <li>{q.phone}</li>
                     <li>{q.criminalRecord}</li>
                     <li>{q.previousVisa}</li>
-                    <li>{q.travelWithFamily}</li>
+                    <li>{q.visaRefusal}</li>
+                    <li>{q.passportExpiry}</li>
+                    <li>{q.travelWithFamily}{q.children.length ? ` · ${q.children.map((child) => `${child.name} ${child.age}`).join(", ")}` : ""}</li>
+                    <li>{q.contactHour ? `${q.contactHour}:00` : ""}</li>
                   </ul>
                 ) : null}
                 {qErrKey ? <p className="text-metal">{t(qErrKey)}</p> : null}
@@ -1011,7 +1103,7 @@ export function PortalPage({ id }: { id: string }) {
                   {qStep > 0 ? (
                     <button type="button" className="btn" onClick={() => { setMsg(""); setQStep(qStep - 1); }}>{t("q_back")}</button>
                   ) : null}
-                  <button className="btn-solid w-fit" type="submit">{qStep === 8 ? t("q_save") : t("q_next")}</button>
+                  <button className="btn-solid w-fit" type="submit">{qStep === 11 ? t("q_save") : t("q_next")}</button>
                 </div>
               </form>
             ) : null}
@@ -1027,7 +1119,10 @@ export function PortalPage({ id }: { id: string }) {
                   [q.phone, "", 4],
                   [q.criminalRecord, "", 5],
                   [q.previousVisa, "", 6],
-                  [q.travelWithFamily, "", 7],
+                  [q.visaRefusal, "", 7],
+                  [q.passportExpiry, "", 8],
+                  [q.travelWithFamily, "", 9],
+                  [q.contactHour ? `${q.contactHour}:00` : "", "", 10],
                 ].map((row) => (
                   <p key={String(row[2])} className="flex items-center justify-between gap-3 border-t border-white/10 py-2 text-sm">
                     <span>{[row[0], row[1]].filter(Boolean).join(" ")}</span>
@@ -1041,6 +1136,7 @@ export function PortalPage({ id }: { id: string }) {
               <div className="glass p-5">
                 <p className="kicker">{t("status_issued")}</p>
                 <p className="mt-3 text-lg">{t("issued_keep")}</p>
+                <Link to="/after/$citizenship" params={{ citizenship: countrySlug(app.citizenship || "georgia") }} className="btn mt-4 inline-flex">{t("after_nav")}</Link>
               </div>
             ) : null}
             {parts && app.status === "OPEN" && app.stage >= 2 ? (
@@ -1132,6 +1228,26 @@ export function PortalPage({ id }: { id: string }) {
             {app.status === "OPEN" && (app.stage === 2 || (app.stage >= 4 && !thirdPaid)) ? (
               <label className={`grid gap-2 rounded-2xl p-4 text-sm ${proof && app.stage === 2 ? "" : "step-live"}`}>
                 {t("pay_i_paid")}
+                <span className="text-mist">{t("ack_need")}</span>
+                {([
+                  ["room", "ack_room"],
+                  ["night", "ack_night"],
+                  ["fee", "ack_fee"],
+                  ["country", "ack_country"],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={acks[key]}
+                      onChange={(e) => {
+                        const next = { ...acks, [key]: e.target.checked };
+                        setAcks(next);
+                        if (app) void savePayAcks({ data: { id: app.id, ...next } }).catch(() => undefined);
+                      }}
+                    />
+                    {t(label)}
+                  </label>
+                ))}
                 <span className="text-mist">{t("proof_help")}</span>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={seeSum} onChange={(e) => setSeeSum(e.target.checked)} />{t("proof_see_sum")}</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={seeDate} onChange={(e) => setSeeDate(e.target.checked)} />{t("proof_see_date")}</label>
@@ -1143,7 +1259,7 @@ export function PortalPage({ id }: { id: string }) {
                     type="file"
                     accept="image/*,application/pdf"
                     capture="environment"
-                    disabled={!seeSum || !seeDate || !seePayee}
+                    disabled={!acksDone({ acks }) || !seeSum || !seeDate || !seePayee}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       e.target.value = "";
@@ -1161,7 +1277,7 @@ export function PortalPage({ id }: { id: string }) {
                 {app.stage === 4 && !detail?.documents.some((d) => d.status === "REJECTED") ? null : proof || app.stage > 2 ? <p className="kicker mb-3">{t("hint_here")}</p> : null}
                 <h3 className="display text-3xl">{t("checklist_title")}</h3>
                 <ul className="mt-3 grid gap-2 text-sm">
-                  {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
+                  {papers.map((cat) => {
                     const files = [...(detail?.documents.filter((d) => d.category === cat) ?? [])].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
                     const latest = files[0];
                     const label = !latest ? t("checklist_miss") : latest.status === "REJECTED" ? t("checklist_no") : latest.status === "APPROVED" ? t("checklist_ok") : t("checklist_wait");
@@ -1207,8 +1323,23 @@ export function PortalPage({ id }: { id: string }) {
                     </div>
                   </div>
                 ) : null}
+                {frame ? (
+                  <div className="mt-4 grid gap-3">
+                    <div className="relative bg-black">
+                      <img src={frame.url} alt="" className="max-h-[70vh] w-full object-contain" />
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <div className="h-[72%] w-[42%] rounded-[50%] border-2 border-[#ff6a1a] shadow-[0_0_0_999px_rgba(9,9,9,0.55)]" />
+                      </div>
+                    </div>
+                    <p className="text-sm text-mist">{t("photo_frame")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn" onClick={() => { URL.revokeObjectURL(frame.url); setFrame(null); }}>{t("pass_retake")}</button>
+                      <button type="button" className="btn-solid" onClick={() => { setPendingDocs((cur) => ({ ...cur, PHOTO: frame.file })); URL.revokeObjectURL(frame.url); setFrame(null); }}>{t("photo_use")}</button>
+                    </div>
+                  </div>
+                ) : null}
                 <ul className="mt-4 grid gap-3">
-                  {DOC_CATEGORIES.filter((c) => c !== "PAYMENT_PROOF" && c !== "FINAL").map((cat) => {
+                  {papers.map((cat) => {
                     const files = [...(detail?.documents.filter((d) => d.category === cat) ?? [])].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
                     const newest = files[files.length - 1]?.id;
                     return (

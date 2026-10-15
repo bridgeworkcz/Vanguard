@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
-import { accountAuth, accountBackend } from "@/lib/vanguard/account";
+import { accountAuth, accountBackend, accountSession } from "@/lib/vanguard/account";
 import { completePasswordReset, requestPasswordReset } from "@/lib/vanguard/api";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { Shell, usePageMeta } from "@/components/vg/chrome";
@@ -15,6 +15,11 @@ export const Route = createFileRoute("/login")({
   }),
   component: LoginPage,
 });
+
+function portalAfter() {
+  const caseId = new URLSearchParams(window.location.search).get("case") || "";
+  return caseId ? `/portal?id=${encodeURIComponent(caseId)}` : "/portal";
+}
 
 function LoginPage() {
   const { t, lang } = useI18n();
@@ -41,6 +46,13 @@ function LoginPage() {
       setResetToken(token);
       setMode("reset");
     }
+    const caseId = new URLSearchParams(window.location.search).get("case") || "";
+    if (!caseId) return;
+    accountSession()
+      .then((user) => {
+        if (user) window.location.assign(`/portal?id=${encodeURIComponent(caseId)}`);
+      })
+      .catch(() => undefined);
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -76,7 +88,7 @@ function LoginPage() {
           setBusy(false);
           return;
         }
-        window.location.assign("/portal");
+        window.location.assign(portalAfter());
         return;
       }
       const account = await accountAuth({
@@ -107,7 +119,7 @@ function LoginPage() {
           if (token) sessionStorage.setItem("grok-auth.bearer-token", token);
         }
       }
-      window.location.assign("/portal");
+      window.location.assign(portalAfter());
     } catch (error) {
       const raw = error instanceof Error ? error.message : t("login_error");
       setErr(raw === "Expired" ? t("login_reset_bad") : raw === "Short" ? t("login_short") : softenError(raw, t("sheets_busy")));
@@ -122,6 +134,7 @@ function LoginPage() {
       <main className="mx-auto grid min-h-[70vh] max-w-md place-items-center px-4 py-16">
         <div className="glass w-full p-6">
           <p className="kicker">{t("login_kicker")}</p>
+          {new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("case") ? <p className="mt-3 text-sm text-mist">{t("login_case")}</p> : null}
           <h1 className="display mt-3 text-4xl">{title}</h1>
           {mode === "forgot" ? <p className="mt-3 text-sm text-mist">{t("login_reset_help")}</p> : null}
           <form className="mt-6 grid gap-3" onSubmit={(e) => void submit(e)}>

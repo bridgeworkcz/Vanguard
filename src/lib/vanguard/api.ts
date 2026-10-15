@@ -24,6 +24,9 @@ import {
   stageIndex,
   tranches,
   normalizeScheme,
+  openBlock,
+  acksDone,
+  passportShort,
   type DocCategory,
   type Processing,
   type ProcessStage,
@@ -35,7 +38,8 @@ import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerR
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { canCancel, citizenshipBlocked, kyivMonth, monthCommission, remindBand } from "./ops";
-import { copy } from "./i18n";
+import { askScript, docsForCountry, dueWithin, resolveCampaign } from "./round";
+import { copy, type CopyKey } from "./i18n";
 import { RESET_LINK, deliverMail } from "./mail";
 import crypto from "node:crypto";
 
@@ -220,6 +224,17 @@ async function requireStaff(sql: Sql, userId: string) {
   return p;
 }
 
+async function coveredManagers(sql: Sql, userId: string): Promise<Set<string>> {
+  const rows = await sql<{ managerId: string }>`select manager_id as "managerId" from manager_cover
+    where cover_id = ${userId} and until_at > now()`;
+  return new Set(rows.map((row) => row.managerId));
+}
+
+function managerMaySee(role: string, userId: string, assigned: string, cover: Set<string>) {
+  if (role !== "MANAGER") return true;
+  return assigned === userId || cover.has(assigned);
+}
+
 async function requireAdmin(sql: Sql, userId: string) {
   const p = await ctxProfile(sql, userId);
   if (p.role !== "ADMIN") throw new Error("Forbidden");
@@ -266,9 +281,16 @@ async function loadProducts(sql: Sql): Promise<VisaProduct[]> {
 async function loadVacancies(sql: Sql): Promise<Vacancy[]> {
   const rows = await sql<Vacancy>`select id, title, country, visa_product_id as "visaProductId", employer, salary_net as "salaryNet",
     accommodation, working_hours as "workingHours", description, requirements, quota, active,
-    coalesce(blocked_citizenships, '') as "blockedCitizenships"
+    coalesce(blocked_citizenships, '') as "blockedCitizenships",
+    coalesce(housing_kind, '') as "housingKind"
     from vacancies order by country, title`;
-  return rows.map((v) => ({ ...v, quota: Number(v.quota), active: Boolean(v.active), blockedCitizenships: v.blockedCitizenships || "" }));
+  return rows.map((v) => ({
+    ...v,
+    quota: Number(v.quota),
+    active: Boolean(v.active),
+    blockedCitizenships: v.blockedCitizenships || "",
+    housingKind: v.housingKind === "room" || v.housingKind === "hostel" || v.housingKind === "none" ? v.housingKind : "",
+  }));
 }
 
 export type AppRow = {
@@ -308,6 +330,7 @@ export type AppRow = {
   payReminded?: string;
   linkedTo?: string;
   commissionPaid?: boolean;
+  campaign?: string;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -324,7 +347,8 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     coalesce(a.fee_scheme, 'legacy30') as "feeScheme",
     a.invoice2_due_at::text as "invoice2DueAt",
     coalesce(a.pay_reminded, '') as "payReminded",
-    coalesce(a.linked_to, '') as "linkedTo"
+    coalesce(a.linked_to, '') as "linkedTo",
+    coalesce(a.campaign, '') as "campaign"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -712,7 +736,17 @@ export const getMyApplication = createServerFn({ method: "POST" })
     return { app, documents, messages, wallet, network };
   });
 
-type CreateInput = { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; lang?: string };
+type CreateInput = {
+  vacancyId: string;
+  citizenship: string;
+  processing: Processing;
+  agentCode?: string;
+  lang?: string;
+  record?: string;
+  refusal?: string;
+  passportExpiry?: string;
+  campaign?: string;
+};
 
 async function resolveReferrer(sql: Sql, code: string): Promise<string> {
   const trimmed = code.trim();
@@ -751,8 +785,14 @@ export const createApplication = createServerFn({ method: "POST" })
     processing: input?.processing,
     agentCode: clean(input?.agentCode, 120),
     lang: clean(input?.lang, 8),
+    record: clean(input?.record, 8),
+    refusal: clean(input?.refusal, 8),
+    passportExpiry: clean(input?.passportExpiry, 12),
+    campaign: clean(input?.campaign, 80),
   }))
   .handler(async ({ context, data }) => {
+    const block = openBlock({ criminalRecord: data.record, visaRefusal: data.refusal, passportExpiry: data.passportExpiry });
+    if (block) throw new Error(`Gate ${block}`);
     if (sheetsOn()) {
       const mod = await import("./sheet-backend");
       return mod.createApp(context.userId, data);
@@ -790,9 +830,17 @@ export const createApplication = createServerFn({ method: "POST" })
     const id = newId("VG");
     const total = applyPercent(priceFor(product.basePrice, data.processing), await cutForSql(sql, referrerUserId));
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
-    const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: data.citizenship };
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme)
-      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160')`;
+    const countries = products.map((item) => item.country);
+    const campaign = resolveCampaign(data.campaign || "", countries)?.slug || "";
+    const q: Questionnaire = {
+      ...parseQuestionnaire("{}"),
+      citizenship: data.citizenship,
+      criminalRecord: data.record === "yes" || data.record === "no" ? data.record : "",
+      visaRefusal: data.refusal === "yes" || data.refusal === "no" ? data.refusal : "",
+      passportExpiry: data.passportExpiry || "",
+    };
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, campaign)
+      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160', ${campaign})`;
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "APPLICATION_OPENED", id, vacancy.title);
     return { id };
@@ -892,7 +940,9 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
     if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
     const category = data.category;
     if (!DOC_CATEGORIES.includes(category) || category === "FINAL") throw new Error("Category");
+    if (category !== "PAYMENT_PROOF" && !docsForCountry(app.country).includes(category)) throw new Error("Category");
     if (category === "PAYMENT_PROOF" && app.stage !== 2 && app.stage < 4) throw new Error("Locked");
+    if (category === "PAYMENT_PROOF" && !acksDone(parseQuestionnaire(app.questionnaire))) throw new Error("Acks");
     const mime = normalizeUploadMime(data.mime, data.fileName);
     if (!ALLOWED_MIME.has(mime)) throw new Error("File type");
     if (!data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error(data.data?.length > MAX_DATA ? "File size" : "File type");
@@ -988,6 +1038,7 @@ export const adminListApplications = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     const profile = await requireStaff(sql, context.userId);
+    const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
     const rows = await sql<AppRow>`select a.id, a.user_id as "userId", a.client_email as "clientEmail", a.vacancy_id as "vacancyId",
       a.visa_product_id as "visaProductId", a.country, a.citizenship, a.processing, a.total_cost as "totalCost", a.currency,
       a.production_weeks as "productionWeeks", a.stage, a.status, a.process_stage as "processStage", a.questionnaire,
@@ -999,7 +1050,8 @@ export const adminListApplications = createServerFn({ method: "POST" })
       coalesce(a.referrer_user_id, '') as "referrerUserId",
       a.stage4_at::text as "stage4At",
       coalesce(a.fee_scheme, 'legacy30') as "feeScheme",
-      a.invoice2_due_at::text as "invoice2DueAt"
+      a.invoice2_due_at::text as "invoice2DueAt",
+      coalesce(a.campaign, '') as "campaign"
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
@@ -1015,7 +1067,7 @@ export const adminListApplications = createServerFn({ method: "POST" })
         };
       })
       .filter((r) => data.includeIncomplete || r.profileComplete || r.stage > 1)
-      .filter((r) => profile.role !== "MANAGER" || r.assignedManagerId === profile.userId);
+      .filter((r) => managerMaySee(profile.role, profile.userId, r.assignedManagerId, cover));
   });
 
 export const adminGetApplication = createServerFn({ method: "POST" })
@@ -1030,7 +1082,8 @@ export const adminGetApplication = createServerFn({ method: "POST" })
     const profile = await requireStaff(sql, context.userId);
     const app = await loadApp(sql, id);
     if (!app) throw new Error("Not found");
-    if (profile.role === "MANAGER" && app.assignedManagerId !== profile.userId) throw new Error("Forbidden");
+    const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
+    if (!managerMaySee(profile.role, profile.userId, app.assignedManagerId, cover)) throw new Error("Forbidden");
     return { app, documents: await docsFor(sql, id), messages: await messagesFor(sql, id) };
   });
 
@@ -1052,8 +1105,11 @@ export const adminSetStage = createServerFn({ method: "POST" })
     if (!app) throw new Error("Not found");
     if (data.action === "accept") {
       if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
+      const blocked = openBlock(parseQuestionnaire(app.questionnaire));
+      if (blocked) throw new Error(`Gate ${blocked}`);
       await sql`update applications set stage = 2, stage2_at = now(), cancel_deadline_at = now() + interval '5 days',
-        assigned_manager_id = ${profile.userId}, updated_at = now() where id = ${app.id}`;
+        assigned_manager_id = case when coalesce(assigned_manager_id, '') <> '' then assigned_manager_id else ${profile.userId} end,
+        updated_at = now() where id = ${app.id}`;
     } else if (data.action === "reject") {
       if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
       await sql`update applications set status = 'REJECTED', rejection_reason = ${data.reason}, updated_at = now() where id = ${app.id}`;
@@ -1231,12 +1287,15 @@ export const adminSaveVacancy = createServerFn({ method: "POST" })
         employer = ${clean(data.employer, 160)}, salary_net = ${clean(data.salaryNet, 160)}, accommodation = ${clean(data.accommodation, 300)},
         working_hours = ${clean(data.workingHours, 200)}, description = ${clean(data.description, 2000)}, requirements = ${clean(data.requirements, 2000)},
         quota = ${Math.max(0, Number(data.quota) || 0)}, active = ${Boolean(data.active)},
-        blocked_citizenships = ${clean(data.blockedCitizenships || "", 300)} where id = ${id}`;
+        blocked_citizenships = ${clean(data.blockedCitizenships || "", 300)},
+        housing_kind = ${data.housingKind === "room" || data.housingKind === "hostel" || data.housingKind === "none" ? data.housingKind : ""}
+        where id = ${id}`;
     } else {
-      await sql`insert into vacancies (id, title, country, visa_product_id, employer, salary_net, accommodation, working_hours, description, requirements, quota, active, blocked_citizenships)
+      await sql`insert into vacancies (id, title, country, visa_product_id, employer, salary_net, accommodation, working_hours, description, requirements, quota, active, blocked_citizenships, housing_kind)
         values (${id}, ${title}, ${clean(data.country, 80)}, ${clean(data.visaProductId, 40)}, ${clean(data.employer, 160)}, ${clean(data.salaryNet, 160)},
         ${clean(data.accommodation, 300)}, ${clean(data.workingHours, 200)}, ${clean(data.description, 2000)}, ${clean(data.requirements, 2000)},
-        ${Math.max(0, Number(data.quota) || 0)}, ${Boolean(data.active)}, ${clean(data.blockedCitizenships || "", 300)})`;
+        ${Math.max(0, Number(data.quota) || 0)}, ${Boolean(data.active)}, ${clean(data.blockedCitizenships || "", 300)},
+        ${data.housingKind === "room" || data.housingKind === "hostel" || data.housingKind === "none" ? data.housingKind : ""})`;
     }
     await audit(sql, context.userId, "VACANCY", id, title);
     return { id };
@@ -1885,7 +1944,11 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const person = await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
     if (!app || app.userId !== context.userId || app.status !== "REJECTED") throw new Error("Locked");
-    const citizenship = app.citizenship || parseQuestionnaire(app.questionnaire).citizenship;
+    const prior = parseQuestionnaire(app.questionnaire);
+    if (prior.criminalRecord === "yes") throw new Error("Gate record");
+    if (prior.visaRefusal === "yes") throw new Error("Gate refusal");
+    if (prior.passportExpiry && passportShort(prior.passportExpiry)) throw new Error("Gate passport");
+    const citizenship = app.citizenship || prior.citizenship;
     if (!citizenship) throw new Error("Citizenship");
     const vacancies = await loadVacancies(sql);
     const products = await loadProducts(sql);
@@ -1896,8 +1959,14 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
     if (dup[0]) return { id: dup[0].id };
     const next = newId("VG");
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme)
-      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire(app.questionnaire), citizenship })}, ${app.referrerUserId || ""}, ${normalizeScheme(app.feeScheme)})`;
+    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
+      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...prior, citizenship })}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
+    const papers = await sql<{ category: string; fileName: string; mime: string; data: string }>`select category, file_name as "fileName", mime, data
+      from documents where application_id = ${app.id} and category in ('PASSPORT', 'PHOTO')`;
+    for (const paper of papers) {
+      await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
+        values (${newId("DOC")}, ${next}, ${context.userId}, ${paper.category}, ${paper.fileName}, ${paper.mime}, ${paper.data}, 'UPLOADED')`;
+    }
     await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "RESUBMIT", next, id);
     return { id: next };
@@ -2000,4 +2069,193 @@ export const changeMyPassword = createServerFn({ method: "POST" })
     await sql`update office_users set password_hash = ${hashPassword(data.next)} where id = ${context.userId}`;
     return { ok: true };
   });
+
+let rateCache: { at: number; rates: Record<string, number> } | null = null;
+
+export const fxRates = createServerFn({ method: "GET" }).handler(async () => {
+  if (rateCache && Date.now() - rateCache.at < 6 * 3600 * 1000) return rateCache.rates;
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/EUR", { signal: AbortSignal.timeout(4000) });
+    const body = (await res.json()) as { result?: string; rates?: Record<string, number> };
+    if (body.result !== "success" || !body.rates) return rateCache?.rates ?? {};
+    rateCache = { at: Date.now(), rates: body.rates };
+    return body.rates;
+  } catch {
+    return rateCache?.rates ?? {};
+  }
+});
+
+export const savePayAcks = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id?: string; room?: boolean; night?: boolean; fee?: boolean; country?: boolean }) => ({
+    id: clean(input?.id, 40),
+    room: Boolean(input?.room),
+    night: Boolean(input?.night),
+    fee: Boolean(input?.fee),
+    country: Boolean(input?.country),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    if (!app || app.userId !== context.userId || app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
+    const q = parseQuestionnaire(app.questionnaire);
+    q.acks = { room: data.room, night: data.night, fee: data.fee, country: data.country };
+    await sql`update applications set questionnaire = ${JSON.stringify(q)}, updated_at = now() where id = ${app.id}`;
+    return { ok: true as const };
+  });
+
+export const adminAskDocument = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id?: string; category?: string }) => ({
+    id: clean(input?.id, 40),
+    category: clean(input?.category, 40),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    const profile = await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    if (!app) throw new Error("Not found");
+    const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
+    if (!managerMaySee(profile.role, profile.userId, app.assignedManagerId, cover)) throw new Error("Forbidden");
+    if (!docsForCountry(app.country).includes(data.category as DocCategory)) throw new Error("Category");
+    const q = parseQuestionnaire(app.questionnaire);
+    const langRow = await sql<{ lang: string }>`select coalesce(client_lang, 'en') as lang from applications where id = ${app.id}`;
+    const lang = langRow[0]?.lang || "en";
+    const paper = copy(lang, `cat_${data.category}` as CopyKey);
+    const script = askScript(lang, app.id, paper);
+    const who = clientName(q) || app.clientEmail;
+    const phone = q.phone || "no phone";
+    const text = `Кому написати з робочого WhatsApp\n${who}\n${phone}\nСправа ${app.id} · ${lang}\n\n${script}`;
+    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
+    await sendSafeTelegramAlert(text, chat[0]?.value ? { chatId: chat[0].value } : {});
+    await audit(sql, context.userId, "ASK_DOC", app.id, data.category);
+    return { ok: true as const };
+  });
+
+export const adminEmployerLink = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    const profile = await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app) throw new Error("Not found");
+    const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
+    if (!managerMaySee(profile.role, profile.userId, app.assignedManagerId, cover)) throw new Error("Forbidden");
+    const token = crypto.randomBytes(18).toString("base64url");
+    await sql`insert into employer_links (token, application_id) values (${token}, ${app.id})`;
+    await audit(sql, context.userId, "EMPLOYER_LINK", app.id, "");
+    return { token };
+  });
+
+export const readEmployerLink = createServerFn({ method: "GET" })
+  .validator((token: unknown) => clean(token, 80))
+  .handler(async ({ data: token }) => {
+    if (!token) return null;
+    const sql = await getSql();
+    const rows = await sql<{ applicationId: string }>`select application_id as "applicationId" from employer_links where token = ${token} limit 1`;
+    const hit = rows[0];
+    if (!hit) return null;
+    const app = await loadApp(sql, hit.applicationId);
+    if (!app) return null;
+    const q = parseQuestionnaire(app.questionnaire);
+    const seat = await sql<{ accommodation: string; housingKind: string }>`select accommodation, coalesce(housing_kind, '') as "housingKind"
+      from vacancies where id = ${app.vacancyId} limit 1`;
+    return {
+      name: clientName(q) || "—",
+      job: app.vacancyTitle || "—",
+      country: app.country,
+      employer: app.employer || "",
+      housing: seat[0]?.housingKind || "",
+      accommodation: seat[0]?.accommodation || "",
+    };
+  });
+
+export const adminSetCover = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { managerId?: string; coverId?: string }) => ({
+    managerId: clean(input?.managerId, 80),
+    coverId: clean(input?.coverId, 80),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    const profile = await requireStaff(sql, context.userId);
+    const managerId = profile.role === "ADMIN" ? data.managerId : profile.userId;
+    if (!managerId) throw new Error("Manager");
+    if (!data.coverId) {
+      await sql`delete from manager_cover where manager_id = ${managerId}`;
+      return { ok: true as const };
+    }
+    if (data.coverId === managerId) throw new Error("Cover");
+    const people = await sql<{ userId: string; role: string }>`select user_id as "userId", role from profiles where user_id = ${managerId} or user_id = ${data.coverId}`;
+    const manager = people.find((row) => row.userId === managerId);
+    const cover = people.find((row) => row.userId === data.coverId);
+    if (!manager || !cover || !STAFF.has(manager.role) || !STAFF.has(cover.role)) throw new Error("Cover");
+    await sql`insert into manager_cover (manager_id, cover_id, until_at)
+      values (
+        ${managerId},
+        ${data.coverId},
+        case
+          when ((date_trunc('day', now() at time zone 'Europe/Prague') + interval '19 hours') at time zone 'Europe/Prague') > now()
+            then ((date_trunc('day', now() at time zone 'Europe/Prague') + interval '19 hours') at time zone 'Europe/Prague')
+          else ((date_trunc('day', now() at time zone 'Europe/Prague') + interval '19 hours') at time zone 'Europe/Prague') + interval '1 day'
+        end
+      )
+      on conflict (manager_id) do update set cover_id = excluded.cover_id, until_at = excluded.until_at`;
+    await audit(sql, context.userId, "COVER", managerId, data.coverId);
+    return { ok: true as const };
+  });
+
+export const listCovers = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return [];
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    return sql<{ managerId: string; coverId: string; untilAt: string }>`select manager_id as "managerId", cover_id as "coverId", until_at::text as "untilAt"
+      from manager_cover where until_at > now()`;
+  });
+
+export const wallBoard = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return [];
+    const sql = await getSql();
+    await requireStaff(sql, context.userId);
+    const rows = await sql<{
+      id: string;
+      country: string;
+      stage: number;
+      questionnaire: string;
+      cancelAt: string | null;
+      dueAt: string | null;
+    }>`select id, country, stage, questionnaire, cancel_deadline_at::text as "cancelAt", invoice2_due_at::text as "dueAt"
+      from applications where status = 'OPEN' and stage >= 2`;
+    const now = Date.now();
+    return rows
+      .map((row) => {
+        const first = row.stage < 3 ? dueWithin(row.cancelAt, now) : null;
+        const second = row.stage >= 3 && row.stage < 4 ? dueWithin(row.dueAt, now) : null;
+        const mark = first || second;
+        if (!mark) return null;
+        const q = parseQuestionnaire(row.questionnaire);
+        return {
+          id: row.id,
+          country: row.country,
+          name: clientName(q) || row.id,
+          hour: q.contactHour,
+          mark,
+          when: (row.stage < 3 ? row.cancelAt : row.dueAt) || "",
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .sort((a, b) => Date.parse(a.when) - Date.parse(b.when));
+  });
+
 

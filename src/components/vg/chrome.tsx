@@ -474,6 +474,7 @@ export function Shell({ children, tone = "dark" }: { children: ReactNode; tone?:
             <p className="mt-3 flex gap-4 text-sm">
               <Link to="/privacy" className="underline-offset-4 hover:underline">{t("privacy_nav")}</Link>
               <Link to="/terms" className="underline-offset-4 hover:underline">{t("terms_nav")}</Link>
+              <Link to="/limits" className="underline-offset-4 hover:underline">{t("limits_nav")}</Link>
             </p>
             {site?.settings.registration_number ? (
               <p className={`mt-2 text-xs ${tone === "light" ? "text-ink/50" : "text-mist"}`}>
