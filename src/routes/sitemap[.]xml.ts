@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { CITIZENSHIPS, countrySlug, sameCountry } from "@/lib/vanguard/domain";
 import { VISA_PRODUCTS } from "@/lib/vanguard/seed";
 
-const PAGES = ["/", "/about", "/contact", "/filings", "/questions", "/privacy", "/terms", "/agents", "/login"];
+const PAGES = ["/", "/about", "/contact", "/filings", "/questions", "/privacy", "/terms", "/agents", "/login", "/limits"];
 
 export const Route = createFileRoute("/sitemap.xml")({
   server: {
@@ -14,7 +14,8 @@ export const Route = createFileRoute("/sitemap.xml")({
         const fromPages = CITIZENSHIPS.flatMap((citizen) =>
           countries.filter((country) => !sameCountry(citizen, country)).map((country) => `/from/${countrySlug(citizen)}/${countrySlug(country)}`),
         );
-        const urls = [...PAGES, ...countryPages, ...fromPages]
+        const afterPages = CITIZENSHIPS.map((citizen) => `/after/${countrySlug(citizen)}`);
+        const urls = [...PAGES, ...countryPages, ...fromPages, ...afterPages]
           .map((path) => `  <url><loc>${origin}${path}</loc></url>`)
           .join("\n");
         const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;

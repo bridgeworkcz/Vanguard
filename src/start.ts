@@ -20,9 +20,9 @@ const securityHeaders = createMiddleware().server(async ({ next }) => {
       "img-src 'self' data: blob: https:",
       "font-src 'self' https://fonts.gstatic.com data:",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "script-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' https://grok.com",
       "frame-src 'self' https://maps.google.com https://www.google.com https://www.google.com/maps",
-      "connect-src 'self'",
+      "connect-src 'self' https://grok.com",
     ].join("; ");
   }
   for (const [name, value] of Object.entries(headers)) setResponseHeader(name, value);
