@@ -542,6 +542,23 @@ async function nudgeOffice(sql: Sql) {
   }
 }
 
+async function ensurePublicCopy(sql: Sql) {
+  const flag = await sql<{ value: string }>`select value from settings where key = 'copy_voice'`;
+  if (flag[0]?.value === "1") return;
+  const keys = [
+    "hero_title_en", "hero_title_cs", "hero_title_ur", "hero_title_uk", "hero_title_ru",
+    "hero_body_en", "hero_body_cs", "hero_body_ur", "hero_body_uk", "hero_body_ru",
+    "about_lead_en", "about_lead_cs", "about_lead_ur", "about_lead_uk", "about_lead_ru",
+    "about_story_en", "about_story_cs", "about_story_ur", "about_story_uk", "about_story_ru",
+  ];
+  for (const key of keys) {
+    const value = DEFAULT_SETTINGS[key];
+    if (!value) continue;
+    await sql`insert into settings (key, value) values (${key}, ${value}) on conflict (key) do update set value = ${value}`;
+  }
+  await sql`insert into settings (key, value) values ('copy_voice', '1') on conflict (key) do update set value = '1'`;
+}
+
 export const getPublicSite = createServerFn({ method: "GET" }).handler(async () => {
     if (sheetsOn()) {
       const mod = await import("./sheet-backend");
@@ -549,6 +566,7 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
     }
   const sql = await getSql();
   await ensureSeed(sql);
+  await ensurePublicCopy(sql);
   await ensureDirector(sql);
   try {
     await ensurePartnerCatalog(sql);
