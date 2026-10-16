@@ -175,7 +175,10 @@ async function loginInDatabase(data: AccountInput) {
     await sql`insert into office_signin (user_id, code_hash, expires_at, attempts)
       values (${user.id}, ${hashPassword(code)}, now() + interval '10 minutes', 0)
       on conflict (user_id) do update set code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`;
-    const sent = await officeChannel(`Код входу в офіс для ${user.fullName || user.email}: ${code}. Діє 10 хвилин.`, user.email);
+    const plain = `${code}\n${user.fullName || user.email}\n10 хвилин`;
+    const { escapeTelegramHtml, officeNote } = await import("@/lib/google/telegram");
+    const html = officeNote(code, [escapeTelegramHtml(user.fullName || user.email), "10 хвилин"]);
+    const sent = await officeChannel(plain, html, user.email);
     if (!sent) throw new Error("The office could not send the sign-in code.");
     return { needCode: true as const, user: null };
   }
@@ -206,14 +209,14 @@ async function dbHit(bucket: string, limit: number, seconds: number) {
   }
 }
 
-async function officeChannel(message: string, email: string) {
+async function officeChannel(plain: string, html: string, email: string) {
   let sent = false;
   try {
     const { getSql } = await import("@/lib/db");
     const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
     const sql = await getSql();
     const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
-    sent = await sendSafeTelegramAlert(message, chat[0]?.value ? { chatId: chat[0].value } : {});
+    sent = await sendSafeTelegramAlert(html, chat[0]?.value ? { chatId: chat[0].value } : {});
     const mail = await sql<{ key: string; value: string }>`select key, value from settings where key in ('resend_key', 'mail_from')`;
     const map: Record<string, string> = {};
     for (const row of mail) map[row.key] = row.value;
@@ -223,7 +226,7 @@ async function officeChannel(message: string, email: string) {
       from: map.mail_from || "",
       to: email,
       subject: "Office sign-in code",
-      text: message,
+      text: plain,
     });
     sent = sent || mailed;
   } catch (err) {
@@ -237,10 +240,12 @@ async function confirmOfficeCode(data: AccountInput) {
   const { createSessionToken, verifyPassword } = await import("@/lib/google/session");
   const sql = await getSql();
   const email = emailOf(data.email);
-  const users = await sql<{ id: string; email: string; phone: string; fullName: string; roles: string }>`
-    select id, email, phone, full_name as "fullName", roles from office_users where lower(email) = ${email} limit 1`;
+  const phone = phoneOf(data.email);
+  const users = await sql<{ id: string; email: string; phone: string; fullName: string; roles: string; isActive: boolean }>`
+    select id, email, phone, full_name as "fullName", roles, is_active as "isActive"
+    from office_users where lower(email) = ${email} or (${phone} <> '' and phone = ${phone}) limit 1`;
   const userRow = users[0];
-  if (!userRow) throw new Error("Invalid email/phone or password.");
+  if (!userRow || userRow.isActive === false) throw new Error("Invalid email/phone or password.");
   const pending = await sql<{ codeHash: string; expires: string; attempts: number }>`
     select code_hash as "codeHash", expires_at::text as expires, attempts from office_signin where user_id = ${userRow.id}`;
   const row = pending[0];
@@ -250,7 +255,13 @@ async function confirmOfficeCode(data: AccountInput) {
     throw new Error("Invalid email/phone or password.");
   }
   await sql`delete from office_signin where user_id = ${userRow.id}`;
-  const user = publicUser(userRow);
+  const user = publicUser({
+    id: userRow.id,
+    email: userRow.email,
+    phone: userRow.phone,
+    fullName: userRow.fullName,
+    roles: userRow.roles,
+  });
   await sql`update office_users set last_login_at = now() where id = ${user.id}`;
   writeCookie(createSessionToken({ userId: user.id, email: user.email, roles: user.roles }));
   return { mode: "google" as const, needCode: false, user };
@@ -288,7 +299,7 @@ export async function runAccountAuth(data: AccountInput) {
   if (data.password.trim().length < 8) throw new Error("Password must be at least 8 characters long.");
   const { appendSheetRow, readSheetRows, updateSheetRowById } = await import("@/lib/google/sheets");
   const { createSessionToken, hashPassword, verifyPassword } = await import("@/lib/google/session");
-  const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+  const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert } = await import("@/lib/google/telegram");
   const rows = await readSheetRows("Users");
 
   if (data.action === "register") {
@@ -319,7 +330,10 @@ export async function runAccountAuth(data: AccountInput) {
     };
     await appendSheetRow("Users", record);
     writeCookie(createSessionToken({ userId: id, email, roles }));
-    await sendSafeTelegramAlert(`New registration\n${data.fullName}\n${email}`);
+    await sendSafeTelegramAlert(officeNote("Новий акаунт", [
+      escapeTelegramHtml(data.fullName),
+      escapeTelegramHtml(email),
+    ]));
     return { mode: "google" as const, user: publicUser(record) };
   }
 

@@ -431,25 +431,6 @@ const DOC_LABEL: Record<string, string> = {
   FINAL: "Готовий документ",
 };
 
-function ukYes(value: string) {
-  if (value === "yes") return "Так";
-  if (value === "no") return "Ні";
-  return "—";
-}
-
-function ukGender(value: string) {
-  if (value === "f") return "Жіноча";
-  if (value === "m") return "Чоловіча";
-  if (value === "x") return "Інша";
-  return "—";
-}
-
-function ukPace(value: string) {
-  if (value === "EXPRESS") return "Терміново";
-  if (value === "PRIORITY") return "Пріоритет";
-  return "Стандарт";
-}
-
 async function notifyFile(fileName: string, mime: string, buffer: Buffer, caption: string) {
   try {
     const map = await settingMap();
@@ -463,38 +444,21 @@ async function notifyFile(fileName: string, mime: string, buffer: Buffer, captio
 }
 
 async function notifyFilledApplication(app: ReturnType<typeof appFrom>, questionnaire: Questionnaire, email: string) {
-  const { escapeTelegramHtml } = await import("@/lib/google/telegram");
-  const e = (value: string) => escapeTelegramHtml(value.trim() || "—");
+  const { escapeTelegramHtml, officeNote, waLink } = await import("@/lib/google/telegram");
   const vacancy = (await loadVacancies()).find((item) => item.id === app.vacancyId);
-  const digits = questionnaire.phone.replace(/\D/g, "");
-  const phone = digits ? `<a href="https://wa.me/${digits}">${e(questionnaire.phone)}</a>` : e(questionnaire.phone);
-  const middle = questionnaire.middleNameAbsent ? "немає" : questionnaire.middleName;
-  const lines = [
-    "<b>Нова заявка</b>",
-    `Номер: ${e(app.id)}`,
-    `Ім’я: ${e(clientName(questionnaire))}`,
-    `По батькові: ${e(middle)}`,
-    `Телефон: ${phone}`,
-    `Пошта: ${e(email)}`,
-    `Дата народження: ${e(questionnaire.birthDate)}`,
-    `Стать: ${ukGender(questionnaire.gender)}`,
-    `Громадянство: ${e(questionnaire.citizenship)}`,
-    `Судимість: ${ukYes(questionnaire.criminalRecord)}`,
-    `Попередня віза: ${ukYes(questionnaire.previousVisa)}`,
-    `Подорож: ${questionnaire.travelWithFamily === "family" ? "З родиною" : questionnaire.travelWithFamily === "alone" ? "Сам" : "—"}`,
-    "",
-    `Країна: ${e(app.country)}`,
-    `Вакансія: ${e(vacancy?.title || app.vacancyTitle)}`,
-    `Роботодавець: ${e(vacancy?.employer || app.employer)}`,
-    `Зарплата: ${e(vacancy?.salaryNet || "")}`,
-    `Житло: ${e(vacancy?.accommodation || "")}`,
-    `Графік: ${e(vacancy?.workingHours || "")}`,
-    `Темп: ${ukPace(app.processing)}`,
-    `Вартість: ${e(String(app.totalCost))} EUR`,
-    `Термін: ${e(String(app.productionWeeks || ""))} тижнів`,
-  ];
-  if (vacancy?.requirements) lines.push(`Вимоги: ${e(vacancy.requirements)}`);
-  await notify(lines.join("\n"));
+  const pace = app.processing === "EXPRESS" ? " · терміново" : app.processing === "PRIORITY" ? " · пріоритет" : "";
+  const flags = [
+    questionnaire.criminalRecord === "yes" ? "Судимість" : "",
+    questionnaire.visaRefusal === "yes" ? "Відмова у візі" : "",
+  ].filter(Boolean);
+  const phone = waLink(questionnaire.phone);
+  await notify(officeNote("Нова справа", [
+    escapeTelegramHtml(clientName(questionnaire)),
+    phone || escapeTelegramHtml(email),
+    escapeTelegramHtml(`${app.id} · ${app.country} · ${vacancy?.title || app.vacancyTitle}`),
+    escapeTelegramHtml(`${app.totalCost} EUR${pace}`),
+    flags.length ? escapeTelegramHtml(flags.join(" · ")) : "",
+  ]));
   const docs = (await readSheetRows("DossierDocuments")).filter((row) => row.dossierId === app.id && row.driveFileId);
   for (const doc of docs) {
     try {
@@ -507,7 +471,7 @@ async function notifyFilledApplication(app: ReturnType<typeof appFrom>, question
         doc.fileName || "file",
         mime || doc.mime || "application/octet-stream",
         stored.buffer,
-        `<b>${escapeTelegramHtml(label)}</b>\nЗаявка ${e(app.id)}\n${e(clientName(questionnaire))}`,
+        `<b>${escapeTelegramHtml(label)}</b>\n${escapeTelegramHtml(clientName(questionnaire))}\n${escapeTelegramHtml(app.id)}`,
       );
     } catch (err) {
       console.error("[notice file]", err);
@@ -875,8 +839,15 @@ async function sendWeeklyFunnel() {
     return;
   }
   if (stats.week !== current || map.funnel_week) {
-    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
-    await sendSafeTelegramAlert(`Тиждень ${stats.week}\nКалькулятор: ${stats.calc}\nЗаявки: ${stats.apply}\nАнкети: ${stats.question}`);
+    const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    await sendSafeTelegramAlert(officeNote("Тиждень", [
+      escapeTelegramHtml(stats.week),
+      escapeTelegramHtml([
+        stats.calc ? `калькулятор ${stats.calc}` : "",
+        stats.apply ? `заявки ${stats.apply}` : "",
+        stats.question ? `анкети ${stats.question}` : "",
+      ].filter(Boolean).join(" · ")),
+    ]));
     await writeFunnel({ week: current, calc: 0, apply: 0, question: 0 });
   }
   await putSetting("funnel_week", current, "system");
@@ -1532,7 +1503,7 @@ export async function uploadDoc(userId: string, data: { applicationId: string; c
   if (!app || app.userId !== userId) throw new Error("Not found");
   if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
   if (!DOC_CATEGORIES.includes(data.category) || data.category === "FINAL") throw new Error("Category");
-  if (data.category === "PAYMENT_PROOF" && app.stage !== 2 && app.stage < 4) throw new Error("Locked");
+  if (data.category === "PAYMENT_PROOF" && app.stage < 2) throw new Error("Locked");
   const saved = await storeFile(app.id, userId, data.category, data.fileName, data.mime, data.data, "UPLOADED");
   const questionnaire = parseQuestionnaire(app.questionnaire);
   const { escapeTelegramHtml } = await import("@/lib/google/telegram");
@@ -1543,7 +1514,7 @@ export async function uploadDoc(userId: string, data: { applicationId: string; c
     data.fileName || "file",
     normalizeUploadMime(data.mime, data.fileName),
     buffer,
-    `<b>${escapeTelegramHtml(label)}</b>\nЗаявка ${escapeTelegramHtml(app.id)}\n${escapeTelegramHtml(clientName(questionnaire) || "Клієнт")}`,
+    `<b>${escapeTelegramHtml(label)}</b>\n${escapeTelegramHtml(clientName(questionnaire) || "Клієнт")}\n${escapeTelegramHtml(app.id)}`,
   );
   return saved;
 }
@@ -1816,7 +1787,7 @@ export async function adminSaveDispatch(userId: string, data: { id: string; note
 export async function adminUploadProof(userId: string, data: { applicationId: string; fileName: string; mime: string; data: string }) {
   await requireStaff(userId);
   const app = (await loadApps()).find((item) => item.id === data.applicationId);
-  if (!app || isHistoryApp(app) || app.status !== "OPEN" || (app.stage !== 2 && app.stage < 4)) throw new Error("Locked");
+  if (!app || isHistoryApp(app) || app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
   return storeFile(app.id, userId, "PAYMENT_PROOF", data.fileName, data.mime, data.data, "UPLOADED");
 }
 
@@ -2370,7 +2341,7 @@ export async function cancelMine(userId: string, id: string) {
   const app = (await loadApps()).find((item) => item.id === id);
   if (!app || app.userId !== userId) throw new Error("Not found");
   const docs = await docsFor(id);
-  if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF"))) {
+  if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF" && doc.status !== "REJECTED"))) {
     throw new Error("Locked");
   }
   await restoreQuota(app.vacancyId);

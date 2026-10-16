@@ -37,7 +37,7 @@ import {
 import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerRows, seatsForPartners, legacyRealPartners } from "./seed";
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
-import { canCancel, citizenshipBlocked, kyivMonth, monthCommission, remindBand } from "./ops";
+import { canCancel, citizenshipBlocked, hasLiveProof, kyivMonth, monthCommission, remindBand } from "./ops";
 import { askScript, docsForCountry, dueWithin, resolveCampaign } from "./round";
 import { copy, type CopyKey } from "./i18n";
 import { RESET_LINK, deliverMail } from "./mail";
@@ -184,21 +184,27 @@ async function ensureDirector(sql: Sql) {
 }
 
 async function expireUnpaid(sql: Sql) {
-  const late = await sql<{ id: string; vacancyId: string }>`select id, vacancy_id as "vacancyId" from applications
+  const late = await sql<{ id: string }>`select id from applications
     where status = 'OPEN' and stage = 2 and cancel_deadline_at is not null and cancel_deadline_at < now()
-    and not exists (select 1 from documents d where d.application_id = applications.id and d.category = 'PAYMENT_PROOF')`;
+    and not exists (
+      select 1 from documents d
+      where d.application_id = applications.id and d.category = 'PAYMENT_PROOF' and d.status <> 'REJECTED'
+    )`;
   for (const row of late) {
-    await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${row.id}`;
-    await sql`update vacancies set quota = quota + 1 where id = ${row.vacancyId}`;
-    await audit(sql, "system", "AUTO_CANCEL", row.id, "");
+    if (await closeIfOpen(sql, row.id, "CANCELLED")) await audit(sql, "system", "AUTO_CANCEL", row.id, "");
   }
 }
 
 async function ctxProfile(sql: Sql, userId: string): Promise<Profile> {
   await ensureSeed(sql);
   const authUser = await sql<{ email: string; name: string }>`select email, name from "user" where id = ${userId}`;
-  const email = authUser[0]?.email ?? "";
-  const name = authUser[0]?.name ?? "";
+  let email = authUser[0]?.email ?? "";
+  let name = authUser[0]?.name ?? "";
+  if (!email) {
+    const office = await sql<{ email: string; name: string }>`select email, full_name as name from office_users where id = ${userId} and is_active = true limit 1`;
+    email = office[0]?.email ?? "";
+    name = office[0]?.name || name;
+  }
   const existing = await sql<Profile>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles where user_id = ${userId}`;
   if (!existing[0]) {
     const admins = await sql<{ c: number }>`select count(*)::int as c from profiles where role = 'ADMIN'`;
@@ -233,6 +239,35 @@ async function coveredManagers(sql: Sql, userId: string): Promise<Set<string>> {
 function managerMaySee(role: string, userId: string, assigned: string, cover: Set<string>) {
   if (role !== "MANAGER") return true;
   return assigned === userId || cover.has(assigned);
+}
+
+async function guardCase(sql: Sql, userId: string, app: { assignedManagerId?: string } | null | undefined) {
+  if (!app) throw new Error("Not found");
+  const profile = await requireStaff(sql, userId);
+  const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
+  if (!managerMaySee(profile.role, profile.userId, app.assignedManagerId || "", cover)) throw new Error("Forbidden");
+  return profile;
+}
+
+async function takeSeat(sql: Sql, vacancyId: string) {
+  const rows = await sql<{ id: string }>`update vacancies set quota = quota - 1 where id = ${vacancyId} and quota > 0 returning id`;
+  return Boolean(rows[0]);
+}
+
+async function giveSeat(sql: Sql, vacancyId: string) {
+  if (!vacancyId) return;
+  await sql`update vacancies set quota = quota + 1 where id = ${vacancyId}`;
+}
+
+async function closeIfOpen(sql: Sql, id: string, status: "CANCELLED" | "REJECTED", reason = "") {
+  const rows =
+    status === "REJECTED"
+      ? await sql<{ vacancyId: string }>`update applications set status = 'REJECTED', rejection_reason = ${reason}, updated_at = now()
+          where id = ${id} and status = 'OPEN' returning vacancy_id as "vacancyId"`
+      : await sql<{ vacancyId: string }>`update applications set status = 'CANCELLED', updated_at = now()
+          where id = ${id} and status = 'OPEN' returning vacancy_id as "vacancyId"`;
+  if (rows[0]) await giveSeat(sql, rows[0].vacancyId);
+  return Boolean(rows[0]);
 }
 
 async function requireAdmin(sql: Sql, userId: string) {
@@ -439,6 +474,7 @@ async function nudgeOffice(sql: Sql) {
         or (a.stage >= 3 and a.stage < 4 and a.invoice2_due_at > now() and a.invoice2_due_at < now() + interval '48 hours')
       )`;
     const lines: string[] = [];
+    const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert, waLink } = await import("@/lib/google/telegram");
     for (const row of rows) {
       const first = row.stage < 3;
       const band = remindBand(first ? row.cancelAt : row.dueAt);
@@ -447,10 +483,14 @@ async function nudgeOffice(sql: Sql) {
       if (row.reminded.split(",").includes(token)) continue;
       const person = parseQuestionnaire(row.questionnaire);
       const who = row.name || clientName(person) || row.email;
-      const phone = row.phone || person.phone || "no phone";
+      const phone = row.phone || person.phone || "";
       const parts = tranches(Number(row.total), normalizeScheme(row.scheme));
       const amount = first ? parts.first : parts.second;
-      lines.push(`• ${row.id} — ${who} — ${phone} — ${first ? "first payment" : "second payment"} ${amount} EUR, about ${band}h left.`);
+      lines.push([
+        escapeTelegramHtml(who),
+        waLink(phone),
+        escapeTelegramHtml(`${row.id} · ${first ? "перша оплата" : "друга оплата"} · ${amount} EUR · ${band} год`),
+      ].filter(Boolean).join("\n"));
       const next = row.reminded ? `${row.reminded},${token}` : token;
       await sql`update applications set pay_reminded = ${next} where id = ${row.id}`;
     }
@@ -462,15 +502,9 @@ async function nudgeOffice(sql: Sql) {
     if (morning) {
       await sql`insert into settings (key, value) values ('digest_day', ${day}) on conflict (key) do update set value = ${day}`;
     }
-    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    if (!lines.length) return;
     const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
-    const text = [
-      morning ? "Ранок. Один лист, не кожна подія." : "Нагадування по строках.",
-      "Напишіть цим людям з робочого WhatsApp. Сайт сам клієнту не пише.",
-      lines.length ? lines.join("\n") : "Строків на найближчі 48 годин немає.",
-      "Текст клієнту англійською: The payment on your file is due soon. Open the case and upload the receipt.",
-    ].join("\n");
-    await sendSafeTelegramAlert(text, chat[0]?.value ? { chatId: chat[0].value } : {});
+    await sendSafeTelegramAlert(officeNote("Строки", [lines.join("\n\n")]), chat[0]?.value ? { chatId: chat[0].value } : {});
   } catch (err) {
     console.error("[nudge]", err);
   }
@@ -591,10 +625,12 @@ export const takeInvoiceNumber = createServerFn({ method: "POST" })
       if (!open[0]) throw new Error("Locked");
     }
     if (limited(`invoice:${context.userId}`, 12, 60 * 60 * 1000)) throw new Error("Locked");
-    const rows = await sql<{ value: string }>`select value from settings where key = 'invoice_seq'`;
-    const next = (Number(rows[0]?.value) || 1000) + 1;
-    await sql`insert into settings (key, value) values ('invoice_seq', ${String(next)}) on conflict (key) do update set value = ${String(next)}`;
-    return { number: `INV-${next}` };
+    const rows = await sql<{ value: string }>`insert into settings (key, value, updated_at) values ('invoice_seq', '1001', now())
+      on conflict (key) do update set
+        value = ((case when settings.value ~ '^[0-9]+$' then settings.value::int else 1000 end) + 1)::text,
+        updated_at = now()
+      returning value`;
+    return { number: `INV-${rows[0]?.value || "1001"}` };
   });
 
 export const joinWaitlist = createServerFn({ method: "POST" })
@@ -832,6 +868,7 @@ export const createApplication = createServerFn({ method: "POST" })
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
     const countries = products.map((item) => item.country);
     const campaign = resolveCampaign(data.campaign || "", countries)?.slug || "";
+    const lang = data.lang === "cs" || data.lang === "ru" || data.lang === "ur" ? data.lang : "en";
     const q: Questionnaire = {
       ...parseQuestionnaire("{}"),
       citizenship: data.citizenship,
@@ -839,9 +876,14 @@ export const createApplication = createServerFn({ method: "POST" })
       visaRefusal: data.refusal === "yes" || data.refusal === "no" ? data.refusal : "",
       passportExpiry: data.passportExpiry || "",
     };
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, campaign)
-      values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160', ${campaign})`;
-    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
+    if (!(await takeSeat(sql, vacancy.id))) throw new Error("Opening unavailable");
+    try {
+      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, campaign, client_lang)
+        values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160', ${campaign}, ${lang})`;
+    } catch (err) {
+      await giveSeat(sql, vacancy.id);
+      throw err;
+    }
     await audit(sql, context.userId, "APPLICATION_OPENED", id, vacancy.title);
     return { id };
   });
@@ -855,6 +897,8 @@ export const openSpouseCase = createServerFn({ method: "POST" })
     const profile = await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
     if (!app || app.userId !== context.userId || app.status !== "OPEN") throw new Error("Not found");
+    const linked = await sql<{ id: string }>`select id from applications where linked_to = ${app.id} and status = 'OPEN' limit 1`;
+    if (linked[0]) return { id: linked[0].id };
     const vacancies = await loadVacancies(sql);
     const products = await loadProducts(sql);
     const vacancy = vacancies.find((item) => item.id === app.vacancyId && item.active);
@@ -863,9 +907,14 @@ export const openSpouseCase = createServerFn({ method: "POST" })
     const next = newId("VG");
     const total = applyPercent(priceFor(product.basePrice, app.processing), await cutForSql(sql, app.referrerUserId));
     const q: Questionnaire = { ...parseQuestionnaire("{}"), citizenship: app.citizenship };
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
-      values (${next}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${app.citizenship}, ${app.processing}, ${total}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
-    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
+    if (!(await takeSeat(sql, vacancy.id))) throw new Error("Opening unavailable");
+    try {
+      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
+        values (${next}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${app.citizenship}, ${app.processing}, ${total}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
+    } catch (err) {
+      await giveSeat(sql, vacancy.id);
+      throw err;
+    }
     await audit(sql, context.userId, "SPOUSE_OPENED", next, app.id);
     return { id: next };
   });
@@ -878,16 +927,16 @@ export const lookupCaseStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getRequest } = await import("@tanstack/react-start/server");
     const ip = getRequest()?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-    if (limited(`lookup:${ip.slice(0, 80)}`, 12, 15 * 60 * 1000)) return { found: false as const };
     if (!data.id || !data.surname) return { found: false as const };
+    if (await durableHit(`lookup:${ip.slice(0, 64)}`, 12, 15 * 60)) return { found: false as const };
     const sql = await getSql();
-    const rows = await sql<{ stage: number; status: string; country: string; questionnaire: string }>`
-      select stage, status, country, questionnaire from applications where upper(id) = ${data.id} limit 1`;
+    const rows = await sql<{ stage: number; status: string; questionnaire: string }>`
+      select stage, status, questionnaire from applications where upper(id) = ${data.id} limit 1`;
     const row = rows[0];
     if (!row) return { found: false as const };
     const last = parseQuestionnaire(row.questionnaire).lastName.trim().toLowerCase();
     if (!last || last !== data.surname) return { found: false as const };
-    return { found: true as const, stage: Number(row.stage), status: row.status, country: row.country };
+    return { found: true as const, stage: Number(row.stage), status: row.status };
   });
 
 export const saveQuestionnaire = createServerFn({ method: "POST" })
@@ -912,14 +961,30 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     if (sameCountry(q.citizenship, app.country)) return { ok: false as const, error: "citizenship" };
     const last = q.lastName.trim().toLowerCase();
     const birth = q.birthDate.trim().slice(0, 10);
+    q.lastName = q.lastName.trim();
+    q.birthDate = birth || q.birthDate.trim();
     if (last.length >= 2 && birth.length >= 8) {
       const twin = await sql<{ id: string }>`select id from applications where status = 'OPEN' and id <> ${app.id}
-        and lower(questionnaire::jsonb->>'lastName') = ${last}
-        and left(coalesce(questionnaire::jsonb->>'birthDate', ''), 10) = ${birth} limit 1`;
+        and btrim(lower(questionnaire::jsonb->>'lastName')) = ${last}
+        and left(btrim(coalesce(questionnaire::jsonb->>'birthDate', '')), 10) = ${birth} limit 1`;
       if (twin[0]) return { ok: false as const, error: "person" };
     }
     await sql`update applications set questionnaire = ${JSON.stringify(q)}, profile_complete = true, citizenship = ${q.citizenship}, updated_at = now() where id = ${app.id}`;
     await audit(sql, context.userId, "QUESTIONNAIRE", app.id, clientName(q));
+    if (!app.profileComplete) {
+      const pace = app.processing === "EXPRESS" ? " · терміново" : app.processing === "PRIORITY" ? " · пріоритет" : "";
+      const flags = [q.criminalRecord === "yes" ? "Судимість" : "", q.visaRefusal === "yes" ? "Відмова у візі" : ""].filter(Boolean);
+      const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert, waLink } = await import("@/lib/google/telegram");
+      const phone = waLink(q.phone);
+      const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
+      await sendSafeTelegramAlert(officeNote("Нова справа", [
+        escapeTelegramHtml(clientName(q)),
+        phone || escapeTelegramHtml(app.clientEmail),
+        escapeTelegramHtml(`${app.id} · ${app.country} · ${app.vacancyTitle}`),
+        escapeTelegramHtml(`${app.totalCost} EUR${pace}`),
+        flags.length ? escapeTelegramHtml(flags.join(" · ")) : "",
+      ]), chat[0]?.value ? { chatId: chat[0].value } : {});
+    }
     return { ok: true as const };
   });
 
@@ -941,7 +1006,7 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
     const category = data.category;
     if (!DOC_CATEGORIES.includes(category) || category === "FINAL") throw new Error("Category");
     if (category !== "PAYMENT_PROOF" && !docsForCountry(app.country).includes(category)) throw new Error("Category");
-    if (category === "PAYMENT_PROOF" && app.stage !== 2 && app.stage < 4) throw new Error("Locked");
+    if (category === "PAYMENT_PROOF" && app.stage < 2) throw new Error("Locked");
     if (category === "PAYMENT_PROOF" && !acksDone(parseQuestionnaire(app.questionnaire))) throw new Error("Acks");
     const mime = normalizeUploadMime(data.mime, data.fileName);
     if (!ALLOWED_MIME.has(mime)) throw new Error("File type");
@@ -970,7 +1035,9 @@ export const postMessage = createServerFn({ method: "POST" })
     const app = await loadApp(sql, data.applicationId);
     if (!app) throw new Error("Not found");
     const staff = STAFF.has(profile.role);
-    if (!staff && app.userId !== context.userId) throw new Error("Forbidden");
+    if (staff) {
+      if (profile.role === "MANAGER") await guardCase(sql, context.userId, app);
+    } else if (app.userId !== context.userId) throw new Error("Forbidden");
     await sql`insert into messages (id, application_id, author_id, author_role, body) values (${newId("MSG")}, ${app.id}, ${context.userId}, ${profile.role}, ${data.body})`;
   });
 
@@ -996,7 +1063,9 @@ export const downloadDocument = createServerFn({ method: "POST" })
     const app = await loadApp(sql, doc.applicationId);
     if (!app) throw new Error("Not found");
     const staff = STAFF.has(profile.role);
-    if (!staff && app.userId !== context.userId) throw new Error("Forbidden");
+    if (staff) {
+      if (profile.role === "MANAGER") await guardCase(sql, context.userId, app);
+    } else if (app.userId !== context.userId) throw new Error("Forbidden");
     return doc;
   });
 
@@ -1009,11 +1078,28 @@ export const adminOverview = createServerFn({ method: "GET" })
     }
     const sql = await getSql();
     const profile = await requireStaff(sql, context.userId);
-    const waiting = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN' and stage = 1 and profile_complete = true`;
+    const mine = profile.role === "MANAGER";
+    const waiting = await sql<{ c: number }>`select count(*)::int as c from applications
+      where status = 'OPEN' and stage = 1 and profile_complete = true
+      and (${mine} = false or assigned_manager_id = ${profile.userId}
+        or assigned_manager_id in (select manager_id from manager_cover where cover_id = ${profile.userId} and until_at > now()))`;
     const proofs = await sql<{ c: number }>`select count(*)::int as c from applications a where a.status = 'OPEN' and a.stage = 2
-      and exists (select 1 from documents d where d.application_id = a.id and d.category = 'PAYMENT_PROOF' and d.status = 'UPLOADED')`;
-    const live = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
-    const users = await sql<{ userId: string; email: string; fullName: string; phone: string; role: string }>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles order by email`;
+      and exists (select 1 from documents d where d.application_id = a.id and d.category = 'PAYMENT_PROOF' and d.status = 'UPLOADED')
+      and (${mine} = false or a.assigned_manager_id = ${profile.userId}
+        or a.assigned_manager_id in (select manager_id from manager_cover where cover_id = ${profile.userId} and until_at > now()))`;
+    const live = await sql<{ c: number }>`select count(*)::int as c from applications
+      where status = 'OPEN'
+      and (${mine} = false or assigned_manager_id = ${profile.userId}
+        or assigned_manager_id in (select manager_id from manager_cover where cover_id = ${profile.userId} and until_at > now()))`;
+    const users = await sql<{ userId: string; email: string; fullName: string; phone: string; role: string }>`select user_id as "userId", email, full_name as "fullName", phone, role from profiles
+      where ${mine} = false
+        or role in ('ADMIN', 'MANAGER')
+        or user_id in (
+          select user_id from applications
+          where assigned_manager_id = ${profile.userId}
+            or assigned_manager_id in (select manager_id from manager_cover where cover_id = ${profile.userId} and until_at > now())
+        )
+      order by email`;
     const cutRows = await sql<{ value: string }>`select value from settings where key = 'agent_discounts'`;
     const cuts = parseCuts(cutRows[0]?.value);
     return {
@@ -1100,9 +1186,9 @@ export const adminSetStage = createServerFn({ method: "POST" })
       return mod.adminSetStage(context.userId, data);
     }
     const sql = await getSql();
-    const profile = await requireStaff(sql, context.userId);
     const app = await loadApp(sql, data.id);
     if (!app) throw new Error("Not found");
+    const profile = await guardCase(sql, context.userId, app);
     if (data.action === "accept") {
       if (app.stage !== 1 || app.status !== "OPEN" || !app.profileComplete) throw new Error("Not ready");
       const blocked = openBlock(parseQuestionnaire(app.questionnaire));
@@ -1111,25 +1197,26 @@ export const adminSetStage = createServerFn({ method: "POST" })
         assigned_manager_id = case when coalesce(assigned_manager_id, '') <> '' then assigned_manager_id else ${profile.userId} end,
         updated_at = now() where id = ${app.id}`;
     } else if (data.action === "reject") {
-      if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
-      await sql`update applications set status = 'REJECTED', rejection_reason = ${data.reason}, updated_at = now() where id = ${app.id}`;
+      await closeIfOpen(sql, app.id, "REJECTED", data.reason);
     } else if (data.action === "cancel") {
-      if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
-      await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${app.id}`;
+      await closeIfOpen(sql, app.id, "CANCELLED");
     } else if (data.action === "confirm-payment") {
       if (app.stage !== 2 || app.status !== "OPEN") throw new Error("Not ready");
       const proofs = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'PAYMENT_PROOF' and status <> 'REJECTED' limit 1`;
       if (!proofs[0]) throw new Error("No proof");
-      await sql`update documents set status = 'APPROVED' where application_id = ${app.id} and category = 'PAYMENT_PROOF'`;
-      await sql`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${Math.max(1, Number(app.productionWeeks) || 8) * 7} * interval '1 day'),
-        process_stage = 'IN_PROCESS', updated_at = now() where id = ${app.id}`;
+      await sql`update documents set status = 'APPROVED' where application_id = ${app.id} and category = 'PAYMENT_PROOF' and status = 'UPLOADED'`;
+      const moved = await sql<{ id: string }>`update applications set stage = 3, stage3_at = now(), doc_deadline_at = now() + (${Math.max(1, Number(app.productionWeeks) || 8) * 7} * interval '1 day'),
+        process_stage = 'IN_PROCESS', updated_at = now() where id = ${app.id} and stage = 2 and status = 'OPEN' returning id`;
+      if (!moved[0]) throw new Error("Not ready");
       await audit(sql, profile.userId, data.action, app.id, data.reason);
       void mailSql(sql, app.clientEmail, "stage", app.id);
       return { ok: true as const, stage: 3 };
     } else if (data.action === "stage4") {
       if (app.stage !== 3 || app.status !== "OPEN") throw new Error("Not ready");
       if (openedBeforeInvoice2Rule(app.createdAt)) throw new Error("Legacy");
-      await sql`update applications set stage = 4, stage4_at = now(), updated_at = now() where id = ${app.id}`;
+      const moved = await sql<{ id: string }>`update applications set stage = 4, stage4_at = now(), updated_at = now()
+        where id = ${app.id} and stage = 3 and status = 'OPEN' returning id`;
+      if (!moved[0]) throw new Error("Not ready");
       await audit(sql, profile.userId, data.action, app.id, data.reason);
       void mailSql(sql, app.clientEmail, "due", app.id);
       return { ok: true as const, stage: 4 };
@@ -1153,10 +1240,10 @@ export const adminSetProcess = createServerFn({ method: "POST" })
       await mod.adminSetProcess(context.userId, data); return;
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     if (!PROCESS_STAGES.includes(data.processStage as ProcessStage)) throw new Error("Stage");
     const app = await loadApp(sql, data.id);
     if (!app || app.stage < 3 || app.status !== "OPEN") throw new Error("Locked");
+    await guardCase(sql, context.userId, app);
     if (openedBeforeInvoice2Rule(app.createdAt) && stageIndex(data.processStage as ProcessStage) > stageIndex(INVOICE2_STAGE)) throw new Error("Legacy");
     const before = stageIndex(app.processStage as ProcessStage);
     const next = stageIndex(data.processStage as ProcessStage);
@@ -1180,7 +1267,8 @@ export const adminSaveDispatch = createServerFn({ method: "POST" })
       await mod.adminSaveDispatch(context.userId, data); return;
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    await guardCase(sql, context.userId, app);
     await sql`update applications set dispatch_note = ${data.note}, updated_at = now() where id = ${data.id}`;
     await audit(sql, context.userId, "DISPATCH", data.id, "");
   });
@@ -1194,9 +1282,9 @@ export const adminUploadFinal = createServerFn({ method: "POST" })
       return mod.adminUploadFinal(context.userId, data);
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     const app = await loadApp(sql, clean(data.applicationId, 40));
     if (!app || app.processStage !== "FINAL_LEGAL_SERVICE" || app.stage < 3) throw new Error("Locked");
+    await guardCase(sql, context.userId, app);
     if (!ALLOWED_MIME.has(data.mime) || !data.data?.startsWith("data:") || data.data.length > MAX_DATA) {
       throw new Error("File");
     }
@@ -1216,9 +1304,9 @@ export const adminUploadProof = createServerFn({ method: "POST" })
       return mod.adminUploadProof(context.userId, data);
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     const app = await loadApp(sql, clean(data.applicationId, 40));
-    if (!app || (app.stage !== 2 && app.stage < 4) || app.status !== "OPEN") throw new Error("Locked");
+    if (!app || app.stage < 2 || app.status !== "OPEN") throw new Error("Locked");
+    await guardCase(sql, context.userId, app);
     const mime = normalizeUploadMime(data.mime, data.fileName);
     if (!ALLOWED_MIME.has(mime) || !data.data?.startsWith("data:") || data.data.length > MAX_DATA) throw new Error("File");
     const id = newId("DOC");
@@ -1253,7 +1341,9 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     if (vacancy.quota < 1) throw new Error("Opening unavailable");
     if (!product.allowedProcessing.includes(data.processing)) throw new Error("Pace");
     if (citizenshipBlocked(vacancy.blockedCitizenships, data.citizenship)) throw new Error("Citizenship");
-    const user = await sql<{ id: string }>`select id from "user" where lower(email) = ${data.email} limit 1`;
+    const user = officeDatabase()
+      ? await sql<{ id: string }>`select id from office_users where lower(email) = ${data.email} and is_active = true limit 1`
+      : await sql<{ id: string }>`select id from "user" where lower(email) = ${data.email} limit 1`;
     if (user[0]?.id) {
       const dup = await sql<{ id: string }>`select id from applications where user_id = ${user[0].id} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
       if (dup[0]) return { id: dup[0].id };
@@ -1261,9 +1351,14 @@ export const adminCreateApplication = createServerFn({ method: "POST" })
     const id = newId("VG");
     const total = priceFor(product.basePrice, data.processing);
     const weeks = productionWeeks(product.productionMinWeeks, product.productionMaxWeeks, data.processing);
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, fee_scheme)
-      values (${id}, ${user[0]?.id ?? null}, ${data.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire("{}"), citizenship: data.citizenship })}, 'entry160')`;
-    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
+    if (!(await takeSeat(sql, vacancy.id))) throw new Error("Opening unavailable");
+    try {
+      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, fee_scheme)
+        values (${id}, ${user[0]?.id ?? null}, ${data.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify({ ...parseQuestionnaire("{}"), citizenship: data.citizenship })}, 'entry160')`;
+    } catch (err) {
+      await giveSeat(sql, vacancy.id);
+      throw err;
+    }
     await audit(sql, context.userId, "APPLICATION_CREATED", id, data.email);
     return { id };
   });
@@ -1775,10 +1870,10 @@ export const adminDeleteApplication = createServerFn({ method: "POST" })
       return;
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     const app = await loadApp(sql, id);
+    await guardCase(sql, context.userId, app);
     if (!app) throw new Error("Not found");
-    if (app.status === "OPEN") await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
+    if (app.status === "OPEN") await closeIfOpen(sql, id, "CANCELLED");
     await sql`delete from documents where application_id = ${id}`;
     await sql`delete from messages where application_id = ${id}`;
     await sql`delete from applications where id = ${id}`;
@@ -1819,6 +1914,8 @@ export const adminMarkCommission = createServerFn({ method: "POST" })
     const sql = await getSql();
     if (sheetsOn()) return (await import("./sheet-backend")).adminMarkCommission(context.userId, data);
     const profile = await requireStaff(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    await guardCase(sql, context.userId, app);
     await sql`update applications set commission_paid = ${data.paid}, updated_at = now() where id = ${data.id}`;
     await audit(sql, profile.userId, "COMMISSION", data.id, data.paid ? "paid" : "due");
     return { ok: true as const };
@@ -1841,13 +1938,12 @@ export const adminSetReferrer = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     if (sheetsOn()) return (await import("./sheet-backend")).adminSetReferrer(context.userId, data);
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     const app = await loadApp(sql, data.id);
-    if (!app) throw new Error("Not found");
+    await guardCase(sql, context.userId, app);
     const referrerUserId = data.referrerUserId ? await resolveReferrer(sql, data.referrerUserId) : "";
     if (data.referrerUserId && !referrerUserId) throw new Error("Role");
-    await sql`update applications set referrer_user_id = ${referrerUserId}, updated_at = now() where id = ${app.id}`;
-    await audit(sql, context.userId, "REFERRER", app.id, referrerUserId);
+    await sql`update applications set referrer_user_id = ${referrerUserId}, updated_at = now() where id = ${data.id}`;
+    await audit(sql, context.userId, "REFERRER", data.id, referrerUserId);
     return { ok: true };
   });
 
@@ -1859,8 +1955,17 @@ export const adminAudit = createServerFn({ method: "GET" })
       return mod.adminAudit(context.userId);
     }
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
-    return sql<{ id: string; actorId: string; action: string; target: string; details: string; createdAt: string }>`select id, actor_id as "actorId", action, target, details, created_at::text as "createdAt" from audit_log order by created_at desc limit 80`;
+    const profile = await requireStaff(sql, context.userId);
+    return sql<{ id: string; actorId: string; action: string; target: string; details: string; createdAt: string }>`select id, actor_id as "actorId", action, target, details, created_at::text as "createdAt"
+      from audit_log
+      where ${profile.role} <> 'MANAGER'
+        or actor_id = ${profile.userId}
+        or target in (
+          select id from applications
+          where assigned_manager_id = ${profile.userId}
+            or assigned_manager_id in (select manager_id from manager_cover where cover_id = ${profile.userId} and until_at > now())
+        )
+      order by created_at desc limit 80`;
   });
 
 export const adminAllTeam = createServerFn({ method: "GET" })
@@ -1926,11 +2031,13 @@ export const cancelMyApplication = createServerFn({ method: "POST" })
     const app = await loadApp(sql, id);
     if (!app || app.userId !== context.userId) throw new Error("Not found");
     const docs = await docsFor(sql, id);
-    if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF"))) {
+    if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, hasLiveProof(docs))) {
       throw new Error("Locked");
     }
-    await sql`update applications set status = 'CANCELLED', updated_at = now() where id = ${id}`;
-    await sql`update vacancies set quota = quota + 1 where id = ${app.vacancyId}`;
+    const closed = await sql<{ vacancyId: string }>`update applications set status = 'CANCELLED', updated_at = now()
+      where id = ${id} and user_id = ${context.userId} and status = 'OPEN' returning vacancy_id as "vacancyId"`;
+    if (!closed[0]) throw new Error("Locked");
+    await giveSeat(sql, closed[0].vacancyId);
     await audit(sql, context.userId, "CLIENT_CANCEL", id, "");
     return { ok: true };
   });
@@ -1956,18 +2063,33 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const product = products.find((item) => item.id === vacancy?.visaProductId && item.active);
     if (!vacancy || vacancy.quota < 1 || !product) throw new Error("Opening unavailable");
     if (citizenshipBlocked(vacancy.blockedCitizenships, citizenship)) throw new Error("Citizenship");
+    const again = prior.lastName.trim().toLowerCase();
+    const born = prior.birthDate.trim().slice(0, 10);
+    if (again.length >= 2 && born.length >= 8) {
+      const twin = await sql<{ id: string }>`select id from applications where status = 'OPEN'
+        and btrim(lower(questionnaire::jsonb->>'lastName')) = ${again}
+        and left(btrim(coalesce(questionnaire::jsonb->>'birthDate', '')), 10) = ${born} limit 1`;
+      if (twin[0]) throw new Error("person");
+    }
     const dup = await sql<{ id: string }>`select id from applications where user_id = ${context.userId} and vacancy_id = ${vacancy.id} and status = 'OPEN' limit 1`;
     if (dup[0]) return { id: dup[0].id };
     const next = newId("VG");
-    await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
-      values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...prior, citizenship })}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
-    const papers = await sql<{ category: string; fileName: string; mime: string; data: string }>`select category, file_name as "fileName", mime, data
-      from documents where application_id = ${app.id} and category in ('PASSPORT', 'PHOTO')`;
-    for (const paper of papers) {
-      await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
-        values (${newId("DOC")}, ${next}, ${context.userId}, ${paper.category}, ${paper.fileName}, ${paper.mime}, ${paper.data}, 'UPLOADED')`;
+    if (!(await takeSeat(sql, vacancy.id))) throw new Error("Opening unavailable");
+    try {
+      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, linked_to)
+        values (${next}, ${context.userId}, ${person.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${citizenship}, ${app.processing}, ${app.totalCost}, 'EUR', ${app.productionWeeks}, 1, 'OPEN', ${JSON.stringify({ ...prior, citizenship })}, ${app.referrerUserId || ""}, 'entry160', ${app.id})`;
+      const papers = await sql<{ category: string; fileName: string; mime: string; data: string }>`select category, file_name as "fileName", mime, data
+        from documents where application_id = ${app.id} and category in ('PASSPORT', 'PHOTO')`;
+      for (const paper of papers) {
+        await sql`insert into documents (id, application_id, user_id, category, file_name, mime, data, status)
+          values (${newId("DOC")}, ${next}, ${context.userId}, ${paper.category}, ${paper.fileName}, ${paper.mime}, ${paper.data}, 'UPLOADED')`;
+      }
+    } catch (err) {
+      await sql`delete from documents where application_id = ${next}`;
+      await sql`delete from applications where id = ${next}`;
+      await giveSeat(sql, vacancy.id);
+      throw err;
     }
-    await sql`update vacancies set quota = quota - 1 where id = ${vacancy.id} and quota > 0`;
     await audit(sql, context.userId, "RESUBMIT", next, id);
     return { id: next };
   });
@@ -1982,17 +2104,14 @@ export const reviewDocument = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     if (sheetsOn()) return (await import("./sheet-backend")).reviewDocument(context.userId, data);
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
     if (data.status !== "APPROVED" && data.status !== "REJECTED") throw new Error("Status");
-    const found = await sql<{ id: string }>`select id from documents where id = ${data.id}`;
+    const found = await sql<{ id: string; applicationId: string }>`select id, application_id as "applicationId" from documents where id = ${data.id}`;
     if (!found[0]) throw new Error("Not found");
+    const app = await loadApp(sql, found[0].applicationId);
+    await guardCase(sql, context.userId, app);
     await sql`update documents set status = ${data.status}, rejection_reason = ${data.status === "REJECTED" ? declineText(data.reason) : ""} where id = ${data.id}`;
     await audit(sql, context.userId, "DOCUMENT", data.id, data.status);
-    if (data.status === "REJECTED") {
-      const doc = await sql<{ application_id: string }>`select application_id from documents where id = ${data.id}`;
-      const app = doc[0] ? await loadApp(sql, doc[0].application_id) : null;
-      if (app) void mailSql(sql, app.clientEmail, "doc", app.id);
-    }
+    if (data.status === "REJECTED" && app) void mailSql(sql, app.clientEmail, "doc", app.id);
     return { ok: true };
   });
 
@@ -2005,7 +2124,7 @@ export const assignManagers = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     if (sheetsOn()) return (await import("./sheet-backend")).assignManagers(context.userId, data);
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
+    await requireAdmin(sql, context.userId);
     for (const id of data.ids) {
       await sql`update applications set assigned_manager_id = ${data.managerId}, updated_at = now() where id = ${id}`;
     }
@@ -2015,16 +2134,30 @@ export const assignManagers = createServerFn({ method: "POST" })
 
 export const exportOpenCases = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .handler(async ({ context }) => {
+  .validator((input: { ids?: string[] } | undefined) => {
+    const ids = Array.isArray(input?.ids) ? input.ids.map((id) => clean(String(id), 40)).filter(Boolean) : [];
+    return { ids: [...new Set(ids)].slice(0, 5000) };
+  })
+  .handler(async ({ context, data }) => {
     if (sheetsOn()) return (await import("./sheet-backend")).exportOpenCases(context.userId);
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
-    const rows = await sql<{ c: number }>`select count(*)::int as c from applications where status = 'OPEN'`;
-    const count = Number(rows[0]?.c ?? 0);
+    const profile = await requireStaff(sql, context.userId);
+    if (profile.role === "MANAGER" && data.ids.length) {
+      const cover = await coveredManagers(sql, profile.userId);
+      const rows = await sql<{ id: string; assignedManagerId: string }>`select id, coalesce(assigned_manager_id, '') as "assignedManagerId"
+        from applications where id = any(${data.ids}::text[])`;
+      if (rows.length !== data.ids.length || rows.some((row) => !managerMaySee(profile.role, profile.userId, row.assignedManagerId, cover))) {
+        throw new Error("Forbidden");
+      }
+    }
+    const count = data.ids.length;
     await audit(sql, context.userId, "EXPORT", "OpenCases", String(count));
     if (count >= 20) {
-      const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
-      await sendSafeTelegramAlert(`Експорт ${count} відкритих справ. Хто: ${context.userId}`);
+      const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+      await sendSafeTelegramAlert(officeNote("Експорт", [
+        escapeTelegramHtml(`${count} відкритих справ`),
+        escapeTelegramHtml(profile.fullName || profile.email),
+      ]));
     }
     return { count };
   });
@@ -2127,9 +2260,15 @@ export const adminAskDocument = createServerFn({ method: "POST" })
     const paper = copy(lang, `cat_${data.category}` as CopyKey);
     const script = askScript(lang, app.id, paper);
     const who = clientName(q) || app.clientEmail;
-    const phone = q.phone || "no phone";
-    const text = `Кому написати з робочого WhatsApp\n${who}\n${phone}\nСправа ${app.id} · ${lang}\n\n${script}`;
-    const { sendSafeTelegramAlert } = await import("@/lib/google/telegram");
+    const { escapeTelegramHtml, officeNote, sendSafeTelegramAlert, waLink } = await import("@/lib/google/telegram");
+    const text = [
+      officeNote("WhatsApp", [
+        escapeTelegramHtml(who),
+        waLink(q.phone),
+        escapeTelegramHtml(app.id),
+      ]),
+      escapeTelegramHtml(script),
+    ].join("\n\n");
     const chat = await sql<{ value: string }>`select value from settings where key = 'telegram_owner_chat'`;
     await sendSafeTelegramAlert(text, chat[0]?.value ? { chatId: chat[0].value } : {});
     await audit(sql, context.userId, "ASK_DOC", app.id, data.category);
@@ -2227,7 +2366,8 @@ export const wallBoard = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     if (sheetsOn()) return [];
     const sql = await getSql();
-    await requireStaff(sql, context.userId);
+    const profile = await requireStaff(sql, context.userId);
+    const cover = profile.role === "MANAGER" ? await coveredManagers(sql, profile.userId) : new Set<string>();
     const rows = await sql<{
       id: string;
       country: string;
@@ -2235,10 +2375,13 @@ export const wallBoard = createServerFn({ method: "GET" })
       questionnaire: string;
       cancelAt: string | null;
       dueAt: string | null;
-    }>`select id, country, stage, questionnaire, cancel_deadline_at::text as "cancelAt", invoice2_due_at::text as "dueAt"
+      assignedManagerId: string;
+    }>`select id, country, stage, questionnaire, cancel_deadline_at::text as "cancelAt", invoice2_due_at::text as "dueAt",
+      coalesce(assigned_manager_id, '') as "assignedManagerId"
       from applications where status = 'OPEN' and stage >= 2`;
     const now = Date.now();
     return rows
+      .filter((row) => managerMaySee(profile.role, profile.userId, row.assignedManagerId, cover))
       .map((row) => {
         const first = row.stage < 3 ? dueWithin(row.cancelAt, now) : null;
         const second = row.stage >= 3 && row.stage < 4 ? dueWithin(row.dueAt, now) : null;

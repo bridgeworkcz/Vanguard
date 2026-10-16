@@ -36,6 +36,18 @@ export function escapeTelegramHtml(text: string): string {
 
 // --- 3. Базовий транспорт відправки повідомлень у Telegram API ---
 
+export function waLink(phone: string): string {
+  const shown = phone.trim();
+  const digits = shown.replace(/\D/g, "");
+  if (digits.length < 8) return escapeTelegramHtml(shown);
+  return `<a href="https://wa.me/${digits}">${escapeTelegramHtml(shown)}</a>`;
+}
+
+export function officeNote(title: string, lines: Array<string | false | null | undefined>): string {
+  const body = lines.map((line) => (typeof line === "string" ? line.trim() : "")).filter(Boolean);
+  return [`<b>${escapeTelegramHtml(title)}</b>`, ...body].join("\n");
+}
+
 export async function sendTelegramMessage(
   message: string,
   options: SendTelegramOptions = {}
