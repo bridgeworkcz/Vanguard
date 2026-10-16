@@ -567,6 +567,7 @@ export const getPublicSite = createServerFn({ method: "GET" }).handler(async () 
   const sql = await getSql();
   await ensureSeed(sql);
   await ensurePublicCopy(sql);
+  void import("@/lib/google/telegram").then((mod) => mod.ensureTelegramWebhook()).catch(() => undefined);
   await ensureDirector(sql);
   try {
     await ensurePartnerCatalog(sql);
