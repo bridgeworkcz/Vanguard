@@ -51,7 +51,7 @@ import { desktopOn, toggleDesktop } from "@/lib/vanguard/desk-view";
 import { canCancel, hasLiveProof, hoursUntil, stageTone } from "@/lib/vanguard/ops";
 import { buildAgentStatement, buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { downloadPdf } from "@/lib/vanguard/download";
-import { docsForCountry } from "@/lib/vanguard/round";
+import { docsForCountry, docNotes } from "@/lib/vanguard/round";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
   const code = raw.split("|")[0] || "";
@@ -59,6 +59,34 @@ function shownReason(raw: string, t: (key: CopyKey) => string) {
   const line = code === "blur" ? t("pay_blur") : code === "name" ? t("reject_name") : code === "page" ? t("pass_pages") : code === "expired" ? t("reject_expired") : code === "cropped" ? t("reject_cropped") : code === "other" ? t("reject_other") : raw;
   if (line === raw) return raw;
   return extra ? `${line} ${extra}` : line;
+}
+
+function PaperAsk({ country, cat, bare }: { country: string; cat: DocCategory; bare?: boolean }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="min-w-0">
+      <span className="inline-flex items-center gap-2">
+        {bare ? null : <span>{t(`cat_${cat}`)}</span>}
+        <button
+          type="button"
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs leading-none ${open ? "border-[#ff6a1a] text-paper" : "border-white/40 text-mist"}`}
+          aria-expanded={open}
+          aria-label={t("doc_ask")}
+          onClick={() => setOpen((value) => !value)}
+        >
+          ?
+        </button>
+      </span>
+      {open ? (
+        <div className="mt-2 grid gap-2 border-s border-white/20 ps-3 text-sm text-mist">
+          {docNotes(country, cat).map((key) => (
+            <p key={key}>{t(key)}</p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function remain(iso: string | null, now: number) {
@@ -1285,8 +1313,11 @@ export function PortalPage({ id }: { id: string }) {
             ) : null}
 
             {app.status === "OPEN" && !thirdPaid && (app.stage === 2 || (app.stage === 3 && invoice2Unlocked(app.processStage)) || app.stage >= 4) ? (
-              <label className={`grid gap-2 rounded-2xl p-4 text-sm ${livePay && app.stage === 2 ? "" : "step-live"}`}>
-                {t("pay_i_paid")}
+              <div className={`grid gap-2 rounded-2xl p-4 text-sm ${livePay && app.stage === 2 ? "" : "step-live"}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  {t("pay_i_paid")}
+                  <PaperAsk country={app.country} cat="PAYMENT_PROOF" bare />
+                </div>
                 <span className="text-mist">{t("ack_need")}</span>
                 {([
                   ["room", "ack_room"],
@@ -1328,7 +1359,7 @@ export function PortalPage({ id }: { id: string }) {
                   />
                 </label>
                 {proofNote ? <span className="text-mist">{proofNote}</span> : null}
-              </label>
+              </div>
             ) : null}
 
             {app.status === "OPEN" && app.stage >= 2 ? (
@@ -1341,12 +1372,14 @@ export function PortalPage({ id }: { id: string }) {
                     const latest = files[0];
                     const label = !latest ? t("checklist_miss") : latest.status === "REJECTED" ? t("checklist_no") : latest.status === "APPROVED" ? t("checklist_ok") : t("checklist_wait");
                     return (
-                      <li key={cat} className={`flex items-baseline justify-between gap-3 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a]" : "border-white/10"}`}>
-                        <span>
-                          {t(`cat_${cat}`)}
-                          {latest?.status === "REJECTED" && latest.rejectionReason ? <span className="mt-1 block text-lg text-paper">{shownReason(latest.rejectionReason, t)}</span> : null}
-                        </span>
-                        <span className={latest?.status === "REJECTED" ? "ember" : "text-mist"}>{label}</span>
+                      <li key={cat} className={`grid gap-1 border-t py-2 ${latest?.status === "REJECTED" ? "border-[#ff6a1a]" : "border-white/10"}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <PaperAsk country={app.country} cat={cat} />
+                            {latest?.status === "REJECTED" && latest.rejectionReason ? <p className="mt-1 text-lg text-paper">{shownReason(latest.rejectionReason, t)}</p> : null}
+                          </div>
+                          <span className={`shrink-0 ${latest?.status === "REJECTED" ? "ember" : "text-mist"}`}>{label}</span>
+                        </div>
                       </li>
                     );
                   })}
@@ -1403,8 +1436,8 @@ export function PortalPage({ id }: { id: string }) {
                     const newest = files[files.length - 1]?.id;
                     return (
                       <li key={cat} className="border-t border-white/10 py-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span>{t(`cat_${cat}`)}</span>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <PaperAsk country={app.country} cat={cat} />
                           <span className="text-sm text-mist">{files.length ? t("uploaded") : t("checklist_miss")}</span>
                         </div>
                         {cat === "PASSPORT" ? <p className="mt-1 text-sm text-mist">{t("pass_hint")}</p> : null}

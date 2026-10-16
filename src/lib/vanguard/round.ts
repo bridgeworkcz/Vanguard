@@ -1,4 +1,5 @@
 import { countrySlug, hasHousing, type DocCategory } from "./domain";
+import type { CopyKey } from "./i18n";
 
 /** Papers the client is asked for. The list is not the same for every destination. */
 export function docsForCountry(country: string): DocCategory[] {
@@ -8,6 +9,65 @@ export function docsForCountry(country: string): DocCategory[] {
   }
   list.push("OTHER");
   return list;
+}
+
+/** What the client should read before photographing this paper. Base rule, then the destination. */
+export function docNotes(country: string, cat: DocCategory): CopyKey[] {
+  if (cat === "PASSPORT") {
+    const extra =
+      country === "Germany" ? "note_pass_de" : country === "Canada" ? "note_pass_ca" : country === "New Zealand" ? "note_pass_nz" : "note_pass_visa";
+    return ["note_pass", extra];
+  }
+  if (cat === "POLICE_CLEARANCE") {
+    const extra =
+      country === "Czech Republic"
+        ? "note_police_cz"
+        : country === "Slovakia"
+          ? "note_police_sk"
+          : country === "Poland"
+            ? "note_police_pl"
+            : country === "Germany"
+              ? "note_police_de"
+              : country === "Hungary"
+                ? "note_police_hu"
+                : country === "Serbia"
+                  ? "note_police_rs"
+                  : country === "Norway"
+                    ? "note_police_no"
+                    : country === "Canada"
+                      ? "note_police_ca"
+                      : country === "New Zealand"
+                        ? "note_police_nz"
+                        : "note_police_eu";
+    return ["note_police", extra];
+  }
+  if (cat === "PHOTO") {
+    const extra = country === "Germany" ? "note_photo_de" : country === "Canada" ? "note_photo_ca" : country === "New Zealand" ? "note_photo_nz" : "note_photo_eu";
+    return ["note_photo", extra];
+  }
+  if (cat === "EDUCATION") {
+    const extra =
+      country === "Germany"
+        ? "note_edu_de"
+        : country === "Poland"
+          ? "note_edu_pl"
+          : country === "Canada"
+            ? "note_edu_ca"
+            : country === "New Zealand"
+              ? "note_edu_nz"
+              : country === "Czech Republic" || country === "Slovakia"
+                ? "note_edu_cz"
+                : "";
+    return extra ? ["note_edu", extra] : ["note_edu"];
+  }
+  if (cat === "MEDICAL") {
+    if (country === "Canada") return ["note_med_ca"];
+    if (country === "New Zealand") return ["note_med_nz"];
+    if (country === "Norway") return ["note_med_no"];
+    return ["note_med_de"];
+  }
+  if (cat === "PAYMENT_PROOF") return ["note_pay"];
+  return ["note_other"];
 }
 
 export const HOME_CURRENCY: Record<string, string> = {
