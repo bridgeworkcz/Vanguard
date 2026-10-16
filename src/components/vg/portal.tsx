@@ -5,6 +5,7 @@ import { Shell, useDesk, useSite } from "./chrome";
 import {
   cancelMyApplication,
   createApplication,
+  deleteMyApplication,
   downloadDocument,
   getMyApplication,
   getSessionProfile,
@@ -843,13 +844,25 @@ export function PortalPage({ id }: { id: string }) {
           <ul className="grid gap-3">
             {rows && rows.length === 0 ? <li className="text-mist">{t("portal_empty")}</li> : null}
             {rows?.map((row) => (
-              <li key={row.id}>
+              <li key={row.id} className="grid gap-2">
                 <Link to="/portal" search={{ id: row.id }} className="glass grid gap-2 p-4 sm:grid-cols-4">
                   <span className="display text-2xl sm:col-span-2">{row.vacancyTitle || row.country}</span>
                   <span className="text-sm text-mist">{row.country}</span>
                   <span className="text-sm text-paper">{nextAction(row, false, false, t)}</span>
                   <span className={`text-sm ${stageTone(row.status, row.stage)}`}>{statusLabel(row, t)}</span>
                 </Link>
+                <button
+                  type="button"
+                  className="btn w-fit"
+                  onClick={() => {
+                    if (!window.confirm(t("case_remove_ask"))) return;
+                    void deleteMyApplication({ data: row.id })
+                      .then(() => refreshList())
+                      .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+                  }}
+                >
+                  {t("case_remove")}
+                </button>
               </li>
             ))}
           </ul>
@@ -880,6 +893,18 @@ export function PortalPage({ id }: { id: string }) {
                 }}
               >
                 {t("share_case")}
+              </button>
+              <button
+                type="button"
+                className="btn mt-2"
+                onClick={() => {
+                  if (!window.confirm(t("case_remove_ask"))) return;
+                  void deleteMyApplication({ data: app.id })
+                    .then(() => navigate({ to: "/portal", search: { id: "" } }))
+                    .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+                }}
+              >
+                {t("case_remove")}
               </button>
               <h2 className="display mt-2 text-4xl">{app.vacancyTitle}</h2>
               <a href="#case-next" className="btn-solid mt-4 inline-flex">

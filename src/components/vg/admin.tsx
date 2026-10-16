@@ -11,6 +11,7 @@ import {
   adminDeletePartner,
   adminDeleteAccount,
   adminDeleteApplication,
+  adminPurgeClientDeleted,
   adminRestoreAccount,
   adminMarkCommission,
   adminDeleteTeam,
@@ -1087,6 +1088,24 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
               >
                 {t("admin_assign")} · {picked.length}
               </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={acting}
+                onClick={() => {
+                  if (!window.confirm(t("admin_purge_deleted_ask"))) return;
+                  setActing(true);
+                  void adminPurgeClientDeleted()
+                    .then(async (res) => {
+                      setDeskNote(`${t("admin_purge_deleted_done")} · ${res.count}`);
+                      setApps(await adminListApplications({ data: { includeIncomplete: showAll } }));
+                    })
+                    .catch(() => setErr(t("admin_unsaved")))
+                    .finally(() => setActing(false));
+                }}
+              >
+                {t("admin_purge_deleted")}
+              </button>
             </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
@@ -1251,6 +1270,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                               {twin ? <span className="mt-1 block text-xs">{t("phone_same")}</span> : null}
                               {hour ? <span className="mt-1 block text-xs text-mist">{t("write_after")} {hour}:00</span> : null}
                               {a.accountClosed ? <span className="mt-1 block text-xs text-mist">{t("account_closed")}</span> : null}
+                              {a.clientDeletedAt ? <span className="mt-1 block text-xs">{t("client_deleted")}</span> : null}
                             </td>
                             <td data-label={t("admin_country")}>{a.country}</td>
                             <td data-label={t("seat")}>
@@ -1309,6 +1329,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                 <p className="text-mist">
                   {detail.app.clientEmail} · {detail.app.totalCost} EUR · {detail.app.processing}
                 </p>
+                {detail.app.clientDeletedAt ? <p className="mt-2">{t("client_deleted")}</p> : null}
                 <p className="mt-3 ember">
                   {detail.app.status !== "OPEN"
                     ? t("portal_next_closed")

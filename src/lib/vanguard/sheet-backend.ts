@@ -58,6 +58,7 @@ type Extra = {
   lang: string;
   accountClosed: boolean;
   commissionPaid: boolean;
+  clientDeletedAt: string;
 };
 
 type Profile = { userId: string; email: string; fullName: string; phone: string; role: string };
@@ -257,6 +258,7 @@ function emptyExtra(): Extra {
     lang: "en",
     accountClosed: false,
     commissionPaid: false,
+    clientDeletedAt: "",
   };
 }
 
@@ -325,6 +327,7 @@ function appFrom(row: SheetRow, vacancies: Vacancy[]) {
     referrerUserId: extra.referrerUserId || "",
     clientPhone: extra.questionnaire.phone || "",
     accountClosed: extra.accountClosed === true,
+    clientDeletedAt: extra.clientDeletedAt || null,
     lang: extra.lang || "en",
     feeScheme: "legacy30" as const,
     invoice2DueAt: null,
@@ -1333,7 +1336,7 @@ export async function sessionProfile(userId: string) {
 export async function listMine(userId: string) {
   await profile(userId);
   return (await loadApps())
-    .filter((app) => app.userId === userId)
+    .filter((app) => app.userId === userId && !app.clientDeletedAt)
     .map(present)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -1341,7 +1344,7 @@ export async function listMine(userId: string) {
 export async function getMine(userId: string, id: string) {
   await profile(userId);
   const app = (await loadApps()).find((item) => item.id === id);
-  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (!app || app.userId !== userId || app.clientDeletedAt) throw new Error("Not found");
   await persistLegacyCap(app);
   let wallet = "";
   let network = "";
@@ -1443,7 +1446,7 @@ export async function createApp(userId: string, data: { vacancyId: string; citiz
 export async function saveQuestionnaire(userId: string, data: { id: string; questionnaire: Questionnaire }) {
   const person = await profile(userId);
   const app = (await loadApps()).find((item) => item.id === data.id);
-  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (!app || app.userId !== userId || app.clientDeletedAt) throw new Error("Not found");
   if (app.stage !== 1 || app.status !== "OPEN") throw new Error("Locked");
   const questionnaire = { ...parseQuestionnaire("{}"), ...data.questionnaire };
   const error = questionnaireError(questionnaire);
@@ -1500,7 +1503,7 @@ async function storeFile(applicationId: string, userId: string, category: string
 export async function uploadDoc(userId: string, data: { applicationId: string; category: DocCategory; fileName: string; mime: string; data: string }) {
   await profile(userId);
   const app = (await loadApps()).find((item) => item.id === data.applicationId);
-  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (!app || app.userId !== userId || app.clientDeletedAt) throw new Error("Not found");
   if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
   if (!DOC_CATEGORIES.includes(data.category) || data.category === "FINAL") throw new Error("Category");
   if (data.category === "PAYMENT_PROOF" && app.stage < 2) throw new Error("Locked");
@@ -1525,7 +1528,7 @@ export async function postMessage(userId: string, data: { applicationId: string;
   const app = (await loadApps()).find((item) => item.id === data.applicationId);
   if (!app) throw new Error("Not found");
   const staff = person.role === "ADMIN" || person.role === "MANAGER";
-  if (!staff && app.userId !== userId) throw new Error("Forbidden");
+  if (!staff && (app.userId !== userId || app.clientDeletedAt)) throw new Error("Forbidden");
   const stamp = nowIso();
   await appendSheetRow("SupportTickets", {
     id: newId("MSG"),
@@ -1548,7 +1551,7 @@ export async function downloadDoc(userId: string, id: string) {
   const app = (await loadApps()).find((item) => item.id === doc.dossierId);
   if (!app) throw new Error("Not found");
   const staff = person.role === "ADMIN" || person.role === "MANAGER";
-  if (!staff && app.userId !== userId) throw new Error("Forbidden");
+  if (!staff && (app.userId !== userId || app.clientDeletedAt)) throw new Error("Forbidden");
   if (!doc.driveFileId) throw new Error("File could not be opened.");
   try {
     if (doc.driveFileId.startsWith("docs/")) {
@@ -2336,10 +2339,61 @@ export async function adminAllTeam(userId: string) {
     });
 }
 
+export async function deleteMine(userId: string, id: string) {
+  await profile(userId);
+  const app = (await loadApps()).find((item) => item.id === id);
+  if (!app || app.userId !== userId || isHistoryApp(app)) throw new Error("Not found");
+  if (app.clientDeletedAt) return { ok: true as const };
+  const docs = await docsFor(id);
+  const abandon = app.status === "OPEN" && app.stage < 3 && !docs.some((doc) => doc.category === "PAYMENT_PROOF" && doc.status !== "REJECTED");
+  await saveApp(app, { ...app.extra, clientDeletedAt: nowIso() }, abandon ? { status: "CANCELLED" } : {});
+  if (abandon && app.vacancyId) await restoreQuota(app.vacancyId);
+  await audit(userId, "CLIENT_DELETE", id, "");
+  return { ok: true as const };
+}
+
+export async function purgeClientDeleted(userId: string) {
+  await requireAdmin(userId);
+  const apps = (await loadApps()).filter((app) => app.clientDeletedAt && !isHistoryApp(app));
+  for (const app of apps) {
+    if (app.status === "OPEN" && app.stage < 3 && app.vacancyId) {
+      try {
+        await restoreQuota(app.vacancyId);
+      } catch (err) {
+        console.error("[purge-quota]", err);
+      }
+    }
+  }
+  const ids = apps.map((app) => app.id);
+  if (!ids.length) return { count: 0 };
+  await deleteSheetRowsByIds("Applications", ids);
+  const [docs, pays, notes] = await Promise.all([
+    readSheetRows("DossierDocuments"),
+    readSheetRows("PaymentTransactions"),
+    readSheetRows("SupportTickets"),
+  ]);
+  const held = new Set(ids);
+  await deleteSheetRowsByIds(
+    "DossierDocuments",
+    docs.filter((row) => held.has(row.dossierId)).map((row) => row.id),
+  ).catch((err) => console.error("[purge-docs]", err));
+  await deleteSheetRowsByIds(
+    "PaymentTransactions",
+    pays.filter((row) => held.has(row.dossierId)).map((row) => row.id),
+  ).catch((err) => console.error("[purge-pay]", err));
+  await deleteSheetRowsByIds(
+    "SupportTickets",
+    notes.filter((row) => held.has(row.subject) || held.has(row.dossierId)).map((row) => row.id),
+  ).catch((err) => console.error("[purge-notes]", err));
+  await audit(userId, "PURGE_CLIENT_DELETED", "applications", String(ids.length));
+  dropPublicCache();
+  return { count: ids.length };
+}
+
 export async function cancelMine(userId: string, id: string) {
   await profile(userId);
   const app = (await loadApps()).find((item) => item.id === id);
-  if (!app || app.userId !== userId) throw new Error("Not found");
+  if (!app || app.userId !== userId || app.clientDeletedAt) throw new Error("Not found");
   const docs = await docsFor(id);
   if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, docs.some((doc) => doc.category === "PAYMENT_PROOF" && doc.status !== "REJECTED"))) {
     throw new Error("Locked");
@@ -2353,7 +2407,7 @@ export async function cancelMine(userId: string, id: string) {
 export async function resubmit(userId: string, id: string) {
   await profile(userId);
   const app = (await loadApps()).find((item) => item.id === id);
-  if (!app || app.userId !== userId || app.status !== "REJECTED") throw new Error("Locked");
+  if (!app || app.userId !== userId || app.clientDeletedAt || app.status !== "REJECTED") throw new Error("Locked");
   const citizenship = app.citizenship || app.extra.questionnaire.citizenship;
   if (!citizenship) throw new Error("Citizenship");
   return createApp(userId, { vacancyId: app.vacancyId, citizenship, processing: app.processing, referrerUserId: app.referrerUserId });

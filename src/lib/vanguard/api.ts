@@ -366,6 +366,7 @@ export type AppRow = {
   linkedTo?: string;
   commissionPaid?: boolean;
   campaign?: string;
+  clientDeletedAt?: string | null;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -383,7 +384,8 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     a.invoice2_due_at::text as "invoice2DueAt",
     coalesce(a.pay_reminded, '') as "payReminded",
     coalesce(a.linked_to, '') as "linkedTo",
-    coalesce(a.campaign, '') as "campaign"
+    coalesce(a.campaign, '') as "campaign",
+    a.client_deleted_at::text as "clientDeletedAt"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -733,7 +735,7 @@ export const listMyApplications = createServerFn({ method: "GET" })
       a.stage4_at::text as "stage4At",
       coalesce(a.fee_scheme, 'legacy30') as "feeScheme"
       from applications a left join vacancies v on v.id = a.vacancy_id
-      where a.user_id = ${context.userId} order by a.created_at desc`;
+      where a.user_id = ${context.userId} and a.client_deleted_at is null order by a.created_at desc`;
     return rows.map((r) => {
       const capped = capLegacyProgress(r.createdAt, Number(r.stage), r.processStage);
       return {
@@ -758,7 +760,7 @@ export const getMyApplication = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
-    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt) throw new Error("Not found");
     const documents = await docsFor(sql, id);
     const messages = await messagesFor(sql, id);
     let wallet = "";
@@ -896,7 +898,7 @@ export const openSpouseCase = createServerFn({ method: "POST" })
     const sql = await getSql();
     const profile = await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
-    if (!app || app.userId !== context.userId || app.status !== "OPEN") throw new Error("Not found");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt || app.status !== "OPEN") throw new Error("Not found");
     const linked = await sql<{ id: string }>`select id from applications where linked_to = ${app.id} and status = 'OPEN' limit 1`;
     if (linked[0]) return { id: linked[0].id };
     const vacancies = await loadVacancies(sql);
@@ -953,7 +955,7 @@ export const saveQuestionnaire = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, data.id);
-    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt) throw new Error("Not found");
     if (app.stage !== 1 || app.status !== "OPEN") throw new Error("Locked");
     const q = { ...parseQuestionnaire("{}"), ...data.questionnaire };
     const err = questionnaireError(q);
@@ -1001,7 +1003,7 @@ export const uploadMyDocument = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, clean(data?.applicationId, 40));
-    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt) throw new Error("Not found");
     if (app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
     const category = data.category;
     if (!DOC_CATEGORIES.includes(category) || category === "FINAL") throw new Error("Category");
@@ -1037,7 +1039,7 @@ export const postMessage = createServerFn({ method: "POST" })
     const staff = STAFF.has(profile.role);
     if (staff) {
       if (profile.role === "MANAGER") await guardCase(sql, context.userId, app);
-    } else if (app.userId !== context.userId) throw new Error("Forbidden");
+    } else if (app.userId !== context.userId || app.clientDeletedAt) throw new Error("Forbidden");
     await sql`insert into messages (id, application_id, author_id, author_role, body) values (${newId("MSG")}, ${app.id}, ${context.userId}, ${profile.role}, ${data.body})`;
   });
 
@@ -1065,7 +1067,7 @@ export const downloadDocument = createServerFn({ method: "POST" })
     const staff = STAFF.has(profile.role);
     if (staff) {
       if (profile.role === "MANAGER") await guardCase(sql, context.userId, app);
-    } else if (app.userId !== context.userId) throw new Error("Forbidden");
+    } else if (app.userId !== context.userId || app.clientDeletedAt) throw new Error("Forbidden");
     return doc;
   });
 
@@ -1137,7 +1139,8 @@ export const adminListApplications = createServerFn({ method: "POST" })
       a.stage4_at::text as "stage4At",
       coalesce(a.fee_scheme, 'legacy30') as "feeScheme",
       a.invoice2_due_at::text as "invoice2DueAt",
-      coalesce(a.campaign, '') as "campaign"
+      coalesce(a.campaign, '') as "campaign",
+      a.client_deleted_at::text as "clientDeletedAt"
       from applications a left join vacancies v on v.id = a.vacancy_id
       order by a.created_at desc`;
     return rows
@@ -2029,7 +2032,7 @@ export const cancelMyApplication = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
-    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt) throw new Error("Not found");
     const docs = await docsFor(sql, id);
     if (!canCancel(app.status, app.stage, app.cancelDeadlineAt, hasLiveProof(docs))) {
       throw new Error("Locked");
@@ -2042,6 +2045,46 @@ export const cancelMyApplication = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const deleteMyApplication = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: unknown) => clean(id, 40))
+  .handler(async ({ context, data: id }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).deleteMine(context.userId, id);
+    const sql = await getSql();
+    await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, id);
+    if (!app || app.userId !== context.userId) throw new Error("Not found");
+    if (app.clientDeletedAt) return { ok: true as const };
+    const proofs = await sql<{ id: string }>`select id from documents where application_id = ${app.id} and category = 'PAYMENT_PROOF' and status <> 'REJECTED' limit 1`;
+    const abandon = app.status === "OPEN" && app.stage < 3 && !proofs[0];
+    await sql`update applications set client_deleted_at = now(), updated_at = now() where id = ${app.id} and user_id = ${context.userId}`;
+    if (abandon) await closeIfOpen(sql, app.id, "CANCELLED");
+    await audit(sql, context.userId, "CLIENT_DELETE", app.id, "");
+    return { ok: true as const };
+  });
+
+export const adminPurgeClientDeleted = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).purgeClientDeleted(context.userId);
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const rows = await sql<{ id: string; vacancyId: string; status: string; stage: number }>`
+      select id, vacancy_id as "vacancyId", status, stage from applications where client_deleted_at is not null`;
+    for (const row of rows) {
+      if (row.status === "OPEN" && Number(row.stage) < 3) await giveSeat(sql, row.vacancyId);
+    }
+    const ids = rows.map((row) => row.id);
+    if (ids.length) {
+      await sql`delete from documents where application_id = any(${ids}::text[])`;
+      await sql`delete from messages where application_id = any(${ids}::text[])`;
+      await sql`delete from employer_links where application_id = any(${ids}::text[])`;
+      await sql`delete from applications where client_deleted_at is not null`;
+    }
+    await audit(sql, context.userId, "PURGE_CLIENT_DELETED", "applications", String(ids.length));
+    return { count: ids.length };
+  });
+
 export const resubmitApplication = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((id: unknown) => clean(id, 40))
@@ -2050,7 +2093,7 @@ export const resubmitApplication = createServerFn({ method: "POST" })
     const sql = await getSql();
     const person = await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, id);
-    if (!app || app.userId !== context.userId || app.status !== "REJECTED") throw new Error("Locked");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt || app.status !== "REJECTED") throw new Error("Locked");
     const prior = parseQuestionnaire(app.questionnaire);
     if (prior.criminalRecord === "yes") throw new Error("Gate record");
     if (prior.visaRefusal === "yes") throw new Error("Gate refusal");
@@ -2232,7 +2275,7 @@ export const savePayAcks = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ctxProfile(sql, context.userId);
     const app = await loadApp(sql, data.id);
-    if (!app || app.userId !== context.userId || app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
+    if (!app || app.userId !== context.userId || app.clientDeletedAt || app.status !== "OPEN" || app.stage < 2) throw new Error("Locked");
     const q = parseQuestionnaire(app.questionnaire);
     q.acks = { room: data.room, night: data.night, fee: data.fee, country: data.country };
     await sql`update applications set questionnaire = ${JSON.stringify(q)}, updated_at = now() where id = ${app.id}`;
