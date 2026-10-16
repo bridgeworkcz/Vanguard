@@ -1593,6 +1593,7 @@ export async function adminOverview(userId: string) {
     phone: row.phone,
     role: roleOf(rolesOf(row.roles)),
     clientDiscount: cuts[row.id] || 0,
+    passwordNote: person.role === "ADMIN" ? "" : "",
   }));
   return {
     role: person.role,
@@ -2498,6 +2499,19 @@ export async function changeMyPassword(userId: string, data: { current: string; 
   await updateSheetRowById("Users", userId, { ...row, passwordHash: hashPassword(data.next) });
   await audit(userId, "PASSWORD", userId, "");
   return { ok: true };
+}
+
+export async function adminSetUserPassword(actorId: string, userId: string, password: string) {
+  await requireAdmin(actorId);
+  const next = password.trim();
+  if (next.length < 8) throw new Error("Short");
+  const rows = await readSheetRows("Users");
+  const row = rows.find((item) => item.id === userId);
+  if (!row || row.isActive === "false") throw new Error("Not found");
+  const { hashPassword } = await import("@/lib/google/session");
+  await updateSheetRowById("Users", userId, { ...row, passwordHash: hashPassword(next) });
+  await audit(actorId, "PASSWORD_SET", userId, "");
+  return { ok: true as const };
 }
 
 type ResetRow = { hash: string; userId: string; exp: number };

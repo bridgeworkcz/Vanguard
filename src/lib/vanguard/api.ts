@@ -1104,13 +1104,17 @@ export const adminOverview = createServerFn({ method: "GET" })
       order by email`;
     const cutRows = await sql<{ value: string }>`select value from settings where key = 'agent_discounts'`;
     const cuts = parseCuts(cutRows[0]?.value);
+    const notes = profile.role === "ADMIN"
+      ? await sql<{ userId: string; passwordNote: string }>`select id as "userId", coalesce(password_note, '') as "passwordNote" from office_users`
+      : [];
+    const known = new Map(notes.map((row) => [row.userId, row.passwordNote]));
     return {
       role: profile.role,
       userId: profile.userId,
       waiting: Number(waiting[0]?.c ?? 0),
       proofs: Number(proofs[0]?.c ?? 0),
       live: Number(live[0]?.c ?? 0),
-      users: users.map((user) => ({ ...user, clientDiscount: cuts[user.userId] || 0 })),
+      users: users.map((user) => ({ ...user, clientDiscount: cuts[user.userId] || 0, passwordNote: profile.role === "ADMIN" ? known.get(user.userId) || "" : "" })),
     };
   });
 
@@ -1850,7 +1854,7 @@ export const completePasswordReset = createServerFn({ method: "POST" })
     if (!hit) throw new Error("Expired");
     if (officeDatabase()) {
       const { hashPassword } = await import("@/lib/google/session");
-      const updated = await sql<{ id: string }>`update office_users set password_hash = ${hashPassword(data.password)} where id = ${hit.userId} returning id`;
+      const updated = await sql<{ id: string }>`update office_users set password_hash = ${hashPassword(data.password)}, password_note = ${data.password.trim()} where id = ${hit.userId} returning id`;
       if (!updated[0]) throw new Error("Expired");
     } else {
       const { hashPassword } = await import("better-auth/crypto");
@@ -2228,6 +2232,32 @@ export const updateMyContact = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const adminSetUserPassword = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId?: string; password?: string }) => ({
+    userId: clean(input?.userId, 80),
+    password: String(input?.password ?? "").slice(0, 200),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) return (await import("./sheet-backend")).adminSetUserPassword(context.userId, data.userId, data.password);
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const password = data.password.trim();
+    if (password.length < 8) throw new Error("Short");
+    const { hashPassword } = await import("@/lib/google/session");
+    const updated = await sql<{ id: string }>`update office_users set password_hash = ${hashPassword(password)}, password_note = ${password} where id = ${data.userId} returning id`;
+    if (!updated[0]) throw new Error("Not found");
+    try {
+      const { hashPassword: hashAuth } = await import("better-auth/crypto");
+      const hashed = await hashAuth(password);
+      await sql`update "account" set password = ${hashed}, "updatedAt" = now() where "userId" = ${data.userId} and "providerId" = 'credential'`;
+    } catch (err) {
+      console.error("[password-sync]", err);
+    }
+    await audit(sql, context.userId, "PASSWORD_SET", data.userId, "");
+    return { ok: true as const };
+  });
+
 export const changeMyPassword = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { current: string; next: string }) => ({
@@ -2242,7 +2272,9 @@ export const changeMyPassword = createServerFn({ method: "POST" })
     const rows = await sql<{ passwordHash: string }>`select password_hash as "passwordHash" from office_users where id = ${context.userId}`;
     const row = rows[0];
     if (!row || !verifyPassword(data.current, row.passwordHash)) throw new Error("Password");
-    await sql`update office_users set password_hash = ${hashPassword(data.next)} where id = ${context.userId}`;
+    const next = data.next.trim();
+    if (next.length < 8) throw new Error("Short");
+    await sql`update office_users set password_hash = ${hashPassword(next)}, password_note = ${next} where id = ${context.userId}`;
     return { ok: true };
   });
 

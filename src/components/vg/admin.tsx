@@ -34,6 +34,7 @@ import {
   adminSetRole,
   adminSetClientDiscount,
   adminSetStage,
+  adminSetUserPassword,
   adminUploadFinal,
   adminUploadProof,
   adminListMedia,
@@ -547,6 +548,8 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
   const [cutUser, setCutUser] = useState("");
   const [cutPct, setCutPct] = useState("0");
   const [cutNote, setCutNote] = useState("");
+  const [passDraft, setPassDraft] = useState<Record<string, string>>({});
+  const [passMsg, setPassMsg] = useState<Record<string, string>>({});
   const staffUk = role === "ADMIN" || role === "MANAGER";
   const t = (key: CopyKey) => (staffUk ? (ADMIN_UK[key] ?? publicT(key)) : publicT(key));
 
@@ -933,6 +936,41 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                       </button>
                       ) : null}
                       </div>
+                      {isAdmin ? (
+                        <form
+                          className="flex flex-wrap items-center gap-2"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const password = (passDraft[u.userId] || "").trim();
+                            if (password.length < 8) {
+                              setPassMsg((cur) => ({ ...cur, [u.userId]: t("admin_password_short") }));
+                              return;
+                            }
+                            void adminSetUserPassword({ data: { userId: u.userId, password } })
+                              .then(() => adminOverview())
+                              .then((next) => {
+                                setOverview(next);
+                                setPassDraft((cur) => ({ ...cur, [u.userId]: "" }));
+                                setPassMsg((cur) => ({ ...cur, [u.userId]: t("admin_password_saved") }));
+                              })
+                              .catch((err: unknown) => {
+                                const text = err instanceof Error ? err.message : "";
+                                setPassMsg((cur) => ({ ...cur, [u.userId]: text === "Short" ? t("admin_password_short") : t("admin_unsaved") }));
+                              });
+                          }}
+                        >
+                          <span className="latin text-paper">{u.passwordNote || t("admin_password_hidden")}</span>
+                          <input
+                            className="field max-w-xs"
+                            value={passDraft[u.userId] || ""}
+                            autoComplete="new-password"
+                            placeholder={t("admin_password_new")}
+                            onChange={(e) => setPassDraft((cur) => ({ ...cur, [u.userId]: e.target.value }))}
+                          />
+                          <button className="btn" type="submit">{t("admin_password_save")}</button>
+                          {passMsg[u.userId] ? <span className="text-mist">{passMsg[u.userId]}</span> : null}
+                        </form>
+                      ) : null}
                       {focusUser === u.userId ? (
                         <div className="grid gap-2 pb-1">
                           <p className="text-xs uppercase tracking-widest text-mist">{t("admin_user_cases")}</p>

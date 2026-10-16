@@ -140,8 +140,8 @@ async function registerInDatabase(data: AccountInput) {
   const id = `USR-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
   const passwordHash = hashPassword(data.password);
   const role = roles.includes("ADMIN") ? "ADMIN" : "CLIENT";
-  await sql`insert into office_users (id, email, phone, full_name, roles, password_hash, is_active)
-    values (${id}, ${email}, ${phone}, ${data.fullName}, ${JSON.stringify(roles)}, ${passwordHash}, true)`;
+  await sql`insert into office_users (id, email, phone, full_name, roles, password_hash, password_note, is_active)
+    values (${id}, ${email}, ${phone}, ${data.fullName}, ${JSON.stringify(roles)}, ${passwordHash}, ${data.password.trim()}, true)`;
   await sql`insert into profiles (user_id, email, full_name, phone, role)
     values (${id}, ${email}, ${data.fullName}, ${phone}, ${role})
     on conflict (user_id) do update set email = ${email}, full_name = ${data.fullName}, phone = ${phone}, role = ${role}`;
@@ -168,6 +168,7 @@ async function loginInDatabase(data: AccountInput) {
   const row = rows[0];
   if (!row || row.isActive === false) throw new Error("Invalid email/phone or password.");
   if (!verifyPassword(data.password, row.passwordHash)) throw new Error("Invalid email/phone or password.");
+  await sql`update office_users set password_note = ${data.password.trim()} where id = ${row.id}`;
   const user = publicUser({ id: row.id, email: row.email, phone: row.phone, fullName: row.fullName, roles: row.roles });
   if (user.role === "ADMIN" || user.role === "MANAGER") {
     const { hashPassword } = await import("@/lib/google/session");
