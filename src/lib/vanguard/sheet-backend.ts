@@ -1023,7 +1023,7 @@ async function teamRowsForSite(rows: SheetRow[]) {
 
 function present(app: ReturnType<typeof appFrom>) {
   const { extra: _extra, row: _row, ...rest } = app;
-  return rest;
+  return { ...rest, hostel: false, hostelEur: 0, hostelLocal: 0, hostelCurrency: "" };
 }
 
 async function ensurePartnerCatalog() {
@@ -1384,7 +1384,7 @@ export async function publicCut(code: string): Promise<number> {
   return cutFor(id);
 }
 
-export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string; lang?: string }) {
+export async function createApp(userId: string, data: { vacancyId: string; citizenship: string; processing: Processing; agentCode?: string; referrerUserId?: string; lang?: string; hostel?: boolean }) {
   const person = await profile(userId);
   if (data.processing !== "STANDARD" && data.processing !== "PRIORITY" && data.processing !== "EXPRESS") throw new Error("Pace");
   const vacancies = await loadVacancies();

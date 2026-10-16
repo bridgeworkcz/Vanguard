@@ -1368,6 +1368,7 @@ export function AdminPage({ tab, id }: { tab: string; id: string }) {
                   {detail.app.clientEmail} · {detail.app.totalCost} EUR · {detail.app.processing}
                 </p>
                 {detail.app.clientDeletedAt ? <p className="mt-2">{t("client_deleted")}</p> : null}
+                {detail.app.hostel ? <p className="mt-2">{t("hostel_on")} · {detail.app.hostelLocal && detail.app.hostelCurrency && detail.app.hostelCurrency !== "EUR" ? `${detail.app.hostelLocal} ${detail.app.hostelCurrency} · ` : ""}{detail.app.hostelEur} EUR</p> : null}
                 <p className="mt-3 ember">
                   {detail.app.status !== "OPEN"
                     ? t("portal_next_closed")

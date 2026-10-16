@@ -38,7 +38,8 @@ import { DEFAULT_SETTINGS, OFFICE, TEAM, VISA_PRODUCTS, buildVacancies, partnerR
 import { limited } from "./guard";
 import { toPublicSettings, toStaffSettings } from "./public-settings";
 import { canCancel, citizenshipBlocked, hasLiveProof, kyivMonth, monthCommission, remindBand } from "./ops";
-import { askScript, docsForCountry, dueWithin, resolveCampaign } from "./round";
+import { hostelQuote } from "./hostel";
+import { askScript, docsForCountry, dueWithin, resolveCampaign, seatHasHouse } from "./round";
 import { copy, type CopyKey } from "./i18n";
 import { RESET_LINK, deliverMail } from "./mail";
 import crypto from "node:crypto";
@@ -317,15 +318,32 @@ async function loadVacancies(sql: Sql): Promise<Vacancy[]> {
   const rows = await sql<Vacancy>`select id, title, country, visa_product_id as "visaProductId", employer, salary_net as "salaryNet",
     accommodation, working_hours as "workingHours", description, requirements, quota, active,
     coalesce(blocked_citizenships, '') as "blockedCitizenships",
-    coalesce(housing_kind, '') as "housingKind"
+    coalesce(housing_kind, '') as "housingKind",
+    coalesce(hostel_eur, 0) as "hostelEur",
+    coalesce(hostel_local, 0) as "hostelLocal",
+    coalesce(hostel_currency, '') as "hostelCurrency"
     from vacancies order by country, title`;
-  return rows.map((v) => ({
+  const mapped = rows.map((v) => ({
     ...v,
     quota: Number(v.quota),
     active: Boolean(v.active),
     blockedCitizenships: v.blockedCitizenships || "",
     housingKind: v.housingKind === "room" || v.housingKind === "hostel" || v.housingKind === "none" ? v.housingKind : "",
+    hostelEur: Number(v.hostelEur) || 0,
+    hostelLocal: Number(v.hostelLocal) || 0,
+    hostelCurrency: v.hostelCurrency || "",
   }));
+  for (const vacancy of mapped) {
+    const housed = seatHasHouse(vacancy.housingKind || "", vacancy.accommodation);
+    if (housed || vacancy.hostelEur > 0) continue;
+    const quote = hostelQuote(vacancy.id, vacancy.country);
+    vacancy.hostelEur = quote.eur;
+    vacancy.hostelLocal = quote.local;
+    vacancy.hostelCurrency = quote.currency;
+    await sql`update vacancies set hostel_eur = ${quote.eur}, hostel_local = ${quote.local}, hostel_currency = ${quote.currency}
+      where id = ${vacancy.id} and hostel_eur = 0`;
+  }
+  return mapped;
 }
 
 export type AppRow = {
@@ -367,6 +385,10 @@ export type AppRow = {
   commissionPaid?: boolean;
   campaign?: string;
   clientDeletedAt?: string | null;
+  hostel?: boolean;
+  hostelEur?: number;
+  hostelLocal?: number;
+  hostelCurrency?: string;
 };
 
 async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
@@ -385,7 +407,11 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     coalesce(a.pay_reminded, '') as "payReminded",
     coalesce(a.linked_to, '') as "linkedTo",
     coalesce(a.campaign, '') as "campaign",
-    a.client_deleted_at::text as "clientDeletedAt"
+    a.client_deleted_at::text as "clientDeletedAt",
+    coalesce(a.hostel, false) as hostel,
+    coalesce(v.hostel_eur, 0) as "hostelEur",
+    coalesce(v.hostel_local, 0) as "hostelLocal",
+    coalesce(v.hostel_currency, '') as "hostelCurrency"
     from applications a left join vacancies v on v.id = a.vacancy_id where a.id = ${id}`;
   const row = rows[0];
   if (!row) return null;
@@ -397,6 +423,10 @@ async function loadApp(sql: Sql, id: string): Promise<AppRow | null> {
     stage: capped.stage,
     processStage: capped.processStage,
     profileComplete: Boolean(row.profileComplete),
+    hostel: Boolean(row.hostel),
+    hostelEur: Number(row.hostelEur) || 0,
+    hostelLocal: Number(row.hostelLocal) || 0,
+    hostelCurrency: row.hostelCurrency || "",
   };
 }
 
@@ -784,6 +814,7 @@ type CreateInput = {
   refusal?: string;
   passportExpiry?: string;
   campaign?: string;
+  hostel?: boolean;
 };
 
 async function resolveReferrer(sql: Sql, code: string): Promise<string> {
@@ -827,6 +858,7 @@ export const createApplication = createServerFn({ method: "POST" })
     refusal: clean(input?.refusal, 8),
     passportExpiry: clean(input?.passportExpiry, 12),
     campaign: clean(input?.campaign, 80),
+    hostel: Boolean(input?.hostel),
   }))
   .handler(async ({ context, data }) => {
     const block = openBlock({ criminalRecord: data.record, visaRefusal: data.refusal, passportExpiry: data.passportExpiry });
@@ -879,9 +911,10 @@ export const createApplication = createServerFn({ method: "POST" })
       passportExpiry: data.passportExpiry || "",
     };
     if (!(await takeSeat(sql, vacancy.id))) throw new Error("Opening unavailable");
+    const hostel = Boolean(data.hostel) && !seatHasHouse(vacancy.housingKind || "", vacancy.accommodation) && (vacancy.hostelEur || 0) > 0;
     try {
-      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, campaign, client_lang)
-        values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160', ${campaign}, ${lang})`;
+      await sql`insert into applications (id, user_id, client_email, vacancy_id, visa_product_id, country, citizenship, processing, total_cost, currency, production_weeks, stage, status, questionnaire, referrer_user_id, fee_scheme, campaign, client_lang, hostel)
+        values (${id}, ${context.userId}, ${profile.email}, ${vacancy.id}, ${product.id}, ${product.country}, ${data.citizenship}, ${data.processing}, ${total}, 'EUR', ${weeks}, 1, 'OPEN', ${JSON.stringify(q)}, ${referrerUserId}, 'entry160', ${campaign}, ${lang}, ${hostel})`;
     } catch (err) {
       await giveSeat(sql, vacancy.id);
       throw err;
@@ -1400,6 +1433,17 @@ export const adminSaveVacancy = createServerFn({ method: "POST" })
         ${data.housingKind === "room" || data.housingKind === "hostel" || data.housingKind === "none" ? data.housingKind : ""})`;
     }
     await audit(sql, context.userId, "VACANCY", id, title);
+    const kind = data.housingKind === "room" || data.housingKind === "hostel" || data.housingKind === "none" ? data.housingKind : "";
+    const housed = seatHasHouse(kind, clean(data.accommodation, 300));
+    if (housed) {
+      await sql`update vacancies set hostel_eur = 0, hostel_local = 0, hostel_currency = '' where id = ${id}`;
+    } else {
+      const priced = await sql<{ eur: number }>`select hostel_eur as eur from vacancies where id = ${id}`;
+      if (!Number(priced[0]?.eur)) {
+        const quote = hostelQuote(id, clean(data.country, 80));
+        await sql`update vacancies set hostel_eur = ${quote.eur}, hostel_local = ${quote.local}, hostel_currency = ${quote.currency} where id = ${id}`;
+      }
+    }
     return { id };
   });
 
@@ -2255,6 +2299,30 @@ export const adminSetUserPassword = createServerFn({ method: "POST" })
       console.error("[password-sync]", err);
     }
     await audit(sql, context.userId, "PASSWORD_SET", data.userId, "");
+    return { ok: true as const };
+  });
+
+export const setHostel = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id?: string; on?: boolean }) => ({
+    id: clean(input?.id, 40),
+    on: Boolean(input?.on),
+  }))
+  .handler(async ({ context, data }) => {
+    if (sheetsOn()) throw new Error("Unavailable");
+    const sql = await getSql();
+    await ctxProfile(sql, context.userId);
+    const app = await loadApp(sql, data.id);
+    if (!app || app.userId !== context.userId || app.clientDeletedAt || app.status !== "OPEN") throw new Error("Not found");
+    if (app.stage >= 4) {
+      const proof = await sql<{ id: string }>`select id from documents
+        where application_id = ${app.id} and category = 'PAYMENT_PROOF' and status <> 'REJECTED'
+          and (${app.stage4At}::text is null or created_at >= ${app.stage4At}::timestamptz)
+        limit 1`;
+      if (proof[0]) throw new Error("Locked");
+    }
+    if (data.on && (!(app.hostelEur && app.hostelEur > 0))) throw new Error("Locked");
+    await sql`update applications set hostel = ${data.on}, updated_at = now() where id = ${app.id}`;
     return { ok: true as const };
   });
 

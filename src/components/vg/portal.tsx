@@ -16,6 +16,7 @@ import {
   resubmitApplication,
   saveQuestionnaire,
   savePayAcks,
+  setHostel,
   takeInvoiceNumber,
   noteFunnel,
   openSpouseCase,
@@ -52,6 +53,7 @@ import { canCancel, hasLiveProof, hoursUntil, stageTone } from "@/lib/vanguard/o
 import { buildAgentStatement, buildContract, buildInvoice, buildOffer, downloadStamped } from "@/lib/vanguard/pdf";
 import { downloadPdf } from "@/lib/vanguard/download";
 import { docsForCountry, docNotes } from "@/lib/vanguard/round";
+import { HostelBox } from "./hostel-note";
 
 function shownReason(raw: string, t: (key: CopyKey) => string) {
   const code = raw.split("|")[0] || "";
@@ -434,7 +436,7 @@ export function PortalPage({ id }: { id: string }) {
       return;
     }
     sessionStorage.removeItem("vg-intent");
-    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string; lang?: string; record?: string; refusal?: string; passportExpiry?: string; campaign?: string };
+    const intent = JSON.parse(raw) as { vacancyId: string; citizenship: string; processing: "STANDARD" | "PRIORITY" | "EXPRESS"; agentCode?: string; lang?: string; record?: string; refusal?: string; passportExpiry?: string; campaign?: string; hostel?: boolean };
     createApplication({ data: { ...intent, lang: intent.lang || lang, campaign: intent.campaign || sessionStorage.getItem("vg-campaign") || "" } })
       .then((res) => navigate({ to: "/portal", search: { id: res.id } }))
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
@@ -671,6 +673,9 @@ export function PortalPage({ id }: { id: string }) {
         number: numbered.number,
         hold: true,
         scheme: normalizeScheme(app.feeScheme),
+        hostelEur: tranche === 3 && app.hostel ? Number(app.hostelEur) || 0 : 0,
+        hostelLocal: Number(app.hostelLocal) || 0,
+        hostelCurrency: app.hostelCurrency || "",
       });
       if (url) saveFile(url, `${app.id}-invoice-${tranche}.pdf`);
     });
@@ -1272,11 +1277,26 @@ export function PortalPage({ id }: { id: string }) {
               <div id="case-next" className="grid gap-2">
                 <h3 className="display text-3xl">{t("portal_folder")}</h3>
                 {thirdPaid ? <p className="text-sm text-mist">{t("pay_no_more")}</p> : <p className="text-sm text-mist">{t("open_here")}</p>}
+                {Number(app.hostelEur) > 0 ? (
+                  <HostelBox
+                    eur={Number(app.hostelEur)}
+                    local={Number(app.hostelLocal) || 0}
+                    currency={app.hostelCurrency || ""}
+                    on={Boolean(app.hostel)}
+                    locked={thirdPaid}
+                    busy={paperBusy}
+                    onToggle={(next) => {
+                      void setHostel({ data: { id: app.id, on: next } })
+                        .then(() => refreshDetail(app.id))
+                        .catch((e: unknown) => setErr(e instanceof Error ? e.message : "Error"));
+                    }}
+                  />
+                ) : null}
                 {(parts
                   ? [
                       { n: 1 as const, label: t("invoice_1"), amount: parts.first, open: true, paid: app.stage >= 3, due: app.stage === 2 && !thirdPaid },
                       { n: 2 as const, label: t("invoice_2"), amount: parts.second, open: (app.stage >= 3 && invoice2Unlocked(app.processStage)) || app.stage >= 4, paid: app.stage >= 4, due: app.stage === 3 && invoice2Unlocked(app.processStage) && !thirdPaid },
-                      { n: 3 as const, label: t("invoice_3"), amount: parts.final, open: app.stage >= 4, paid: thirdPaid, due: app.stage >= 4 && !thirdPaid },
+                      { n: 3 as const, label: t("invoice_3"), amount: parts.final + (app.hostel ? Number(app.hostelEur) || 0 : 0), open: app.stage >= 4, paid: thirdPaid, due: app.stage >= 4 && !thirdPaid },
                     ]
                   : []
                 )

@@ -9,6 +9,7 @@ import { citizenshipBlocked } from "@/lib/vanguard/ops";
 import { useI18n, softenError } from "@/lib/vanguard/i18n";
 import { CountryStill, CountLine, EmployerMark, LogoStrip, LicenseWall, StepRail, VacancyShots } from "./media";
 import { MiniFlag } from "./flags";
+import { HostelBox, HostelLine, hasHostelOffer } from "./hostel-note";
 
 function Reviews({ settings }: { settings: Record<string, string> }) {
   const { t } = useI18n();
@@ -73,22 +74,22 @@ export function HomePage({ pinnedAgent = "" }: { pinnedAgent?: string }) {
     if (pinnedAgent) rememberAgent(pinnedAgent);
   }, [pinnedAgent]);
   useEffect(() => {
-    setAgentNote(Boolean(sessionStorage.getItem("vg-agent") || pinnedAgent));
-    const raw = window.sessionStorage.getItem("vg-last-calc");
-    const url = new URL(window.location.href);
-    const fromUrl = {
-      citizenship: url.searchParams.get("citizenship") || "",
-      country: url.searchParams.get("country") || "",
-      productId: url.searchParams.get("product") || "",
-      speed: (url.searchParams.get("speed") || "") as Processing | "",
-    };
-    const saved = fromUrl.citizenship || fromUrl.country || fromUrl.productId || fromUrl.speed
-      ? fromUrl
-      : raw
-        ? (JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" })
-        : null;
-    if (!saved) return;
     try {
+      setAgentNote(Boolean(sessionStorage.getItem("vg-agent") || pinnedAgent));
+      const raw = window.sessionStorage.getItem("vg-last-calc");
+      const url = new URL(window.location.href);
+      const fromUrl = {
+        citizenship: url.searchParams.get("citizenship") || "",
+        country: url.searchParams.get("country") || "",
+        productId: url.searchParams.get("product") || "",
+        speed: (url.searchParams.get("speed") || "") as Processing | "",
+      };
+      const saved = fromUrl.citizenship || fromUrl.country || fromUrl.productId || fromUrl.speed
+        ? fromUrl
+        : raw
+          ? (JSON.parse(raw) as { citizenship?: string; country?: string; productId?: string; speed?: Processing | "" })
+          : null;
+      if (!saved || typeof saved !== "object") return;
       setCitizenship(saved.citizenship || "");
       setCountry(saved.country || "");
       setProductId(saved.productId || "");
@@ -206,7 +207,7 @@ export function HomePage({ pinnedAgent = "" }: { pinnedAgent?: string }) {
               </label>
               <label className="grid gap-1 text-sm text-mist">
                 {t("calc_country")}
-                <button type="button" className="field flex min-h-11 items-center gap-2 text-left" onClick={() => setCountryOpen((open) => !open)}>
+                <button type="button" className="field flex min-h-11 items-center gap-2 text-left" aria-expanded={countryOpen} aria-haspopup="listbox" onClick={() => setCountryOpen((open) => !open)}>
                   {country ? <MiniFlag country={country} /> : null}
                   <span>{country || t("calc_pick")}</span>
                 </button>
@@ -317,7 +318,7 @@ export function HomePage({ pinnedAgent = "" }: { pinnedAgent?: string }) {
                     {country}: {data.countsByCountry[country].filed} {t("counts_filed")} · {data.countsByCountry[country].issued} {t("counts_issued")}
                   </p>
                 ) : null}
-                <button className="btn-solid" type="submit" disabled={catalog.length === 0}>
+                <button className="btn-solid" type="submit" disabled={(!data && !error) || catalog.length === 0}>
                   {!data && !error ? t("loading") : t("calc_search")}
                 </button>
               </div>
@@ -380,10 +381,8 @@ export function SearchPage({
   const weeks = visa && pace ? productionWeeks(visa.productionMinWeeks, visa.productionMaxWeeks, pace) : 0;
   const listFee = visa && pace ? priceFor(visa.basePrice, pace) : 0;
   const fee = applyPercent(listFee, cut);
-  const openSeat = (v: { active: boolean; pauseUntil?: string }) => {
-    if (v.pauseUntil && Date.parse(v.pauseUntil) > Date.now()) return false;
-    return v.active || Boolean(v.pauseUntil);
-  };
+  const openSeat = (v: { active: boolean; pauseUntil?: string }) =>
+    v.active && !(v.pauseUntil && Date.parse(v.pauseUntil) > Date.now());
   const jobs = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota > 0 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const full = data?.vacancies.filter((v) => openSeat(v) && v.visaProductId === product && v.quota < 1 && !citizenshipBlocked(v.blockedCitizenships, citizenship)) ?? [];
   const houseN = jobs.filter((job) => seatHasHouse(job.housingKind || "", job.accommodation)).length;
@@ -440,6 +439,7 @@ export function SearchPage({
                   <p className="mt-1 text-sm text-paper">{job.salaryNet}</p>
                   <p className="text-sm">{job.workingHours}</p>
                   <p className="text-sm text-mist">{job.accommodation}</p>
+                  <HostelLine job={job} />
                   <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
                   <Link
                     to="/vacancies/$id"
@@ -572,6 +572,7 @@ export function SearchPage({
                     <p className="mt-2 text-sm text-mist">{visa.country} · {visa.duration}</p>
                     <p className="mt-1 text-sm">{job.workingHours}</p>
                     <p className="text-sm text-mist">{job.accommodation}</p>
+                    <HostelLine job={job} />
                     <p className="mt-1 text-sm text-mist">{t("search_wait")}</p>
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                   </div>
@@ -611,6 +612,7 @@ export function SearchPage({
                         <p className="text-sm text-mist">{job.employer}</p>
                         <p className="mt-1 text-sm">{job.workingHours}</p>
                         <p className="text-sm text-mist">{job.accommodation}</p>
+                        <HostelLine job={job} />
                         <p className="mt-1 text-sm text-metal">{job.quota} {t("search_quota")}</p>
                       </article>
                     ))}
@@ -631,6 +633,7 @@ export function SearchPage({
                     <p className="mt-2 inline-flex items-center gap-2 text-sm"><MiniFlag country={visa.country} /> {visa.country} · {visa.duration}</p>
                     <p className="mt-1 text-sm">{job.workingHours}</p>
                     <p className="text-sm text-mist">{job.accommodation}{job.housingKind === "room" || job.housingKind === "hostel" || job.housingKind === "none" ? ` · ${t(`house_${job.housingKind}`)}` : ""}</p>
+                    <HostelLine job={job} />
                     {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : null}
                     {Number(waits[job.id]) > 0 ? <p className="mt-1 text-sm text-mist">{waits[job.id]} {t("wait_n")}</p> : null}
                     <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product, speed: pace }} className="btn-solid mt-4 inline-flex">
@@ -641,6 +644,7 @@ export function SearchPage({
                     <span className="block">{job.salaryNet}</span>
                     {moneyAside(salaryNumber(job.salaryNet), citizenship, rates, t("pay_about"), t("pay_rate"))}
                     <span className="mt-1 block text-mist">{job.accommodation}</span>
+                    <HostelLine job={job} />
                     {payLine(job.salaryNet) ? <span className="mt-1 block text-xs text-mist">{payLine(job.salaryNet)}</span> : null}
                   </p>
                   <p className="text-sm text-metal">
@@ -680,6 +684,7 @@ export function VacancyPage({
   const [record, setRecord] = useState("");
   const [refusal, setRefusal] = useState("");
   const [expiry, setExpiry] = useState("");
+  const [bookHostel, setBookHostel] = useState(false);
   const cut = useAgentCut();
   const rates = useRates();
   useEffect(() => {
@@ -698,7 +703,7 @@ export function VacancyPage({
       return;
     }
     const campaign = sessionStorage.getItem("vg-campaign") || "";
-    const intent = { vacancyId: job.id, citizenship: citizen, processing: pace as Processing, agentCode: agentCode.trim(), lang, record, refusal, passportExpiry: expiry, campaign };
+    const intent = { vacancyId: job.id, citizenship: citizen, processing: pace as Processing, agentCode: agentCode.trim(), lang, record, refusal, passportExpiry: expiry, campaign, hostel: bookHostel && hasHostelOffer(job) };
     if (!signedIn) {
       rememberAgent(agentCode);
       sessionStorage.setItem("vg-intent", JSON.stringify(intent));
@@ -776,6 +781,15 @@ export function VacancyPage({
             </div>
           ))}
         </dl>
+        {hasHostelOffer(job) ? (
+          <HostelBox
+            eur={Number(job.hostelEur)}
+            local={Number(job.hostelLocal) || 0}
+            currency={job.hostelCurrency || ""}
+            on={bookHostel}
+            onToggle={setBookHostel}
+          />
+        ) : null}
         {job.requirements ? (
           <div className="mt-8">
             <h2 className="text-xs uppercase tracking-widest text-mist">{t("field_requirements")}</h2>
@@ -790,7 +804,29 @@ export function VacancyPage({
             </ul>
           </div>
         ) : null}
+        {job.quota === 1 ? <p className="mt-4 text-sm">{t("seat_last")}</p> : null}
         {err ? <p className="mt-4 text-sm text-metal">{err}</p> : null}
+        {job.quota < 1 ? (
+          <div className="mt-8 grid gap-3">
+            <p>{t("search_wait")}</p>
+            {signedIn ? (
+              <button
+                type="button"
+                className="btn w-fit"
+                onClick={() =>
+                  void joinWaitlist({ data: { vacancyId: job.id, citizenship: citizen } })
+                    .then(() => setErr(t("search_wait_done")))
+                    .catch(() => setErr(t("sheets_busy")))
+                }
+              >
+                {t("search_wait_btn")}
+              </button>
+            ) : (
+              <Link to="/login" className="btn w-fit">{t("search_wait_in")}</Link>
+            )}
+          </div>
+        ) : (
+        <>
         <label className="mt-6 grid max-w-sm gap-1 text-sm text-mist">
           {t("agent_code")}
           <input
@@ -832,6 +868,8 @@ export function VacancyPage({
             {busy ? t("applying") : t("search_apply")}
           </button>
         </div>
+        </>
+        )}
       </article>
     </Shell>
   );
@@ -1110,6 +1148,7 @@ function AgentSeats({ cut, citizenship }: { cut: number; citizenship: string }) 
               <p className="text-sm text-mist">{job.country} · {job.employer}</p>
               <p className="mt-2 text-sm">{job.salaryNet}</p>
               <p className="text-sm text-mist">{job.accommodation}</p>
+              <HostelLine job={job} />
               {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : <p className="mt-2 text-sm text-mist">{job.quota} {t("search_quota")}</p>}
               {fee ? (
                 <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product: job.visaProductId, speed: "STANDARD" }} className="btn-solid mt-3 inline-flex">
@@ -1174,6 +1213,7 @@ export function FromPage({ citizenship: citizenSlug, country: countryParam }: { 
                 <p className="text-sm text-mist">{job.employer}</p>
                 <p className="mt-2 text-sm">{job.salaryNet}</p>
                 <p className="text-sm text-mist">{job.accommodation}</p>
+                <HostelLine job={job} />
                 {job.quota === 1 ? <p className="mt-2 text-sm">{t("seat_last")}</p> : <p className="mt-2 text-sm text-mist">{job.quota} {t("search_quota")}</p>}
                 <Link to="/vacancies/$id" params={{ id: job.id }} search={{ citizenship, product: job.visaProductId, speed: "STANDARD" }} className="btn-solid mt-4 inline-flex">
                   {t("seat_mine")} · {jobFee} EUR
@@ -1276,6 +1316,7 @@ export function CountryPage({ code }: { code: string }) {
               <p className="mt-1 text-sm text-paper">{job.salaryNet}</p>
               <p className="text-sm">{job.workingHours}</p>
               <p className="text-sm text-mist">{job.accommodation}</p>
+              <HostelLine job={job} />
               <p className="mt-1 text-sm text-mist">{job.quota > 0 ? `${job.quota} ${t("search_quota")}` : t("search_wait")}</p>
             </li>
           ))}

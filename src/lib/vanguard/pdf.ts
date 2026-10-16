@@ -488,11 +488,15 @@ export async function buildInvoice(opts: {
   number?: string;
   hold?: boolean;
   scheme?: FeeScheme;
+  hostelEur?: number;
+  hostelLocal?: number;
+  hostelCurrency?: string;
 }) {
   const cs = false;
   const scheme = opts.scheme ?? "legacy30";
   const parts = tranches(opts.total, scheme);
-  const amount = opts.tranche === 1 ? parts.first : opts.tranche === 2 ? parts.second : parts.final;
+  const hostelEur = opts.tranche === 3 ? Math.max(0, Math.round(Number(opts.hostelEur) || 0)) : 0;
+  const amount = (opts.tranche === 1 ? parts.first : opts.tranche === 2 ? parts.second : parts.final) + hostelEur;
   const sheet = await open(opts.settings, cs);
   const number = opts.number || `${opts.fileId}-${opts.tranche}`;
   const due =
@@ -536,14 +540,22 @@ export async function buildInvoice(opts: {
     [248, 62, 96, 97],
     opts.tranche - 1,
   );
+  const hostelLocal = Math.max(0, Math.round(Number(opts.hostelLocal) || 0));
+  const hostelCurrency = (opts.hostelCurrency || "").trim();
+  const hostelLabel = hostelEur
+    ? cs
+      ? `Ubytovna, první měsíc${hostelCurrency && hostelCurrency !== "EUR" && hostelLocal ? ` · ${hostelLocal.toLocaleString("en-GB")} ${hostelCurrency}` : ""}`
+      : `Hostel, first month${hostelCurrency && hostelCurrency !== "EUR" && hostelLocal ? ` · ${hostelLocal.toLocaleString("en-GB")} ${hostelCurrency}` : ""}`
+    : "";
   sheet.table(
     [cs ? "Souhrn" : "Summary", "", cs ? "Částka" : "Amount"],
     [
       [cs ? "Honorář sjednaný při otevření spisu" : "Fee fixed when the file was opened", "", money(opts.total)],
+      ...(hostelLabel ? [[hostelLabel, "", money(hostelEur)] as [string, string, string]] : []),
       [cs ? "K úhradě touto fakturou" : "Due on this invoice", "", money(amount)],
     ],
     [310, 96, 97],
-    1,
+    hostelLabel ? 2 : 1,
   );
   sheet.dueBox(cs ? "K úhradě nyní" : "Due now", money(amount));
   sheet.write(euroWords(amount, cs), 14, sheet.bold);
@@ -562,7 +574,11 @@ export async function buildInvoice(opts: {
     [cs ? "Zpráva k platbě" : "Payment note", opts.fileId],
   ]);
   sheet.write(
-    wallet
+    hostelEur
+      ? cs
+        ? "Ubytovna za první měsíc je samostatný řádek. K úhradě nyní je třetí část a tento řádek. Pokud to síť dovolí, do zprávy uveďte číslo spisu. Potvrzení nahrajte ve spise."
+        : "The hostel for the first month is its own line. Due now is the third part plus that line. If the network allows a note, put the file number in it. Upload the receipt in the case."
+      : wallet
       ? cs
         ? "Částka na této faktuře se o nic nezvyšuje. Pokud to síť dovolí, do zprávy uveďte číslo spisu. Potvrzení nahrajte ve spise. Prostředky neposílejte na jinou adresu, než je uvedena výše."
         : "Nothing is added on top of the amount on this invoice. If the network allows a note, put the file number in it. Upload the receipt in the case. Do not send funds to any address other than the wallet printed above."

@@ -60,6 +60,10 @@ export type Vacancy = {
   housingKind?: string;
   /** ISO time. While this is in the future the opening stays off the public list. */
   pauseUntil?: string;
+  /** First-month hostel Vanguard can book, when the employer provides no room. */
+  hostelEur?: number;
+  hostelLocal?: number;
+  hostelCurrency?: string;
 };
 
 export type ChildRow = { name: string; age: string };
